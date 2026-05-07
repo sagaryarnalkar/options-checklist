@@ -1,0 +1,13 @@
+.DS_Store
+.claude/
+handbook_unpacked/
+__pycache__/
+*.pyc
+
+# Secrets — never commit
+.env
+.access_token
+.kite_session.json
+
+# Working artifacts
+*.docx.tmp

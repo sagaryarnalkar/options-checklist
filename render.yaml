@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: options-checklist
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: KITE_API_KEY
+        sync: false   # set in dashboard
+      - key: KITE_API_SECRET
+        sync: false   # set in dashboard
+      - key: REFRESH_TOKEN
+        generateValue: true   # Render auto-generates a random secret
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: OPTIONS_HEADLESS
+        value: "1"

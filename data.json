@@ -1,0 +1,539 @@
+{
+  "as_of": "2026-05-07T08:54:47.586823+05:30",
+  "instruments": {
+    "nifty": {
+      "exchange": "NSE",
+      "tradingsymbol": "NIFTY 50",
+      "spot": 24330.95,
+      "instrument_token": 256265,
+      "futures_tradingsymbol": "NIFTY26MAYFUT",
+      "futures_token": 16914178,
+      "daily": {
+        "date_prev": "2026-05-05",
+        "date": "2026-05-06",
+        "close_prev": 24032.8,
+        "close": 24330.95,
+        "bb21_mid_prev": 23955.16904761905,
+        "bb21_mid": 24032.209523809524,
+        "ema53_prev": 24212.396305314815,
+        "ema53": 24216.78718289575,
+        "cmf21_prev": 0.056037963787411646,
+        "cmf21": 0.1412895474388925
+      },
+      "h2": {
+        "ts_prev": "2026-05-06T13:15:00+05:30",
+        "ts": "2026-05-06T15:15:00+05:30",
+        "close_prev": 24444.4,
+        "close": 24466.5,
+        "vwma21_prev": 24183.290917944916,
+        "vwma21": 24196.608903455348,
+        "source": "futures"
+      }
+    },
+    "banknifty": {
+      "exchange": "NSE",
+      "tradingsymbol": "NIFTY BANK",
+      "spot": 55981.05,
+      "instrument_token": 260105,
+      "futures_tradingsymbol": "BANKNIFTY26MAYFUT",
+      "futures_token": 16913410,
+      "daily": {
+        "date_prev": "2026-05-05",
+        "date": "2026-05-06",
+        "close_prev": 54547.05,
+        "close": 55981.05,
+        "bb21_mid_prev": 55366.747619047615,
+        "bb21_mid": 55577.80952380953,
+        "ema53_prev": 56154.288425909464,
+        "ema53": 56147.87218791282,
+        "cmf21_prev": -0.12584904143912579,
+        "cmf21": 0.013520526815930595
+      },
+      "h2": {
+        "ts_prev": "2026-05-06T13:15:00+05:30",
+        "ts": "2026-05-06T15:15:00+05:30",
+        "close_prev": 56319.0,
+        "close": 56430.0,
+        "vwma21_prev": 55474.37975962376,
+        "vwma21": 55482.86298022137,
+        "source": "futures"
+      }
+    },
+    "indiavix": {
+      "exchange": "NSE",
+      "tradingsymbol": "INDIA VIX",
+      "spot": 16.68,
+      "instrument_token": 264969,
+      "daily": {
+        "date_prev": "2026-05-05",
+        "date": "2026-05-06",
+        "close_prev": 17.91,
+        "close": 16.68,
+        "bb21_mid_prev": 19.55238095238095,
+        "bb21_mid": 19.13142857142857,
+        "ema53_prev": 18.60318508101367,
+        "ema53": 18.53195600393909,
+        "cmf21_prev": null,
+        "cmf21": null
+      }
+    }
+  },
+  "signals": {
+    "golden_goose": "bull_hold",
+    "gg_leaps": "bull_hold",
+    "nidhi_kalash": "bull_cross",
+    "panther": "bull_hold",
+    "ocean_treasure": "bull_hold"
+  },
+  "recommendations": {
+    "nidhi_kalash": {
+      "strategy": "nidhi_kalash",
+      "direction": "bull",
+      "structure": "Bull Put Credit Spread",
+      "expiry": "2026-05-26",
+      "lot_size": 65,
+      "legs": [
+        {
+          "action": "SELL",
+          "transaction_type": "SELL",
+          "tradingsymbol": "NIFTY26MAY24000PE",
+          "strike": 24000,
+          "option_type": "PE",
+          "premium": 187.35,
+          "quantity": 65
+        },
+        {
+          "action": "BUY",
+          "transaction_type": "BUY",
+          "tradingsymbol": "NIFTY26MAY23500PE",
+          "strike": 23500,
+          "option_type": "PE",
+          "premium": 88.55,
+          "quantity": 65
+        }
+      ],
+      "credit_per_unit": 98.8,
+      "credit_total": 6422.0,
+      "wing": 500,
+      "wing_pct": 2.05,
+      "max_profit": 6422.0,
+      "max_loss": 26078.0,
+      "margin_total": 55510.39000000001,
+      "margin_raw": {
+        "initial": {
+          "type": "",
+          "tradingsymbol": "",
+          "exchange": "",
+          "span": 119763.15000000001,
+          "exposure": 31873.79,
+          "option_premium": 5755.75,
+          "additional": 0,
+          "bo": 0,
+          "cash": 0,
+          "var": 0,
+          "mtf": 0,
+          "pnl": {
+            "realised": 0,
+            "unrealised": 0
+          },
+          "leverage": 0,
+          "charges": {
+            "transaction_tax": 0,
+            "transaction_tax_type": "",
+            "exchange_turnover_charge": 0,
+            "sebi_turnover_charge": 0,
+            "brokerage": 0,
+            "stamp_duty": 0,
+            "gst": {
+              "igst": 0,
+              "cgst": 0,
+              "sgst": 0,
+              "total": 0
+            },
+            "total": 0
+          },
+          "total": 157392.69
+        },
+        "final": {
+          "type": "",
+          "tradingsymbol": "",
+          "exchange": "",
+          "span": 30058.600000000006,
+          "exposure": 31873.79,
+          "option_premium": -6422,
+          "additional": 0,
+          "bo": 0,
+          "cash": 0,
+          "var": 0,
+          "mtf": 0,
+          "pnl": {
+            "realised": 0,
+            "unrealised": 0
+          },
+          "leverage": 0,
+          "charges": {
+            "transaction_tax": 0,
+            "transaction_tax_type": "",
+            "exchange_turnover_charge": 0,
+            "sebi_turnover_charge": 0,
+            "brokerage": 0,
+            "stamp_duty": 0,
+            "gst": {
+              "igst": 0,
+              "cgst": 0,
+              "sgst": 0,
+              "total": 0
+            },
+            "total": 0
+          },
+          "total": 55510.39000000001
+        },
+        "orders": [
+          {
+            "type": "equity",
+            "tradingsymbol": "NIFTY26MAY24000PE",
+            "exchange": "NFO",
+            "span": 119763.15000000001,
+            "exposure": 31873.79,
+            "option_premium": 0,
+            "additional": 0,
+            "bo": 0,
+            "cash": 0,
+            "var": 0,
+            "mtf": 0,
+            "pnl": {
+              "realised": 0,
+              "unrealised": 0
+            },
+            "leverage": 1,
+            "charges": {
+              "transaction_tax": 18.266625,
+              "transaction_tax_type": "stt",
+              "exchange_turnover_charge": 4.326754575,
+              "sebi_turnover_charge": 0.01217775,
+              "brokerage": 20,
+              "stamp_duty": 0,
+              "gst": {
+                "igst": 4.3810078185,
+                "cgst": 0,
+                "sgst": 0,
+                "total": 4.3810078185
+              },
+              "total": 46.9865651435
+            },
+            "total": 151636.94
+          },
+          {
+            "type": "equity",
+            "tradingsymbol": "NIFTY26MAY23500PE",
+            "exchange": "NFO",
+            "span": 0,
+            "exposure": 0,
+            "option_premium": 5755.75,
+            "additional": 0,
+            "bo": 0,
+            "cash": 0,
+            "var": 0,
+            "mtf": 0,
+            "pnl": {
+              "realised": 0,
+              "unrealised": 0
+            },
+            "leverage": 1,
+            "charges": {
+              "transaction_tax": 0,
+              "transaction_tax_type": "stt",
+              "exchange_turnover_charge": 2.045017975,
+              "sebi_turnover_charge": 0.00575575,
+              "brokerage": 20,
+              "stamp_duty": 0,
+              "gst": {
+                "igst": 3.9691392704999995,
+                "cgst": 0,
+                "sgst": 0,
+                "total": 3.9691392704999995
+              },
+              "total": 26.0199129955
+            },
+            "total": 5755.75
+          }
+        ],
+        "charges": {
+          "transaction_tax": 0,
+          "transaction_tax_type": "",
+          "exchange_turnover_charge": 0,
+          "sebi_turnover_charge": 0.017933499999999998,
+          "brokerage": 40,
+          "stamp_duty": 0,
+          "gst": {
+            "igst": 0,
+            "cgst": 0,
+            "sgst": 0,
+            "total": 0
+          },
+          "total": 0
+        }
+      },
+      "alternatives": [
+        {
+          "expiry": "2026-05-26",
+          "sold_strike": 24200,
+          "hedge_strike": 23800,
+          "sold_premium": 249.3,
+          "hedge_premium": 140.2,
+          "credit": 109.1,
+          "wing": 400
+        },
+        {
+          "expiry": "2026-05-26",
+          "sold_strike": 24100,
+          "hedge_strike": 23700,
+          "sold_premium": 216.9,
+          "hedge_premium": 120.85,
+          "credit": 96.05,
+          "wing": 400
+        }
+      ]
+    }
+  },
+  "portfolio": {
+    "positions_count": 29,
+    "positions_pnl": -1325889.0049700076,
+    "positions": [
+      {
+        "tradingsymbol": "BAJFINANCE26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 2250,
+        "average_price": 928.1,
+        "last_price": 985.25,
+        "pnl": 128587.5
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26JUN52000PE",
+        "exchange": "NFO",
+        "quantity": -720,
+        "average_price": 624.0625,
+        "last_price": 347.65,
+        "pnl": 199017.00000000003
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26JUN56000PE",
+        "exchange": "NFO",
+        "quantity": -1740,
+        "average_price": 1252.5560340000002,
+        "last_price": 1234.35,
+        "pnl": 31678.499160000123
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26JUN57000PE",
+        "exchange": "NFO",
+        "quantity": -60,
+        "average_price": 1725,
+        "last_price": 1668.75,
+        "pnl": 3375
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 600,
+        "average_price": 55386.13,
+        "last_price": 56532.4,
+        "pnl": 687762
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26MAY52500PE",
+        "exchange": "NFO",
+        "quantity": 720,
+        "average_price": 478.87916700000005,
+        "last_price": 118.95,
+        "pnl": -259149.00024000002
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26MAY53300PE",
+        "exchange": "NFO",
+        "quantity": 5100,
+        "average_price": 582.582647,
+        "last_price": 177.55,
+        "pnl": -2065666.4996999996
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26MAY58000PE",
+        "exchange": "NFO",
+        "quantity": -1410,
+        "average_price": 1543.940426,
+        "last_price": 1926.75,
+        "pnl": -539761.4993400001
+      },
+      {
+        "tradingsymbol": "BANKNIFTY26MAY60000CE",
+        "exchange": "NFO",
+        "quantity": 900,
+        "average_price": 291.866667,
+        "last_price": 66.15,
+        "pnl": -203145.0003
+      },
+      {
+        "tradingsymbol": "BHARTIARTL26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 2850,
+        "average_price": 1902.5,
+        "last_price": 1855,
+        "pnl": -135375
+      },
+      {
+        "tradingsymbol": "BHARTIARTL26MAY1740PE",
+        "exchange": "NFO",
+        "quantity": 5700,
+        "average_price": 16.3875,
+        "last_price": 6.35,
+        "pnl": -57213.75
+      },
+      {
+        "tradingsymbol": "DIXON26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 100,
+        "average_price": 11370.75,
+        "last_price": 11308,
+        "pnl": -6275
+      },
+      {
+        "tradingsymbol": "DIXON26MAY11000PE",
+        "exchange": "NFO",
+        "quantity": 100,
+        "average_price": 720,
+        "last_price": 329.4,
+        "pnl": -39060
+      },
+      {
+        "tradingsymbol": "HDFCBANK26MAYFUT",
+        "exchange": "NFO",
+        "quantity": 2200,
+        "average_price": 800.1625,
+        "last_price": 801.85,
+        "pnl": 3712.5
+      },
+      {
+        "tradingsymbol": "ICICIBANK26JULFUT",
+        "exchange": "NFO",
+        "quantity": 1400,
+        "average_price": 1314.8,
+        "last_price": 1300.1,
+        "pnl": -20580.000000000233
+      },
+      {
+        "tradingsymbol": "ICICIBANK26JUN1200PE",
+        "exchange": "NFO",
+        "quantity": 4200,
+        "average_price": 11.85,
+        "last_price": 10.95,
+        "pnl": -3780
+      },
+      {
+        "tradingsymbol": "ICICIBANK26JUN1300PE",
+        "exchange": "NFO",
+        "quantity": -1400,
+        "average_price": 37.8,
+        "last_price": 42.6,
+        "pnl": -6720.000000000007
+      },
+      {
+        "tradingsymbol": "ICICIBANK26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 1400,
+        "average_price": 1402,
+        "last_price": 1294.6,
+        "pnl": -150360.00000000023
+      },
+      {
+        "tradingsymbol": "INDHOTEL26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 2000,
+        "average_price": 640.025,
+        "last_price": 673.7,
+        "pnl": 67350
+      },
+      {
+        "tradingsymbol": "INDIGO26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 150,
+        "average_price": 4763,
+        "last_price": 4571.2,
+        "pnl": -28770
+      },
+      {
+        "tradingsymbol": "JIOFIN26MAYFUT",
+        "exchange": "NFO",
+        "quantity": 2350,
+        "average_price": 235.85,
+        "last_price": 254.02,
+        "pnl": 42699.5
+      },
+      {
+        "tradingsymbol": "LT26JUN3600PE",
+        "exchange": "NFO",
+        "quantity": -350,
+        "average_price": 44.45,
+        "last_price": 28.2,
+        "pnl": 5687.500000000002
+      },
+      {
+        "tradingsymbol": "LTF26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 2250,
+        "average_price": 290.65,
+        "last_price": 297.3,
+        "pnl": 14962.5
+      },
+      {
+        "tradingsymbol": "NIFTY2651223100PE",
+        "exchange": "NFO",
+        "quantity": 4030,
+        "average_price": 23.256452,
+        "last_price": 5.15,
+        "pnl": -72969.00156
+      },
+      {
+        "tradingsymbol": "NIFTY26JUN22000PE",
+        "exchange": "NFO",
+        "quantity": -910,
+        "average_price": 104.975,
+        "last_price": 64.5,
+        "pnl": 36832.25
+      },
+      {
+        "tradingsymbol": "NIFTY26JUNFUT",
+        "exchange": "NFO",
+        "quantity": 2795,
+        "average_price": 24174.030233,
+        "last_price": 24544.9,
+        "pnl": 1036580.9987649918
+      },
+      {
+        "tradingsymbol": "NIFTY26MAY23000CE",
+        "exchange": "NFO",
+        "quantity": 4095,
+        "average_price": 1060.679365,
+        "last_price": 1489.5,
+        "pnl": 1756020.500325
+      },
+      {
+        "tradingsymbol": "NIFTY27DEC23000PE",
+        "exchange": "NFO",
+        "quantity": 4290,
+        "average_price": 1156.215152,
+        "last_price": 733.95,
+        "pnl": -1811517.50208
+      },
+      {
+        "tradingsymbol": "SBIN26MAY1000CE",
+        "exchange": "NFO",
+        "quantity": 3000,
+        "average_price": 73.7875,
+        "last_price": 93.85,
+        "pnl": 60187.50000000003
+      }
+    ],
+    "available_cash": 4868003.7,
+    "used_margin": 16612777.9625
+  }
+}
