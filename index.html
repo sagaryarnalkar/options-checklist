@@ -1036,6 +1036,34 @@
     </div>`;
   }
 
+  let refreshing = false;
+  async function triggerRefresh(){
+    if (refreshing) return;
+    refreshing = true;
+    const btn = document.getElementById("liveRefresh");
+    const origText = btn ? btn.textContent : null;
+    if (btn) { btn.disabled = true; btn.textContent = "Refreshing… (~30s)"; }
+    try {
+      const r = await fetch("/refresh", { method: "POST", cache: "no-store" });
+      if (r.status === 401){
+        // Not logged in — bounce to /login
+        window.location.href = "/login";
+        return;
+      }
+      if (!r.ok){
+        const txt = await r.text();
+        alert("Refresh failed (HTTP " + r.status + "):\n" + txt.slice(0, 400));
+        return;
+      }
+      // Successful refresh: reload data.json
+      await loadSignals();
+    } catch (e) {
+      alert("Refresh error: " + e.message);
+    } finally {
+      refreshing = false;
+      if (btn) { btn.disabled = false; btn.textContent = origText || "Refresh"; }
+    }
+  }
   async function loadSignals(){
     const card = document.getElementById("liveCard");
     try {
@@ -1051,7 +1079,7 @@
           </div>
           <div class="live-spots" id="liveSpots"></div>
           <div class="live-grid" id="liveGrid"></div>`;
-        document.getElementById("liveRefresh").addEventListener("click", loadSignals);
+        document.getElementById("liveRefresh").addEventListener("click", triggerRefresh);
       }
       renderLiveData(d);
       decorateStrategyCards(d.signals || {});
@@ -1072,7 +1100,7 @@
     updateCounts();
     initTabs();
     loadSignals();
-    document.getElementById("liveRefresh").addEventListener("click", loadSignals);
+    document.getElementById("liveRefresh").addEventListener("click", triggerRefresh);
     document.addEventListener("change", onChange);
     document.getElementById("resetBtn").addEventListener("click", reset);
     setInterval(renderTop, 1000);
