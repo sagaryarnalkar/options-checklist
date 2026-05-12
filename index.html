@@ -920,13 +920,30 @@
     return `<div class="live-row"><span><span class="lbl">${label}</span> ${value}${refLine ? ` <span class="ref">${refLine}</span>` : ""}</span><span class="sig ${sigClass(signal)}">${sigText(signal)}</span></div>`;
   }
   function renderLiveData(d){
-    // As-of stamp
+    // As-of stamp + prominent staleness warning if data isn't from today
     const asof = d.as_of ? new Date(d.as_of) : null;
     const asofEl = document.getElementById("liveAsof");
+    const spotsEl = document.getElementById("liveSpots");
+    let staleBanner = "";
     if (asof){
       const ago = Math.round((Date.now() - asof.getTime()) / 60000);
       const t = asof.toLocaleTimeString("en-IN", { hour:"2-digit", minute:"2-digit", hour12:false });
-      asofEl.textContent = "· as of " + t + " IST" + (ago > 5 ? ` (${ago} min ago)` : "");
+      const dateStr = asof.toLocaleDateString("en-IN", { weekday:"short", day:"2-digit", month:"short" });
+      // Today (IST) in YYYY-MM-DD vs asof's IST date
+      const istNow = new Date(Date.now() + (5.5*3600*1000) - (new Date().getTimezoneOffset() * -60000));
+      const todayKey = new Date().toLocaleDateString("en-CA", {timeZone:"Asia/Kolkata"});
+      const asofKey  = asof.toLocaleDateString("en-CA", {timeZone:"Asia/Kolkata"});
+      const isToday = todayKey === asofKey;
+      const ageHours = ago / 60;
+      if (isToday){
+        asofEl.textContent = "· as of " + t + " IST" + (ago > 5 ? ` (${ago} min ago)` : "");
+      } else {
+        // Stale: show date + clear warning banner
+        asofEl.innerHTML = `· as of <b>${dateStr}, ${t}</b> IST <span style="color:var(--warn)">(stale — click Refresh for today)</span>`;
+        const daysOld = Math.floor((new Date(todayKey) - new Date(asofKey)) / (86400000));
+        const ageText = daysOld === 1 ? "yesterday" : `${daysOld} days ago`;
+        staleBanner = `<div class="live-stale" style="margin-bottom:10px"><b>⚠ Showing data from ${ageText}</b> (${dateStr}, ${t} IST).<br>Click <b>Refresh</b> above to pull today's snapshot from Kite.</div>`;
+      }
     } else {
       asofEl.textContent = "";
     }
@@ -936,7 +953,7 @@
     if (inst.nifty?.spot)     spots.push(`<div class="spot-pill">NIFTY <b>${fmt(inst.nifty.spot)}</b></div>`);
     if (inst.banknifty?.spot) spots.push(`<div class="spot-pill">BANKNIFTY <b>${fmt(inst.banknifty.spot)}</b></div>`);
     if (inst.indiavix?.spot)  spots.push(`<div class="spot-pill">VIX <b>${fmt(inst.indiavix.spot)}</b></div>`);
-    document.getElementById("liveSpots").innerHTML = spots.join("");
+    document.getElementById("liveSpots").innerHTML = staleBanner + spots.join("");
     // Indicator grid
     const daily = inst.nifty?.daily || {};
     const h2    = inst.nifty?.h2 || {};
