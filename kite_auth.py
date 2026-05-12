@@ -29,8 +29,10 @@ from urllib.parse import parse_qs, urlparse
 from kiteconnect import KiteConnect
 from kiteconnect.exceptions import TokenException
 
+from storage import load_session, store_session
+
 ROOT = Path(__file__).parent
-SESSION_FILE = ROOT / ".kite_session.json"
+SESSION_FILE = ROOT / ".kite_session.json"  # legacy reference; storage handles writes now
 ENV_FILE = ROOT / ".env"
 
 # CLI-mode local listener config
@@ -70,11 +72,8 @@ def load_env() -> tuple[str, str]:
 
 def read_cached_session() -> dict | None:
     """Return cached session dict if it's still fresh (token not yet expired)."""
-    if not SESSION_FILE.exists():
-        return None
-    try:
-        data = json.loads(SESSION_FILE.read_text())
-    except Exception:
+    data = load_session()
+    if not data:
         return None
     saved = data.get("saved_at", "")
     try:
@@ -92,15 +91,7 @@ def read_cached_session() -> dict | None:
 
 
 def write_cached_session(access_token: str, user_id: str = "") -> None:
-    SESSION_FILE.write_text(json.dumps({
-        "access_token": access_token,
-        "user_id": user_id,
-        "saved_at": datetime.utcnow().isoformat(),
-    }, indent=2))
-    try:
-        os.chmod(SESSION_FILE, 0o600)
-    except Exception:
-        pass
+    store_session(access_token, user_id)
 
 
 # ---------------- web/headless helpers ----------------

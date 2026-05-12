@@ -23,6 +23,7 @@ import pandas as pd
 
 from kite_auth import get_kite, get_kite_from_cache
 from recommend import build_recommendations
+from storage import store_data
 
 HEADLESS = os.environ.get("OPTIONS_HEADLESS", "").lower() in ("1", "true", "yes")
 
@@ -377,8 +378,8 @@ def main() -> None:
         "portfolio": portfolio,
     }
 
-    OUT.write_text(json.dumps(payload, indent=2, default=str))
-    print(f"\nWrote {OUT} ({OUT.stat().st_size} bytes)")
+    store_data(payload)
+    print(f"\nWrote {OUT} ({OUT.stat().st_size if OUT.exists() else '?'} bytes) + Redis if configured")
     print("Signals:")
     for k, v in signals.items():
         print(f"  {k:15s} {v}")

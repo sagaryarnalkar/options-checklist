@@ -27,6 +27,7 @@ from fastapi.responses import (
 from kite_auth import (
     exchange_request_token, login_url, write_cached_session,
 )
+from storage import load_data_text, storage_info
 
 ROOT = Path(__file__).parent
 INDEX_HTML = ROOT / "index.html"
@@ -50,12 +51,18 @@ async def root():
 
 @app.get("/data.json")
 async def data():
-    if DATA_JSON.exists():
-        return FileResponse(DATA_JSON, media_type="application/json")
+    text = load_data_text()
+    if text:
+        return JSONResponse(content=json.loads(text))
     return JSONResponse(
-        {"error": "data.json not yet generated. Visit /login first, then POST /refresh."},
+        {"error": "no snapshot yet. Visit /login then POST /refresh."},
         status_code=404,
     )
+
+
+@app.get("/storage-info")
+async def storage_info_route():
+    return JSONResponse(storage_info())
 
 
 @app.get("/login")
