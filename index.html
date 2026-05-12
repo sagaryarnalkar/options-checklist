@@ -1064,28 +1064,34 @@
       if (btn) { btn.disabled = false; btn.textContent = origText || "Refresh"; }
     }
   }
-  async function loadSignals(){
+  function ensureLiveCardSkeleton(){
+    // Make sure the live card always has its header (with Refresh button) +
+    // empty content slots. Idempotent — only rebuilds if a slot is missing.
+    if (document.getElementById("liveSpots") && document.getElementById("liveRefresh")) return;
     const card = document.getElementById("liveCard");
+    card.innerHTML = `
+      <div class="live-head">
+        <h3>Live data <span class="live-asof" id="liveAsof"></span></h3>
+        <button class="live-refresh" id="liveRefresh" type="button">Refresh</button>
+      </div>
+      <div class="live-spots" id="liveSpots"></div>
+      <div class="live-grid" id="liveGrid"></div>`;
+    document.getElementById("liveRefresh").addEventListener("click", triggerRefresh);
+  }
+  async function loadSignals(){
+    ensureLiveCardSkeleton();
     try {
       const r = await fetch("data.json?_=" + Date.now(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
-      // Restore card structure if it was replaced by stale message
-      if (!document.getElementById("liveSpots")){
-        card.innerHTML = `
-          <div class="live-head">
-            <h3>Live data <span class="live-asof" id="liveAsof"></span></h3>
-            <button class="live-refresh" id="liveRefresh" type="button">Refresh</button>
-          </div>
-          <div class="live-spots" id="liveSpots"></div>
-          <div class="live-grid" id="liveGrid"></div>`;
-        document.getElementById("liveRefresh").addEventListener("click", triggerRefresh);
-      }
       renderLiveData(d);
       decorateStrategyCards(d.signals || {});
       renderRecommendations(d);
     } catch (e) {
-      card.innerHTML = `<div class="live-stale"><b>No live data yet.</b><br>Run <code>python3 compute.py</code> in the OptionsStrats folder to fetch the 3:15 PM snapshot.</div>`;
+      // Keep header + Refresh button visible; show stale message inside the grid slot.
+      document.getElementById("liveSpots").innerHTML = "";
+      document.getElementById("liveGrid").innerHTML = `<div class="live-stale"><b>No live data yet.</b><br>Click <b>Refresh</b> above to fetch the latest 3:15 PM snapshot. If you aren't logged in to Kite, you'll be redirected to login first.</div>`;
+      document.getElementById("liveAsof").textContent = "";
       document.getElementById("recBlock").innerHTML = "";
     }
   }
@@ -1100,7 +1106,6 @@
     updateCounts();
     initTabs();
     loadSignals();
-    document.getElementById("liveRefresh").addEventListener("click", triggerRefresh);
     document.addEventListener("change", onChange);
     document.getElementById("resetBtn").addEventListener("click", reset);
     setInterval(renderTop, 1000);
