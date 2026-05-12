@@ -1083,17 +1083,23 @@
   }
   function ensureLiveCardSkeleton(){
     // Make sure the live card always has its header (with Refresh button) +
-    // empty content slots. Idempotent — only rebuilds if a slot is missing.
-    if (document.getElementById("liveSpots") && document.getElementById("liveRefresh")) return;
+    // empty content slots. Idempotent.
     const card = document.getElementById("liveCard");
-    card.innerHTML = `
-      <div class="live-head">
-        <h3>Live data <span class="live-asof" id="liveAsof"></span></h3>
-        <button class="live-refresh" id="liveRefresh" type="button">Refresh</button>
-      </div>
-      <div class="live-spots" id="liveSpots"></div>
-      <div class="live-grid" id="liveGrid"></div>`;
-    document.getElementById("liveRefresh").addEventListener("click", triggerRefresh);
+    if (!document.getElementById("liveSpots") || !document.getElementById("liveRefresh")){
+      card.innerHTML = `
+        <div class="live-head">
+          <h3>Live data <span class="live-asof" id="liveAsof"></span></h3>
+          <button class="live-refresh" id="liveRefresh" type="button">Refresh</button>
+        </div>
+        <div class="live-spots" id="liveSpots"></div>
+        <div class="live-grid" id="liveGrid"></div>`;
+    }
+    // Always (re)attach handler — addEventListener with same fn is idempotent.
+    const btn = document.getElementById("liveRefresh");
+    if (btn && !btn._refreshBound){
+      btn.addEventListener("click", triggerRefresh);
+      btn._refreshBound = true;
+    }
   }
   async function loadSignals(){
     ensureLiveCardSkeleton();
