@@ -11,3 +11,6 @@ __pycache__/
 
 # Working artifacts
 *.docx.tmp
+
+# Auto-generated
+data.json

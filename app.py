@@ -101,10 +101,29 @@ a {{ color:#4ea8ff; }}
 
 @app.post("/refresh")
 async def refresh(x_auth_token: Optional[str] = Header(default=None)):
-    """Run compute.py via subprocess. Returns combined stdout+stderr."""
+    """
+    Run compute.py via subprocess. Returns combined stdout+stderr.
+
+    Auth model: requires either (a) an X-Auth-Token header matching the
+    REFRESH_TOKEN env var (used by the cron scheduler), OR (b) a valid Kite
+    session cached on this server (i.e. the user is logged in). Anonymous
+    callers without either are rejected.
+    """
     expected = os.environ.get("REFRESH_TOKEN", "")
-    if expected and x_auth_token != expected:
-        raise HTTPException(status_code=401, detail="invalid X-Auth-Token")
+    token_ok = bool(expected) and x_auth_token == expected
+    # Fall back to session-based auth: if a valid Kite session is cached, allow.
+    session_ok = False
+    if not token_ok:
+        try:
+            from kite_auth import get_kite_from_cache
+            session_ok = get_kite_from_cache() is not None
+        except Exception:
+            session_ok = False
+    if not (token_ok or session_ok):
+        raise HTTPException(
+            status_code=401,
+            detail="refresh requires either X-Auth-Token header or a logged-in Kite session",
+        )
     if not COMPUTE_PY.exists():
         return JSONResponse({"error": "compute.py missing"}, status_code=500)
     env = os.environ.copy()
