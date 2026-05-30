@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -135,8 +136,11 @@ async def refresh(x_auth_token: Optional[str] = Header(default=None)):
         return JSONResponse({"error": "compute.py missing"}, status_code=500)
     env = os.environ.copy()
     env["OPTIONS_HEADLESS"] = "1"
+    # Use the same Python interpreter that's running uvicorn — guarantees
+    # the venv with all deps is picked up, regardless of PATH or env.
+    python_bin = os.environ.get("PYTHON_BIN") or sys.executable or "python3"
     proc = await asyncio.create_subprocess_exec(
-        os.environ.get("PYTHON_BIN", "python3"), str(COMPUTE_PY),
+        python_bin, str(COMPUTE_PY),
         cwd=str(ROOT),
         env=env,
         stdout=asyncio.subprocess.PIPE,
