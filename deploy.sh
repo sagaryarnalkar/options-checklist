@@ -1,33 +1,73 @@
 #!/usr/bin/env bash
-# One-shot deploy for the Options Checklist on a fresh Ubuntu 24.04 VPS.
-# Run as root from inside /opt/options after the source files are in place.
+# One-shot deploy for the Options Checklist on a fresh Ubuntu 24.04 droplet
+# running as a regular user (not root). Uses Caddy for auto-HTTPS via
+# Let's Encrypt + a systemd --user unit for the FastAPI app.
+#
+# Pre-reqs:
+#   - This repo cloned to ~/options-checklist (or wherever pwd is when run)
+#   - A .env file in the same directory with KITE_API_KEY, KITE_API_SECRET,
+#     and REDIS_URL
+#   - A DuckDNS subdomain (or any FQDN) already pointing to this droplet's IP
+#
+# Run:
+#   DOMAIN=sagy-options.duckdns.org bash deploy.sh
+#
+# (sudo will be requested for package install + Caddy + UFW)
+
 set -euo pipefail
 
-cd "$(dirname "$(readlink -f "$0")")"
+INSTALL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$INSTALL_DIR"
 
-if [[ "$EUID" -ne 0 ]]; then
-  echo "Run as root (use sudo)." >&2
+# ---- guards ----
+if [[ "$EUID" -eq 0 ]]; then
+  echo "ERROR: run as your regular user (e.g. 'sagar'), not root." >&2
   exit 1
 fi
 
-INSTALL_DIR="$(pwd)"
-echo "==> Deploying from $INSTALL_DIR"
+if [[ -z "${DOMAIN:-}" ]]; then
+  read -r -p "Enter your DuckDNS domain (e.g. sagy-options.duckdns.org): " DOMAIN
+fi
+if [[ -z "$DOMAIN" ]]; then
+  echo "ERROR: DOMAIN is required." >&2
+  exit 1
+fi
 
-# 1. apt packages
-echo "==> apt update + install python, caddy"
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -y -qq
-apt-get install -y -qq python3 python3-venv python3-pip curl debian-keyring debian-archive-keyring apt-transport-https cron
+if [[ ! -f "$INSTALL_DIR/.env" ]]; then
+  echo "ERROR: $INSTALL_DIR/.env not found." >&2
+  echo "       Create it with:" >&2
+  echo "         KITE_API_KEY=..." >&2
+  echo "         KITE_API_SECRET=..." >&2
+  echo "         REDIS_URL=rediss://..." >&2
+  exit 1
+fi
+chmod 600 "$INSTALL_DIR/.env"
+
+echo "==> Deploying $INSTALL_DIR as user $USER, domain $DOMAIN"
+
+# ---- 1. apt + Caddy install ----
+echo "==> Installing system packages (sudo)"
+sudo apt-get update -qq
+sudo apt-get install -y -qq python3-venv python3-pip curl cron debian-keyring debian-archive-keyring apt-transport-https gnupg
 
 if ! command -v caddy >/dev/null 2>&1; then
   echo "==> Installing Caddy"
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update -y -qq
-  apt-get install -y -qq caddy
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+    | sudo gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+    | sudo tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
+  sudo apt-get update -qq
+  sudo apt-get install -y -qq caddy
 fi
 
-# 2. venv + python deps
+# ---- 2. UFW (open 80 + 443) ----
+if command -v ufw >/dev/null 2>&1; then
+  echo "==> Opening UFW ports 80 + 443"
+  sudo ufw allow 80/tcp  comment 'Caddy HTTP'  >/dev/null 2>&1 || true
+  sudo ufw allow 443/tcp comment 'Caddy HTTPS' >/dev/null 2>&1 || true
+fi
+
+# ---- 3. Python venv + deps ----
 echo "==> Setting up Python venv"
 if [[ ! -d "$INSTALL_DIR/venv" ]]; then
   python3 -m venv "$INSTALL_DIR/venv"
@@ -35,29 +75,25 @@ fi
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip --quiet
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt" --quiet
 
-# 3. .env sanity
-if [[ ! -f "$INSTALL_DIR/.env" ]]; then
-  echo "ERROR: $INSTALL_DIR/.env missing — create it with KITE_API_KEY and KITE_API_SECRET" >&2
-  exit 2
-fi
-chmod 600 "$INSTALL_DIR/.env"
-
-# 4. Caddy reverse proxy on :80 (no HTTPS — raw IP setup)
-echo "==> Writing /etc/caddy/Caddyfile"
-cat > /etc/caddy/Caddyfile <<'EOF'
+# ---- 4. Caddy reverse proxy + auto-HTTPS ----
+echo "==> Writing /etc/caddy/Caddyfile (HTTPS for $DOMAIN)"
+sudo tee /etc/caddy/Caddyfile >/dev/null <<EOF
 {
-    auto_https off
+    email admin@$DOMAIN
 }
 
-:80 {
+$DOMAIN {
     encode gzip
     reverse_proxy 127.0.0.1:8000
 }
 EOF
+sudo systemctl enable --now caddy >/dev/null 2>&1 || true
+sudo systemctl reload caddy
 
-# 5. systemd unit for the FastAPI app
-echo "==> Writing /etc/systemd/system/options-app.service"
-cat > /etc/systemd/system/options-app.service <<EOF
+# ---- 5. systemd --user unit for the FastAPI app ----
+echo "==> Writing ~/.config/systemd/user/options-app.service"
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/options-app.service <<EOF
 [Unit]
 Description=Options Checklist FastAPI app
 After=network.target
@@ -70,60 +106,62 @@ Environment=OPTIONS_HEADLESS=1
 ExecStart=$INSTALL_DIR/venv/bin/uvicorn app:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
-User=root
-Group=root
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOF
 
-# 6. cron for daily 3:15 PM IST = 9:45 UTC (Mon-Fri)
+systemctl --user daemon-reload
+systemctl --user enable --now options-app
+
+# Linger lets the user service survive logout / start on boot
+sudo loginctl enable-linger "$USER" >/dev/null 2>&1 || true
+
+# ---- 6. crontab (daily 09:45 UTC = 15:15 IST, Mon-Fri) ----
 echo "==> Installing cron"
-CRON_LINE="45 9 * * 1-5 cd $INSTALL_DIR && OPTIONS_HEADLESS=1 $INSTALL_DIR/venv/bin/python3 compute.py >> /var/log/options-cron.log 2>&1"
+CRON_LINE="45 9 * * 1-5 cd $INSTALL_DIR && OPTIONS_HEADLESS=1 $INSTALL_DIR/venv/bin/python3 compute.py >> $HOME/options-cron.log 2>&1"
 TMPCRON="$(mktemp)"
-crontab -l 2>/dev/null | grep -v 'OptionsStrats\|options/compute.py' > "$TMPCRON" || true
+crontab -l 2>/dev/null | grep -v 'options-checklist/compute.py\|OptionsStrats' > "$TMPCRON" || true
 echo "$CRON_LINE" >> "$TMPCRON"
 crontab "$TMPCRON"
 rm -f "$TMPCRON"
-touch /var/log/options-cron.log
+touch "$HOME/options-cron.log"
 
-# 7. enable + start everything
-echo "==> Reloading systemd"
-systemctl daemon-reload
-systemctl enable options-app caddy >/dev/null
-systemctl restart options-app
-systemctl restart caddy
-
-# 8. brief smoke test
-sleep 2
+# ---- 7. Smoke test ----
 echo
-echo "==> Smoke test"
+echo "==> Smoke test (give Caddy a moment to provision the cert on first run)"
+sleep 5
+
+echo -n "  app on :8000  "
 if curl -fsS http://127.0.0.1:8000/healthz >/dev/null; then
-  echo "  app on :8000 OK"
+  echo "OK"
 else
-  echo "  WARNING: app on :8000 not responding"
-  systemctl status options-app --no-pager -l | head -20
-fi
-if curl -fsS http://127.0.0.1/healthz >/dev/null; then
-  echo "  caddy on :80 OK"
-else
-  echo "  WARNING: caddy on :80 not responding"
+  echo "FAIL — checking status..."
+  systemctl --user status options-app --no-pager -l | tail -20
 fi
 
-PUBLIC_IP="$(curl -fsS https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
+echo -n "  https://$DOMAIN  "
+if curl -fsS "https://$DOMAIN/healthz" >/dev/null; then
+  echo "OK"
+else
+  echo "PENDING (cert may still be provisioning — retry in 30s)"
+fi
+
 echo
-echo "==================================================="
+echo "================================================================"
 echo "  Deploy complete."
 echo
-echo "  Next steps:"
-echo "    1. Update Kite Connect app redirect URL to:"
-echo "         http://$PUBLIC_IP/callback"
-echo "       (https://developers.kite.trade/apps -> your app -> edit)"
-echo "    2. Visit  http://$PUBLIC_IP/login  in any browser"
-echo "    3. Login, authorize, redirect captures token."
-echo "    4. Trigger first data fetch:"
-echo "         curl -X POST http://$PUBLIC_IP/refresh"
-echo "    5. Open  http://$PUBLIC_IP/  on phone or laptop."
+echo "  Public URL:  https://$DOMAIN/"
 echo
-echo "  Cron will refresh data automatically at 09:45 UTC (15:15 IST) Mon-Fri."
-echo "==================================================="
+echo "  Next steps:"
+echo "    1. Update Kite Connect redirect URL to:"
+echo "         https://$DOMAIN/callback"
+echo "       (https://developers.kite.trade/apps)"
+echo "    2. Visit  https://$DOMAIN/login  and complete the OAuth"
+echo "    3. Click Refresh on the dashboard to seed Redis"
+echo
+echo "  Logs:"
+echo "    App:   journalctl --user -u options-app -f"
+echo "    Cron:  tail -f $HOME/options-cron.log"
+echo "    Caddy: sudo journalctl -u caddy -f"
+echo "================================================================"
