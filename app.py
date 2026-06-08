@@ -147,8 +147,10 @@ async def oi_days(underlying: str = "NIFTY"):
 async def oi_aggregate(
     underlying: str = "NIFTY",
     date: Optional[str] = None,
-    mode: str = "notional",
-    score_threshold_cr: float = 50.0,
+    mode: str = "premium",      # premium matches the reference HFT Algo
+                                 # Scanner scale (peak ~10-30 cr/min on NIFTY
+                                 # vs ~hundreds-of-cr if we used notional).
+    score_threshold_cr: float = 10.0,  # tuned for premium-mode realistic peaks
     n: int = 10,
     atm_band: int = 2,
 ):

@@ -737,13 +737,13 @@
       </label>
       <label>Mode
         <select id="oiMode">
-          <option value="notional" selected>Notional</option>
-          <option value="premium">Premium</option>
+          <option value="premium" selected>Premium</option>
+          <option value="notional">Notional</option>
           <option value="margin">Margin (est)</option>
         </select>
       </label>
       <label>Score ≥ ₹cr
-        <input type="number" id="oiThresholdCr" value="50" min="1" step="1" style="width:70px">
+        <input type="number" id="oiThresholdCr" value="10" min="1" step="1" style="width:70px">
       </label>
       <label>ATM ± (score)
         <input type="number" id="oiAtmBand" value="2" min="0" max="10" step="1" style="width:70px">
@@ -1183,12 +1183,15 @@
     // Score markers: one per minute, only when above threshold. Score 1-10
     // is shown as the marker text. Position + colour depend on which side
     // (put writing = bullish/green/below, call writing = bearish/red/above).
+    // Marker text follows the convention used by reference OI-flow indicators:
+    // put-writing dominant (bullish) → "Buy:N"; call-writing dominant
+    // (bearish) → "Sell:N". The score N reflects ATM-band writing intensity.
     _oiCandleSeries.setMarkers(scoreMarkers.map(m => ({
       time: m.time,
       position: m.side === "put_writing" ? "belowBar" : "aboveBar",
       color:    m.side === "put_writing" ? "#7bd88f" : "#ff6b6b",
       shape:    m.side === "put_writing" ? "arrowUp" : "arrowDown",
-      text: String(m.score),
+      text: (m.side === "put_writing" ? "Buy:" : "Sell:") + m.score,
     })));
 
     // Right-hand BIG-prints list
