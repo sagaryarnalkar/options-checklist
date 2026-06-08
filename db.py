@@ -73,6 +73,32 @@ CREATE TABLE IF NOT EXISTS underlying_candle (
 );
 
 CREATE INDEX IF NOT EXISTS idx_underlying_candle_ts ON underlying_candle(underlying, ts);
+
+-- Track every score marker that gets produced so we can later test whether
+-- the indicator actually predicts what it claims to predict. Forward-return
+-- columns are filled in over time as the requisite future spot becomes
+-- available; markers near end-of-day legitimately stay NULL on long horizons.
+CREATE TABLE IF NOT EXISTS score_marker_outcomes (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                  TEXT    NOT NULL,
+    underlying          TEXT    NOT NULL,
+    side                TEXT    NOT NULL,   -- 'put_writing' | 'call_writing'
+    score               INTEGER NOT NULL,
+    amount_cr           REAL    NOT NULL,
+    mode                TEXT    NOT NULL,   -- 'premium' | 'notional' | 'margin'
+    atm_band            INTEGER NOT NULL,
+    threshold_cr        REAL    NOT NULL,
+    spot_at_marker      REAL    NOT NULL,
+    spot_5min           REAL,
+    spot_15min          REAL,
+    spot_30min          REAL,
+    return_5min_bps     REAL,
+    return_15min_bps    REAL,
+    return_30min_bps    REAL,
+    UNIQUE(ts, underlying, side, mode, atm_band, threshold_cr)
+);
+
+CREATE INDEX IF NOT EXISTS idx_smo_underlying_ts ON score_marker_outcomes(underlying, ts);
 """
 
 
@@ -126,6 +152,74 @@ def insert_candles(conn: sqlite3.Connection, rows: list) -> int:
     cur = conn.executemany(sql, data)
     conn.commit()
     return cur.rowcount
+
+
+def upsert_marker_outcomes(conn: sqlite3.Connection, rows: list) -> int:
+    """Insert OR replace score marker outcomes. Each row has the full
+    (ts, underlying, side, mode, atm_band, threshold_cr) key + all data
+    fields. Forward-return fields may be NULL."""
+    if not rows:
+        return 0
+    keys = (
+        "ts", "underlying", "side", "score", "amount_cr",
+        "mode", "atm_band", "threshold_cr",
+        "spot_at_marker", "spot_5min", "spot_15min", "spot_30min",
+        "return_5min_bps", "return_15min_bps", "return_30min_bps",
+    )
+    sql = (f"INSERT OR REPLACE INTO score_marker_outcomes ({','.join(keys)}) "
+           f"VALUES ({','.join('?' for _ in keys)})")
+    data = [tuple(r.get(k) for k in keys) for r in rows]
+    cur = conn.executemany(sql, data)
+    conn.commit()
+    return cur.rowcount
+
+
+def marker_outcomes_summary(conn: sqlite3.Connection) -> dict:
+    """Aggregated stats for the analysis endpoint."""
+    out: dict = {"by_score": {}, "by_side": {}, "totals": {}, "by_day": []}
+
+    # Per (side, score) summary at each horizon
+    for horizon in ("5min", "15min", "30min"):
+        col = f"return_{horizon}_bps"
+        cur = conn.execute(
+            f"SELECT side, score, COUNT({col}) AS n, "
+            f"AVG({col}) AS mean_bps, "
+            f"SUM(CASE WHEN ((side='put_writing' AND {col}>0) OR (side='call_writing' AND {col}<0)) THEN 1 ELSE 0 END) AS hits "
+            f"FROM score_marker_outcomes WHERE {col} IS NOT NULL "
+            f"GROUP BY side, score ORDER BY side, score"
+        )
+        for r in cur.fetchall():
+            key = f"{r['side']}_{r['score']}"
+            entry = out["by_score"].setdefault(key, {
+                "side": r["side"], "score": r["score"],
+            })
+            entry[f"n_{horizon}"] = r["n"]
+            entry[f"mean_bps_{horizon}"] = r["mean_bps"]
+            entry[f"hit_rate_{horizon}"] = (r["hits"] / r["n"]) if r["n"] else None
+
+    # Per-side aggregated
+    for horizon in ("5min", "15min", "30min"):
+        col = f"return_{horizon}_bps"
+        cur = conn.execute(
+            f"SELECT side, COUNT({col}) AS n, AVG({col}) AS mean_bps, "
+            f"SUM(CASE WHEN ((side='put_writing' AND {col}>0) OR (side='call_writing' AND {col}<0)) THEN 1 ELSE 0 END) AS hits "
+            f"FROM score_marker_outcomes WHERE {col} IS NOT NULL GROUP BY side"
+        )
+        for r in cur.fetchall():
+            entry = out["by_side"].setdefault(r["side"], {"side": r["side"]})
+            entry[f"n_{horizon}"] = r["n"]
+            entry[f"mean_bps_{horizon}"] = r["mean_bps"]
+            entry[f"hit_rate_{horizon}"] = (r["hits"] / r["n"]) if r["n"] else None
+
+    cur = conn.execute(
+        "SELECT underlying, DATE(ts) AS day, COUNT(*) AS n_markers "
+        "FROM score_marker_outcomes GROUP BY underlying, DATE(ts) ORDER BY day DESC"
+    )
+    out["by_day"] = [dict(r) for r in cur.fetchall()]
+
+    cur = conn.execute("SELECT COUNT(*) AS n FROM score_marker_outcomes")
+    out["totals"]["n_markers"] = cur.fetchone()["n"]
+    return out
 
 
 def log_recorder_run(

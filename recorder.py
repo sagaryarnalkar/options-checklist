@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import db
+import oi_flow
 from kite_auth import get_kite_from_cache
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -261,7 +262,92 @@ def run_snapshot(force: bool = False) -> dict:
                     db.log_recorder_run(conn, name, None, 0, 0, err)
             except Exception:
                 pass
+
+    # After the snapshot, refresh today's score-marker outcomes for each
+    # underlying. Cheap (single SQLite query + a small Python loop), idempotent
+    # via the UNIQUE constraint, and fills in forward-return columns as the
+    # 5/15/30-min spot points become available.
+    try:
+        today = now.date().isoformat()
+        with db.get_conn() as conn:
+            for name in UNDERLYINGS:
+                try:
+                    _refresh_marker_outcomes(conn, name, today)
+                except Exception as e:
+                    print(f"[recorder] marker outcomes refresh {name}: {type(e).__name__}: {e}")
+    except Exception as e:
+        print(f"[recorder] marker outcomes overall: {type(e).__name__}: {e}")
+
     return results
+
+
+# ---- Forward-return tracking ----
+# Default settings to track. Mirrors the UI defaults so we're tracking what the
+# user actually sees by default; we can extend to multiple parameter sets later
+# without breaking anything because the UNIQUE key on score_marker_outcomes
+# includes (mode, atm_band, threshold_cr).
+TRACK_MODE = "premium"
+TRACK_THRESHOLD_CR = 10.0
+TRACK_ATM_BAND = 2
+
+
+def _refresh_marker_outcomes(conn, underlying: str, date_str: str) -> int:
+    """Recompute today's markers and upsert with whatever forward-return data
+    is currently available. Returns number of rows written."""
+    result = oi_flow.aggregate_day(
+        conn,
+        underlying=underlying,
+        date=date_str,
+        mode=TRACK_MODE,
+        score_threshold_cr=TRACK_THRESHOLD_CR,
+        n=10,
+        atm_band=TRACK_ATM_BAND,
+    )
+    markers = result.get("score_markers") or []
+    candles = result.get("candles") or []
+    if not markers:
+        return 0
+
+    # Build a time -> close lookup. Time values are IST-shifted unix seconds
+    # (oi_flow._ts_to_unix). Adding 300/900/1800 still works since the shift
+    # is constant.
+    spot_by_time = {c["time"]: c["close"] for c in candles}
+
+    rows = []
+    for m in markers:
+        t = m["time"]
+        spot0 = spot_by_time.get(t)
+        if spot0 is None or spot0 <= 0:
+            continue
+
+        def _ret(spot_future):
+            if spot_future is None or spot_future <= 0:
+                return None
+            return (spot_future - spot0) / spot0 * 10000.0  # bps
+
+        spot5 = spot_by_time.get(t + 5 * 60)
+        spot15 = spot_by_time.get(t + 15 * 60)
+        spot30 = spot_by_time.get(t + 30 * 60)
+
+        rows.append({
+            "ts": m["ts_iso"],
+            "underlying": underlying,
+            "side": m["side"],
+            "score": m["score"],
+            "amount_cr": m["amount_cr"],
+            "mode": TRACK_MODE,
+            "atm_band": TRACK_ATM_BAND,
+            "threshold_cr": TRACK_THRESHOLD_CR,
+            "spot_at_marker": spot0,
+            "spot_5min": spot5,
+            "spot_15min": spot15,
+            "spot_30min": spot30,
+            "return_5min_bps": _ret(spot5),
+            "return_15min_bps": _ret(spot15),
+            "return_30min_bps": _ret(spot30),
+        })
+
+    return db.upsert_marker_outcomes(conn, rows)
 
 
 if __name__ == "__main__":
