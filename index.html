@@ -1082,11 +1082,17 @@
       priceFormat: { type: "price", precision: 0, minMove: 1 },
       base: 0,
     });
-    // Sync visible range between the two panes so panning/zooming feels stacked.
-    const syncFrom = (src, dst) => src.timeScale().subscribeVisibleLogicalRangeChange(r => {
+    // Sync the visible TIME range (not bar-index range) — the two series can
+    // have different bar counts (e.g. candles miss minutes where Kite returned
+    // no data; histogram skips the first minute since it has no prior to
+    // compare ΔOI against). Logical-range sync uses bar indices, so "0..50"
+    // means different times on each chart and the two panes drift apart.
+    // Time-range sync uses actual unix-second timestamps, so 14:45 above
+    // sits over 14:45 below regardless of how many bars each side has.
+    const syncFrom = (src, dst) => src.timeScale().subscribeVisibleTimeRangeChange(r => {
       if (_oiSyncing || !r) return;
       _oiSyncing = true;
-      try { dst.timeScale().setVisibleLogicalRange(r); } catch(e){}
+      try { dst.timeScale().setVisibleRange(r); } catch(e){}
       _oiSyncing = false;
     });
     syncFrom(_oiChart, _oiHistChart);
@@ -1216,8 +1222,19 @@
     const ohlcLabel = s.has_ohlc ? "OHLC" : "spot fallback";
     const peakLabel = s.max_pressure_cr ? `peak ₹${s.max_pressure_cr.toFixed(0)}cr` : "no scored minutes";
     setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints ≥ ₹${d.score_threshold_cr}cr · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
+    // Fit candles to their data range, then mirror the resulting time window
+    // onto the histogram pane so the two charts START aligned. Future
+    // pan/zoom is handled by the subscribeVisibleTimeRangeChange sync.
     _oiChart.timeScale().fitContent();
-    _oiHistChart.timeScale().fitContent();
+    // Defer to let fitContent settle, then sync.
+    requestAnimationFrame(() => {
+      const range = _oiChart.timeScale().getVisibleRange();
+      if (range && _oiHistChart) {
+        _oiSyncing = true;
+        try { _oiHistChart.timeScale().setVisibleRange(range); } catch(e){}
+        _oiSyncing = false;
+      }
+    });
   }
 
   // ---------- live data (data.json from compute.py) ----------
