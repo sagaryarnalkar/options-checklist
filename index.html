@@ -138,6 +138,31 @@
   .rec-alts summary { cursor:pointer; color:var(--accent); padding:4px 0; }
   .rec-alts ul { margin:6px 0 0; padding-left:20px; font-family:var(--mono); }
   .rec-error { background:rgba(255,107,107,.1); border:1px solid rgba(255,107,107,.3); color:var(--danger); padding:10px 12px; border-radius:6px; font-size:13px; }
+  /* ===== OI Flow tab ===== */
+  .oi-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--border); padding:10px 12px; border-radius:var(--radius); margin-bottom:12px; }
+  .oi-controls label { display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .oi-controls select, .oi-controls input { background:var(--panel-2); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:6px 8px; font-family:var(--sans); font-size:13px; }
+  .oi-status { font-size:12px; color:var(--muted); margin-bottom:10px; min-height:18px; }
+  .oi-status.error { color:var(--danger); }
+  .oi-status.warn { color:var(--warn); }
+  .oi-layout { display:grid; grid-template-columns:1fr 280px; gap:12px; }
+  @media (max-width:900px){ .oi-layout { grid-template-columns:1fr; } }
+  .oi-charts { display:flex; flex-direction:column; gap:10px; }
+  .oi-chart-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; }
+  .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+  .oi-chart { height:260px; width:100%; }
+  .oi-side { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
+  .oi-side-title { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.06em; font-weight:600; margin-bottom:8px; }
+  .oi-side-body { font-family:var(--mono); font-size:12px; }
+  .oi-big-row { padding:6px 8px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:2px; }
+  .oi-big-row:last-child { border-bottom:none; }
+  .oi-big-row .top { display:flex; justify-content:space-between; gap:6px; }
+  .oi-big-row .top b { color:var(--text); }
+  .oi-big-row .sub { color:var(--muted); font-size:11px; }
+  .oi-big-row.put_writing b { color:var(--accent-2); }
+  .oi-big-row.call_writing b { color:var(--danger); }
+  .oi-big-row.put_buying b, .oi-big-row.call_buying b { color:var(--warn); }
+  .oi-big-row.short_covering b, .oi-big-row.long_unwinding b { color:var(--muted); }
   /* Signal pills */
   .sig { display:inline-block; padding:2px 8px; border-radius:12px; font-size:11px; font-weight:600; letter-spacing:0.3px; text-transform:uppercase; }
   .sig-bull-cross { background:#1b8a3a; color:white; animation: sigpulse 1.4s infinite; }
@@ -179,6 +204,7 @@
   <div class="tabs" role="tablist">
     <button class="tab active" data-tab="flow" role="tab">By Flow</button>
     <button class="tab" data-tab="strategy" role="tab">By Strategy</button>
+    <button class="tab" data-tab="oiflow" role="tab">OI Flow</button>
   </div>
 
   <!-- ============================ FLOW TAB ============================ -->
@@ -695,6 +721,61 @@
 
   </div>
 
+  <!-- ============================ OI FLOW TAB ============================ -->
+  <div class="tab-panel" id="tabOiflow">
+    <div class="oi-controls">
+      <label>Underlying
+        <select id="oiUnderlying">
+          <option value="NIFTY">NIFTY</option>
+          <option value="BANKNIFTY">BANKNIFTY</option>
+        </select>
+      </label>
+      <label>Day
+        <select id="oiDay"><option>—</option></select>
+      </label>
+      <label>Mode
+        <select id="oiMode">
+          <option value="notional" selected>Notional</option>
+          <option value="premium">Premium</option>
+          <option value="margin">Margin (est)</option>
+        </select>
+      </label>
+      <label>BIG ≥ ₹cr
+        <input type="number" id="oiBigCr" value="50" min="1" step="1" style="width:70px">
+      </label>
+      <label>ATM ± N
+        <input type="number" id="oiN" value="10" min="1" max="50" step="1" style="width:60px">
+      </label>
+      <button type="button" id="oiReload" class="live-refresh">Reload</button>
+    </div>
+
+    <div class="oi-status" id="oiStatus"></div>
+
+    <div class="oi-layout">
+      <div class="oi-charts">
+        <div class="oi-chart-card">
+          <div class="oi-chart-title">Underlying spot (1-min)</div>
+          <div id="oiPriceChart" class="oi-chart"></div>
+        </div>
+        <div class="oi-chart-card">
+          <div class="oi-chart-title">Net writing pressure (₹ crore) — green = put writing dominant, red = call writing dominant</div>
+          <div id="oiHistChart" class="oi-chart"></div>
+        </div>
+      </div>
+      <aside class="oi-side">
+        <div class="oi-side-title">Top 10 BIG prints (today)</div>
+        <div class="oi-side-body" id="oiBigList"><div class="note">No data yet.</div></div>
+      </aside>
+    </div>
+
+    <p class="note" style="margin-top:16px">
+      <b>What this shows.</b> Aggregate OI flow per minute: when option <em>price drops</em> while <em>OI rises</em>,
+      that's writing (selling). PUT writers betting price stays up = bullish; CALL writers betting price stays down = bearish.
+      The histogram is Σ put-writing − Σ call-writing per minute, in ₹ crore. Triangles on the price chart mark BIG writing prints.
+      Read this as <em>aggregate</em> flow, not specific institutions — OI change is anonymous.
+    </p>
+  </div>
+
   <div class="footer">
     Tick-state saved in this browser, keyed per day (auto-clears after 2 days). <code>Reset</code> clears today.<br/>
     All strategies are self-hedged (defined risk) — no discretionary stop-loss.
@@ -893,7 +974,7 @@
   // --- tabs ---
   function initTabs(){
     const tabs = document.querySelectorAll(".tab");
-    const panels = { flow: document.getElementById("tabFlow"), strategy: document.getElementById("tabStrategy") };
+    const panels = { flow: document.getElementById("tabFlow"), strategy: document.getElementById("tabStrategy"), oiflow: document.getElementById("tabOiflow") };
     tabs.forEach(t => t.addEventListener("click", ()=>{
       tabs.forEach(x=>x.classList.remove("active"));
       t.classList.add("active");
@@ -902,6 +983,7 @@
       // persist tab selection
       localStorage.setItem("tab", t.dataset.tab);
       window.scrollTo({top:0, behavior:"smooth"});
+      if (t.dataset.tab === "oiflow") initOiFlowTab();
     }));
     const savedTab = localStorage.getItem("tab");
     if (savedTab && panels[savedTab]) {
@@ -909,7 +991,190 @@
       Object.values(panels).forEach(p=>p.classList.remove("active"));
       document.querySelector(`.tab[data-tab="${savedTab}"]`).classList.add("active");
       panels[savedTab].classList.add("active");
+      if (savedTab === "oiflow") setTimeout(initOiFlowTab, 0);
     }
+  }
+
+  // ---------- OI Flow tab ----------
+  const OI_LIB_URL = "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js";
+  let _oiLibLoading = null;
+  let _oiInited = false;
+  let _oiPriceChart = null, _oiPriceSeries = null;
+  let _oiHistChart  = null, _oiHistSeries  = null;
+  let _oiSyncing = false;
+
+  function loadOiLib(){
+    if (window.LightweightCharts) return Promise.resolve();
+    if (_oiLibLoading) return _oiLibLoading;
+    _oiLibLoading = new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = OI_LIB_URL; s.async = true;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error("failed to load Lightweight Charts library"));
+      document.head.appendChild(s);
+    });
+    return _oiLibLoading;
+  }
+
+  function setOiStatus(msg, cls){
+    const el = document.getElementById("oiStatus");
+    el.className = "oi-status" + (cls ? " " + cls : "");
+    el.textContent = msg || "";
+  }
+
+  async function initOiFlowTab(){
+    if (_oiInited) { oiReload(); return; }
+    _oiInited = true;
+    try {
+      await loadOiLib();
+    } catch(e) {
+      setOiStatus(e.message, "error"); return;
+    }
+    document.getElementById("oiUnderlying").addEventListener("change", () => { loadOiDays(); });
+    document.getElementById("oiReload").addEventListener("click", oiReload);
+    document.getElementById("oiDay").addEventListener("change", oiReload);
+    document.getElementById("oiMode").addEventListener("change", oiReload);
+    document.getElementById("oiBigCr").addEventListener("change", oiReload);
+    document.getElementById("oiN").addEventListener("change", oiReload);
+    buildOiCharts();
+    await loadOiDays();
+  }
+
+  function chartTheme(){
+    return {
+      layout: { background: { color: "transparent" }, textColor: "#8b95a7", fontFamily: "ui-monospace, monospace" },
+      grid:   { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#232a36" },
+      rightPriceScale: { borderColor: "#232a36" },
+      crosshair: { mode: 1 },
+    };
+  }
+
+  function buildOiCharts(){
+    if (!window.LightweightCharts) return;
+    const priceEl = document.getElementById("oiPriceChart");
+    const histEl  = document.getElementById("oiHistChart");
+    _oiPriceChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 260 });
+    _oiHistChart  = LightweightCharts.createChart(histEl,  { ...chartTheme(), width: histEl.clientWidth,  height: 260 });
+    _oiPriceSeries = _oiPriceChart.addLineSeries({ color: "#4ea8ff", lineWidth: 2 });
+    _oiHistSeries  = _oiHistChart.addHistogramSeries({ priceFormat: { type: "price", precision: 2, minMove: 0.01 } });
+    // Sync the two time scales for a stacked-pane feel
+    const syncFrom = (src, dst) => src.timeScale().subscribeVisibleLogicalRangeChange(r => {
+      if (_oiSyncing || !r) return;
+      _oiSyncing = true; try { dst.timeScale().setVisibleLogicalRange(r); } catch(e){} _oiSyncing = false;
+    });
+    syncFrom(_oiPriceChart, _oiHistChart);
+    syncFrom(_oiHistChart,  _oiPriceChart);
+    // Resize on window resize
+    window.addEventListener("resize", () => {
+      if (_oiPriceChart) _oiPriceChart.applyOptions({ width: priceEl.clientWidth });
+      if (_oiHistChart)  _oiHistChart.applyOptions({ width: histEl.clientWidth });
+    });
+  }
+
+  async function loadOiDays(){
+    const under = document.getElementById("oiUnderlying").value;
+    setOiStatus("Loading available days for " + under + "…");
+    try {
+      const r = await fetch(`/oi/days?underlying=${encodeURIComponent(under)}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      const sel = document.getElementById("oiDay");
+      sel.innerHTML = "";
+      if (!d.days || d.days.length === 0){
+        const opt = document.createElement("option");
+        opt.value = ""; opt.textContent = "(no data yet)";
+        sel.appendChild(opt);
+        setOiStatus(
+          `No data recorded yet for ${under}. The recorder writes one snapshot per minute during NSE F&O hours (09:15–15:30 IST, Mon–Fri), starting from the first minute after you've logged in. Come back tomorrow afternoon or later today after market open.`,
+          "warn"
+        );
+        clearCharts();
+        return;
+      }
+      d.days.forEach(day => {
+        const opt = document.createElement("option");
+        opt.value = day; opt.textContent = day;
+        sel.appendChild(opt);
+      });
+      setOiStatus("");
+      await oiReload();
+    } catch(e) {
+      setOiStatus("Failed to load days: " + e.message, "error");
+    }
+  }
+
+  async function oiReload(){
+    if (!_oiPriceChart) return;
+    const under = document.getElementById("oiUnderlying").value;
+    const day = document.getElementById("oiDay").value;
+    if (!day) return;
+    const mode = document.getElementById("oiMode").value;
+    const bigCr = document.getElementById("oiBigCr").value;
+    const n = document.getElementById("oiN").value;
+    setOiStatus("Loading aggregates for " + under + " · " + day + "…");
+    try {
+      const qs = new URLSearchParams({ underlying: under, date: day, mode, big_cr: bigCr, n });
+      const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      renderOiData(d);
+    } catch(e) {
+      setOiStatus("Failed to load aggregate: " + e.message, "error");
+    }
+  }
+
+  function clearCharts(){
+    if (_oiPriceSeries) _oiPriceSeries.setData([]);
+    if (_oiHistSeries)  _oiHistSeries.setData([]);
+    if (_oiPriceSeries) _oiPriceSeries.setMarkers([]);
+    const list = document.getElementById("oiBigList");
+    if (list) list.innerHTML = `<div class="note">No data yet.</div>`;
+  }
+
+  function renderOiData(d){
+    const candles = d.candles || [];
+    const hist    = d.histogram || [];
+    const markers = d.big_writing_markers || [];
+    const top10   = d.big_prints_top10 || [];
+
+    if (candles.length === 0){
+      setOiStatus("No data for this day.", "warn");
+      clearCharts();
+      return;
+    }
+    _oiPriceSeries.setData(candles);
+    _oiHistSeries.setData(hist.map(h => ({
+      time: h.time, value: h.value,
+      color: h.value >= 0 ? "rgba(123,216,143,0.85)" : "rgba(255,107,107,0.85)",
+    })));
+    // Markers on the price pane
+    _oiPriceSeries.setMarkers(markers.map(m => ({
+      time: m.time,
+      position: m.action === "put_writing" ? "belowBar" : "aboveBar",
+      color:    m.action === "put_writing" ? "#7bd88f" : "#ff6b6b",
+      shape:    m.action === "put_writing" ? "arrowUp" : "arrowDown",
+      text: `${m.opt_type} ${m.strike} · ₹${m.amount_cr.toFixed(1)}cr`,
+    })));
+    // Right-hand BIG-prints list
+    const list = document.getElementById("oiBigList");
+    if (top10.length === 0){
+      list.innerHTML = `<div class="note">No BIG prints ≥ ₹${d.big_cr}cr today.</div>`;
+    } else {
+      list.innerHTML = top10.map(b => {
+        const t = new Date(b.time * 1000).toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit", hour12:false});
+        return `<div class="oi-big-row ${b.action}">
+          <div class="top"><b>${t} · ${b.opt_type} ${b.strike}</b><span>₹${b.amount_cr.toFixed(1)}cr</span></div>
+          <div class="sub">${b.action.replace(/_/g," ")} · ΔOI ${b.delta_oi_lots.toLocaleString("en-IN")} lots</div>
+        </div>`;
+      }).join("");
+    }
+    // Status
+    const s = d.summary || {};
+    setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_big_prints || 0} BIG prints (lot ${d.lot_size}, step ${d.strike_step})`);
+    // Auto-fit
+    _oiPriceChart.timeScale().fitContent();
+    _oiHistChart.timeScale().fitContent();
   }
 
   // ---------- live data (data.json from compute.py) ----------

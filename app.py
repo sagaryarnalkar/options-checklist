@@ -33,6 +33,7 @@ from storage import load_data_text, storage_info
 # OI chain recorder (PR A)
 import db
 import recorder
+import oi_flow
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
@@ -124,6 +125,63 @@ async def oi_status():
         "day_summary": summary,
         "recent_runs": runs,
     })
+
+
+SUPPORTED_UNDERLYINGS = ("NIFTY", "BANKNIFTY")
+
+
+@app.get("/oi/days")
+async def oi_days(underlying: str = "NIFTY"):
+    """List trading days (newest first, max 30) that have stored chain data for
+    the given underlying. Empty list means the OI Flow tab will show its empty
+    state."""
+    underlying = underlying.upper()
+    if underlying not in SUPPORTED_UNDERLYINGS:
+        raise HTTPException(status_code=400, detail=f"underlying must be one of {SUPPORTED_UNDERLYINGS}")
+    with db.get_conn() as conn:
+        days = db.available_days(conn, underlying=underlying, limit=30)
+    return JSONResponse({"underlying": underlying, "days": days})
+
+
+@app.get("/oi/aggregate")
+async def oi_aggregate(
+    underlying: str = "NIFTY",
+    date: Optional[str] = None,
+    mode: str = "notional",
+    big_cr: float = 50.0,
+    n: int = 10,
+):
+    """Return minute-aggregates + BIG-print list for one (underlying, date).
+
+    If `date` is omitted, picks the most recent day that has data. Returns the
+    canonical empty shape when no data exists at all for the underlying."""
+    underlying = underlying.upper()
+    if underlying not in SUPPORTED_UNDERLYINGS:
+        raise HTTPException(status_code=400, detail=f"underlying must be one of {SUPPORTED_UNDERLYINGS}")
+    if mode not in ("premium", "notional", "margin"):
+        raise HTTPException(status_code=400, detail="mode must be premium|notional|margin")
+    try:
+        big_cr_f = float(big_cr)
+        n_i = int(n)
+    except Exception:
+        raise HTTPException(status_code=400, detail="big_cr must be a number; n must be an integer")
+    if n_i < 1 or n_i > 50:
+        raise HTTPException(status_code=400, detail="n must be 1..50")
+
+    with db.get_conn() as conn:
+        if date is None:
+            days = db.available_days(conn, underlying=underlying, limit=1)
+            if not days:
+                return JSONResponse(oi_flow.aggregate_day(
+                    conn, underlying=underlying, date="",
+                    mode=mode, big_cr=big_cr_f, n=n_i,
+                ))
+            date = days[0]
+        result = oi_flow.aggregate_day(
+            conn, underlying=underlying, date=date,
+            mode=mode, big_cr=big_cr_f, n=n_i,
+        )
+    return JSONResponse(result)
 
 
 @app.post("/oi/snapshot-now")
