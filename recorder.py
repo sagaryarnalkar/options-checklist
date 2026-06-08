@@ -25,17 +25,21 @@ from kite_auth import get_kite_from_cache
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # ---- Underlyings to record (NIFTY + BANKNIFTY only, per spec) ----
+# instrument_token is needed for Kite historical_data() (1-min OHLC for the
+# candlestick chart). These are stable NSE indices tokens.
 UNDERLYINGS = {
     "NIFTY": {
         "exchange": "NSE",
         "tradingsymbol": "NIFTY 50",
         "nfo_name": "NIFTY",
+        "instrument_token": 256265,
         "atm_n": 10,
     },
     "BANKNIFTY": {
         "exchange": "NSE",
         "tradingsymbol": "NIFTY BANK",
         "nfo_name": "BANKNIFTY",
+        "instrument_token": 260105,
         "atm_n": 10,
     },
 }
@@ -155,9 +159,31 @@ def snapshot_one(kite, name: str, conf: dict) -> dict:
             "oi": q.get("oi"),
         })
 
+    # Underlying 1-min OHLC for the candlestick chart. Best-effort: a fetch
+    # failure here doesn't fail the chain snapshot.
+    candle_inserted = 0
+    try:
+        candle = _fetch_last_completed_candle(kite, conf["instrument_token"])
+        if candle is not None:
+            with db.get_conn() as conn:
+                candle_inserted = db.insert_candles(conn, [{
+                    "ts": candle["ts"],
+                    "underlying": name,
+                    "open": candle["open"],
+                    "high": candle["high"],
+                    "low": candle["low"],
+                    "close": candle["close"],
+                    "volume": candle.get("volume") or 0,
+                }])
+    except Exception as e:
+        # Logged below; chain insert still proceeds.
+        candle_err = f"candle: {type(e).__name__}: {e}"
+    else:
+        candle_err = None
+
     with db.get_conn() as conn:
         inserted = db.insert_snapshots(conn, rows)
-        db.log_recorder_run(conn, name, str(expiry), inserted, strikes=len(target_strikes))
+        db.log_recorder_run(conn, name, str(expiry), inserted, strikes=len(target_strikes), error=candle_err)
 
     return {
         "ok": True,
@@ -165,7 +191,50 @@ def snapshot_one(kite, name: str, conf: dict) -> dict:
         "expiry": str(expiry),
         "strikes": len(target_strikes),
         "rows_inserted": inserted,
+        "candle_inserted": candle_inserted,
         "ts": ts,
+    }
+
+
+def _fetch_last_completed_candle(kite, instrument_token: int) -> Optional[dict]:
+    """Fetch the most recent COMPLETED 1-min candle for the underlying.
+
+    At t = 13:46:30 we want the 13:45 bar (fully formed). We request the
+    most recent ~3 minutes of 1-min data and pick the most recent bar
+    whose minute is strictly less than 'now'."""
+    now = datetime.now(IST)
+    from_dt = now - timedelta(minutes=5)
+    bars = kite.historical_data(
+        instrument_token=instrument_token,
+        from_date=from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+        to_date=now.strftime("%Y-%m-%d %H:%M:%S"),
+        interval="minute",
+    )
+    if not bars:
+        return None
+    current_minute_start = now.replace(second=0, microsecond=0)
+    # Bars arrive oldest-first; pick the newest bar that is strictly before
+    # current_minute_start (i.e. fully complete).
+    completed = None
+    for b in bars:
+        bar_dt = b["date"]
+        # Normalise to IST if needed
+        if bar_dt.tzinfo is None:
+            bar_dt = bar_dt.replace(tzinfo=IST)
+        else:
+            bar_dt = bar_dt.astimezone(IST)
+        if bar_dt < current_minute_start:
+            completed = (bar_dt, b)
+    if completed is None:
+        return None
+    bar_dt, b = completed
+    return {
+        "ts": bar_dt.replace(second=0, microsecond=0).isoformat(),
+        "open": b.get("open"),
+        "high": b.get("high"),
+        "low": b.get("low"),
+        "close": b.get("close"),
+        "volume": b.get("volume"),
     }
 
 

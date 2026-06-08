@@ -151,6 +151,7 @@
   .oi-chart-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; }
   .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
   .oi-chart { height:260px; width:100%; }
+  .oi-chart-tall { height:480px; }
   .oi-side { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
   .oi-side-title { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.06em; font-weight:600; margin-bottom:8px; }
   .oi-side-body { font-family:var(--mono); font-size:12px; }
@@ -740,11 +741,14 @@
           <option value="margin">Margin (est)</option>
         </select>
       </label>
-      <label>BIG ≥ ₹cr
-        <input type="number" id="oiBigCr" value="50" min="1" step="1" style="width:70px">
+      <label>Score ≥ ₹cr
+        <input type="number" id="oiThresholdCr" value="50" min="1" step="1" style="width:70px">
       </label>
-      <label>ATM ± N
-        <input type="number" id="oiN" value="10" min="1" max="50" step="1" style="width:60px">
+      <label>ATM ± (score)
+        <input type="number" id="oiAtmBand" value="2" min="0" max="10" step="1" style="width:70px">
+      </label>
+      <label>ATM ± N (scan)
+        <input type="number" id="oiN" value="10" min="1" max="50" step="1" style="width:70px">
       </label>
       <button type="button" id="oiReload" class="live-refresh">Reload</button>
     </div>
@@ -754,12 +758,8 @@
     <div class="oi-layout">
       <div class="oi-charts">
         <div class="oi-chart-card">
-          <div class="oi-chart-title">Underlying spot (1-min)</div>
-          <div id="oiPriceChart" class="oi-chart"></div>
-        </div>
-        <div class="oi-chart-card">
-          <div class="oi-chart-title">Net writing pressure (₹ crore) — green = put writing dominant, red = call writing dominant</div>
-          <div id="oiHistChart" class="oi-chart"></div>
+          <div class="oi-chart-title">Underlying (1-min) · score markers when ATM writing exceeds threshold</div>
+          <div id="oiPriceChart" class="oi-chart oi-chart-tall"></div>
         </div>
       </div>
       <aside class="oi-side">
@@ -769,10 +769,11 @@
     </div>
 
     <p class="note" style="margin-top:16px">
-      <b>What this shows.</b> Aggregate OI flow per minute: when option <em>price drops</em> while <em>OI rises</em>,
-      that's writing (selling). PUT writers betting price stays up = bullish; CALL writers betting price stays down = bearish.
-      The histogram is Σ put-writing − Σ call-writing per minute, in ₹ crore. Triangles on the price chart mark BIG writing prints.
-      Read this as <em>aggregate</em> flow, not specific institutions — OI change is anonymous.
+      <b>How to read.</b> Score 1–10 on the candle pane reflects ATM-band writing pressure for that minute.
+      Nothing is drawn below the threshold. <span style="color:var(--accent-2)">Green ▲</span> above the candle
+      = PUT writing dominant (bullish); <span style="color:var(--danger)">Red ▼</span> below the candle
+      = CALL writing dominant (bearish). Higher score = stronger relative to the day's peak. ΔOI in shares,
+      not lots; the side panel converts to lots for readability. Aggregate flow only — OI change is anonymous.
     </p>
   </div>
 
@@ -999,9 +1000,7 @@
   const OI_LIB_URL = "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js";
   let _oiLibLoading = null;
   let _oiInited = false;
-  let _oiPriceChart = null, _oiPriceSeries = null;
-  let _oiHistChart  = null, _oiHistSeries  = null;
-  let _oiSyncing = false;
+  let _oiChart = null, _oiCandleSeries = null;
 
   function loadOiLib(){
     if (window.LightweightCharts) return Promise.resolve();
@@ -1034,9 +1033,10 @@
     document.getElementById("oiReload").addEventListener("click", oiReload);
     document.getElementById("oiDay").addEventListener("change", oiReload);
     document.getElementById("oiMode").addEventListener("change", oiReload);
-    document.getElementById("oiBigCr").addEventListener("change", oiReload);
+    document.getElementById("oiThresholdCr").addEventListener("change", oiReload);
+    document.getElementById("oiAtmBand").addEventListener("change", oiReload);
     document.getElementById("oiN").addEventListener("change", oiReload);
-    buildOiCharts();
+    buildOiChart();
     await loadOiDays();
   }
 
@@ -1050,25 +1050,17 @@
     };
   }
 
-  function buildOiCharts(){
+  function buildOiChart(){
     if (!window.LightweightCharts) return;
     const priceEl = document.getElementById("oiPriceChart");
-    const histEl  = document.getElementById("oiHistChart");
-    _oiPriceChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 260 });
-    _oiHistChart  = LightweightCharts.createChart(histEl,  { ...chartTheme(), width: histEl.clientWidth,  height: 260 });
-    _oiPriceSeries = _oiPriceChart.addLineSeries({ color: "#4ea8ff", lineWidth: 2 });
-    _oiHistSeries  = _oiHistChart.addHistogramSeries({ priceFormat: { type: "price", precision: 2, minMove: 0.01 } });
-    // Sync the two time scales for a stacked-pane feel
-    const syncFrom = (src, dst) => src.timeScale().subscribeVisibleLogicalRangeChange(r => {
-      if (_oiSyncing || !r) return;
-      _oiSyncing = true; try { dst.timeScale().setVisibleLogicalRange(r); } catch(e){} _oiSyncing = false;
+    _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 480 });
+    _oiCandleSeries = _oiChart.addCandlestickSeries({
+      upColor: "#7bd88f", downColor: "#ff6b6b",
+      borderUpColor: "#7bd88f", borderDownColor: "#ff6b6b",
+      wickUpColor: "#7bd88f", wickDownColor: "#ff6b6b",
     });
-    syncFrom(_oiPriceChart, _oiHistChart);
-    syncFrom(_oiHistChart,  _oiPriceChart);
-    // Resize on window resize
     window.addEventListener("resize", () => {
-      if (_oiPriceChart) _oiPriceChart.applyOptions({ width: priceEl.clientWidth });
-      if (_oiHistChart)  _oiHistChart.applyOptions({ width: histEl.clientWidth });
+      if (_oiChart) _oiChart.applyOptions({ width: priceEl.clientWidth });
     });
   }
 
@@ -1105,16 +1097,20 @@
   }
 
   async function oiReload(){
-    if (!_oiPriceChart) return;
+    if (!_oiChart) return;
     const under = document.getElementById("oiUnderlying").value;
     const day = document.getElementById("oiDay").value;
     if (!day) return;
     const mode = document.getElementById("oiMode").value;
-    const bigCr = document.getElementById("oiBigCr").value;
+    const threshold = document.getElementById("oiThresholdCr").value;
+    const atmBand = document.getElementById("oiAtmBand").value;
     const n = document.getElementById("oiN").value;
     setOiStatus("Loading aggregates for " + under + " · " + day + "…");
     try {
-      const qs = new URLSearchParams({ underlying: under, date: day, mode, big_cr: bigCr, n });
+      const qs = new URLSearchParams({
+        underlying: under, date: day, mode,
+        score_threshold_cr: threshold, n, atm_band: atmBand,
+      });
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
@@ -1125,41 +1121,39 @@
   }
 
   function clearCharts(){
-    if (_oiPriceSeries) _oiPriceSeries.setData([]);
-    if (_oiHistSeries)  _oiHistSeries.setData([]);
-    if (_oiPriceSeries) _oiPriceSeries.setMarkers([]);
+    if (_oiCandleSeries) { _oiCandleSeries.setData([]); _oiCandleSeries.setMarkers([]); }
     const list = document.getElementById("oiBigList");
     if (list) list.innerHTML = `<div class="note">No data yet.</div>`;
   }
 
   function renderOiData(d){
     const candles = d.candles || [];
-    const hist    = d.histogram || [];
-    const markers = d.big_writing_markers || [];
-    const top10   = d.big_prints_top10 || [];
+    const scoreMarkers = d.score_markers || [];
+    const top10 = d.big_prints_top10 || [];
 
     if (candles.length === 0){
       setOiStatus("No data for this day.", "warn");
       clearCharts();
       return;
     }
-    _oiPriceSeries.setData(candles);
-    _oiHistSeries.setData(hist.map(h => ({
-      time: h.time, value: h.value,
-      color: h.value >= 0 ? "rgba(123,216,143,0.85)" : "rgba(255,107,107,0.85)",
-    })));
-    // Markers on the price pane
-    _oiPriceSeries.setMarkers(markers.map(m => ({
+
+    _oiCandleSeries.setData(candles);
+
+    // Score markers: one per minute, only when above threshold. Score 1-10
+    // is shown as the marker text. Position + colour depend on which side
+    // (put writing = bullish/green/below, call writing = bearish/red/above).
+    _oiCandleSeries.setMarkers(scoreMarkers.map(m => ({
       time: m.time,
-      position: m.action === "put_writing" ? "belowBar" : "aboveBar",
-      color:    m.action === "put_writing" ? "#7bd88f" : "#ff6b6b",
-      shape:    m.action === "put_writing" ? "arrowUp" : "arrowDown",
-      text: `${m.opt_type} ${m.strike} · ₹${m.amount_cr.toFixed(1)}cr`,
+      position: m.side === "put_writing" ? "belowBar" : "aboveBar",
+      color:    m.side === "put_writing" ? "#7bd88f" : "#ff6b6b",
+      shape:    m.side === "put_writing" ? "arrowUp" : "arrowDown",
+      text: String(m.score),
     })));
+
     // Right-hand BIG-prints list
     const list = document.getElementById("oiBigList");
     if (top10.length === 0){
-      list.innerHTML = `<div class="note">No BIG prints ≥ ₹${d.big_cr}cr today.</div>`;
+      list.innerHTML = `<div class="note">No prints ≥ ₹${d.score_threshold_cr}cr today.</div>`;
     } else {
       list.innerHTML = top10.map(b => {
         // b.time is IST-shifted (see oi_flow._ts_to_unix). Undo the shift so
@@ -1172,12 +1166,13 @@
         </div>`;
       }).join("");
     }
-    // Status
+
+    // Status: minutes / strikes / marked / max-pressure / OHLC flag
     const s = d.summary || {};
-    setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_big_prints || 0} BIG prints (lot ${d.lot_size}, step ${d.strike_step})`);
-    // Auto-fit
-    _oiPriceChart.timeScale().fitContent();
-    _oiHistChart.timeScale().fitContent();
+    const ohlcLabel = s.has_ohlc ? "OHLC" : "spot fallback";
+    const peakLabel = s.max_pressure_cr ? `peak ₹${s.max_pressure_cr.toFixed(0)}cr` : "no scored minutes";
+    setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints ≥ ₹${d.score_threshold_cr}cr · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
+    _oiChart.timeScale().fitContent();
   }
 
   // ---------- live data (data.json from compute.py) ----------
