@@ -30,12 +30,52 @@ from kite_auth import (
 )
 from storage import load_data_text, storage_info
 
+# OI chain recorder (PR A)
+import db
+import recorder
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
+_scheduler: Optional[AsyncIOScheduler] = None
+
 ROOT = Path(__file__).parent
 INDEX_HTML = ROOT / "index.html"
 DATA_JSON = ROOT / "data.json"
 COMPUTE_PY = ROOT / "compute.py"
 
 app = FastAPI(title="Options Checklist", docs_url=None, redoc_url=None)
+
+
+@app.on_event("startup")
+async def _startup():
+    """Initialise the SQLite store and start the in-process minute scheduler.
+
+    NSE F&O hours are 09:15–15:30 IST = 03:45–10:00 UTC. We schedule every
+    minute across hours 3–10 UTC, Mon–Fri, and the recorder no-ops outside
+    the precise 09:15–15:30 IST window (and when no Kite session is cached).
+    """
+    global _scheduler
+    db.init_db()
+    if os.environ.get("DISABLE_OI_RECORDER", "").lower() in ("1", "true", "yes"):
+        return
+    _scheduler = AsyncIOScheduler(timezone="UTC")
+    _scheduler.add_job(
+        recorder.run_snapshot,
+        trigger=CronTrigger(minute="*", hour="3-10", day_of_week="mon-fri", timezone="UTC"),
+        id="oi_recorder",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=30,
+    )
+    _scheduler.start()
+
+
+@app.on_event("shutdown")
+async def _shutdown():
+    global _scheduler
+    if _scheduler is not None:
+        _scheduler.shutdown(wait=False)
+        _scheduler = None
 
 
 @app.get("/healthz")
@@ -64,6 +104,40 @@ async def data():
 @app.get("/storage-info")
 async def storage_info_route():
     return JSONResponse(storage_info())
+
+
+# ---------- OI chain recorder status / control ----------
+
+@app.get("/oi/status")
+async def oi_status():
+    """Inspection endpoint for the OI recorder. Shows row counts per
+    (underlying, day), last few recorder runs, market-hours flag, and whether
+    a Kite session is currently cached."""
+    from kite_auth import get_kite_from_cache
+    with db.get_conn() as conn:
+        summary = db.day_summary(conn)
+        runs = db.recent_recorder_runs(conn, limit=10)
+    return JSONResponse({
+        "market_hours_now": recorder.is_market_hours(),
+        "kite_session_ok": get_kite_from_cache() is not None,
+        "scheduler_running": _scheduler is not None and _scheduler.running,
+        "day_summary": summary,
+        "recent_runs": runs,
+    })
+
+
+@app.post("/oi/snapshot-now")
+async def oi_snapshot_now(x_auth_token: Optional[str] = Header(default=None)):
+    """Trigger a one-shot snapshot ignoring the market-hours guard. Same auth
+    model as /refresh: header token OR valid Kite session."""
+    expected = os.environ.get("REFRESH_TOKEN", "")
+    if expected and x_auth_token == expected:
+        pass
+    else:
+        from kite_auth import get_kite_from_cache
+        if get_kite_from_cache() is None:
+            raise HTTPException(status_code=401, detail="not authorised")
+    return JSONResponse(recorder.run_snapshot(force=True))
 
 
 @app.get("/login")
