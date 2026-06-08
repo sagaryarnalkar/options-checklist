@@ -148,25 +148,26 @@ async def oi_aggregate(
     underlying: str = "NIFTY",
     date: Optional[str] = None,
     mode: str = "notional",
-    big_cr: float = 50.0,
+    score_threshold_cr: float = 50.0,
     n: int = 10,
+    atm_band: int = 2,
 ):
-    """Return minute-aggregates + BIG-print list for one (underlying, date).
-
-    If `date` is omitted, picks the most recent day that has data. Returns the
-    canonical empty shape when no data exists at all for the underlying."""
+    """Return minute-aggregates + score markers + BIG-print list."""
     underlying = underlying.upper()
     if underlying not in SUPPORTED_UNDERLYINGS:
         raise HTTPException(status_code=400, detail=f"underlying must be one of {SUPPORTED_UNDERLYINGS}")
     if mode not in ("premium", "notional", "margin"):
         raise HTTPException(status_code=400, detail="mode must be premium|notional|margin")
     try:
-        big_cr_f = float(big_cr)
+        thr = float(score_threshold_cr)
         n_i = int(n)
+        atm_i = int(atm_band)
     except Exception:
-        raise HTTPException(status_code=400, detail="big_cr must be a number; n must be an integer")
+        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band must be integers")
     if n_i < 1 or n_i > 50:
         raise HTTPException(status_code=400, detail="n must be 1..50")
+    if atm_i < 0 or atm_i > 10:
+        raise HTTPException(status_code=400, detail="atm_band must be 0..10")
 
     with db.get_conn() as conn:
         if date is None:
@@ -174,12 +175,12 @@ async def oi_aggregate(
             if not days:
                 return JSONResponse(oi_flow.aggregate_day(
                     conn, underlying=underlying, date="",
-                    mode=mode, big_cr=big_cr_f, n=n_i,
+                    mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
                 ))
             date = days[0]
         result = oi_flow.aggregate_day(
             conn, underlying=underlying, date=date,
-            mode=mode, big_cr=big_cr_f, n=n_i,
+            mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
         )
     return JSONResponse(result)
 

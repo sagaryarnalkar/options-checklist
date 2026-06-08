@@ -1,36 +1,43 @@
 """
-OI Flow aggregation.
+OI Flow aggregation — produces what the OI Flow tab renders:
 
-For one (underlying, trading_day), this module walks the per-minute chain_snapshot
-rows and produces:
+  - candles[]          — minute OHLC from underlying_candle (Kite-sourced).
+                         Falls back to a single-value bar (O=H=L=C=spot) when
+                         no candle is stored for that minute, so legacy data
+                         still draws something.
+  - score_markers[]    — at most one marker per minute, only when the
+                         dominant ATM-band writing pressure (PUT or CALL)
+                         exceeds the threshold. Score is 1..10 scaled
+                         linearly between threshold and the day's max.
+  - big_prints_top10[] — for the side panel (all actions, top 10 by amount).
+  - summary{}          — minute count, # marked minutes, # BIG prints.
 
-  - candles[]      — minute-by-minute spot of the underlying (line series; the
-                     recorder snapshots spot once per minute so we don't have
-                     real OHLC bars — only close)
-  - histogram[]    — net writing-pressure per minute, in INR-crore, signed
-                     (positive = bullish = put-writing > call-writing)
-  - big_writing_markers[]  — per-minute markers for BIG put-writing /
-                              call-writing prints (for the candle pane)
-  - big_prints_top10[]     — that day's top 10 BIG prints across all actions
-                              (for the right-hand panel)
-
-Classification per (strike, minute) — from the spec:
-    ΔOI > 0 & Δprice < 0  → WRITING  (CE = call writing / bearish;
-                                       PE = put writing / bullish)
-    ΔOI > 0 & Δprice > 0  → BUYING   (CE = call buying / bullish;
-                                       PE = put buying / bearish)
+CLASSIFICATION (per strike, per minute), unchanged:
+    ΔOI > 0 & Δprice < 0  → WRITING  (PE = put writing / bullish;
+                                       CE = call writing / bearish)
+    ΔOI > 0 & Δprice > 0  → BUYING
     ΔOI < 0 & Δprice > 0  → SHORT COVERING
     ΔOI < 0 & Δprice < 0  → LONG UNWINDING
 
-Amount of |ΔOI|, three modes (UI configurable, default: notional):
-    premium  = |ΔOI| × lot_size × option_LTP
-    notional = |ΔOI| × lot_size × spot
-    margin   = notional × MARGIN_PCT   (default 0.12, label as "estimate")
+AMOUNTS, FIXED IN THIS REVISION:
+    Kite's `oi` field for NSE F&O is reported in *share-equivalent quantity*,
+    not in contracts. The previous code multiplied by lot_size, which
+    inflated every amount by ~75× for NIFTY and ~15× for BANKNIFTY (e.g.
+    ₹244,000 cr for one minute's ΔOI on a single PE strike — clearly wrong).
+    Now we use ΔOI directly:
+        premium  = |ΔOI| × option_LTP
+        notional = |ΔOI| × spot
+        margin   = notional × MARGIN_PCT
+    The display of "ΔOI in lots" in the side panel uses |ΔOI| / lot_size.
 
-Kite's `oi` field is reported in CONTRACTS (lots), so we multiply by lot_size
-to get share-equivalent quantity before pricing.
-
-A strike-minute is BIG when its chosen-mode amount ≥ BIG_CR × 1e7.
+SCORE (per minute):
+    atm_strikes = ATM ± atm_band
+    put_writing_rs  = Σ PE-writing amounts at atm_strikes
+    call_writing_rs = Σ CE-writing amounts at atm_strikes
+    dominant = max(put_writing_rs, call_writing_rs)
+    if dominant < threshold_rs: no marker
+    else: score = clamp(1 + 9 * (dominant - threshold) / (max_for_10 - threshold), 1, 10)
+    max_for_10 is the day's max above threshold (self-calibrating).
 """
 from __future__ import annotations
 
@@ -42,19 +49,12 @@ from typing import Optional
 CRORE = 1e7
 DEFAULT_MARGIN_PCT = 0.12
 
-# Known NIFTY/BANKNIFTY lot sizes as a fallback only — actual size is read
-# from instruments data at recorder/run time and surfaced here via the
-# `lot_size` argument. Update if the exchange revises.
 KNOWN_LOT_SIZES = {"NIFTY": 75, "BANKNIFTY": 15}
 
 
 def _ts_to_unix(ts_iso: str) -> int:
-    """Return a unix-seconds value that, when Lightweight Charts interprets it
-    as UTC (its default), renders as IST on the axis. We shift by +5h30m so
-    "08:15 displayed" actually means "08:15 IST" — which is what an Indian
-    options trader looking at NSE intraday data expects to see. Without the
-    shift the axis reads in UTC (e.g. 03:45 for a 09:15 IST tick), which is
-    actively confusing for this use case."""
+    """Return a unix value that, when Lightweight Charts displays it as UTC,
+    reads as IST on the axis. Shift by +5h30m."""
     return int(datetime.fromisoformat(ts_iso).timestamp() + 5.5 * 3600)
 
 
@@ -63,18 +63,18 @@ def aggregate_day(
     underlying: str,
     date: str,
     mode: str = "notional",
-    big_cr: float = 50.0,
+    score_threshold_cr: float = 50.0,
     n: int = 10,
+    atm_band: int = 2,
     margin_pct: float = DEFAULT_MARGIN_PCT,
     lot_size: Optional[int] = None,
 ) -> dict:
-    """Build minute-aggregates + BIG-print list for one (underlying, date)."""
     if mode not in ("premium", "notional", "margin"):
         raise ValueError(f"unknown mode: {mode}")
     if lot_size is None:
         lot_size = KNOWN_LOT_SIZES.get(underlying, 75)
 
-    big_threshold = float(big_cr) * CRORE
+    threshold_rs = float(score_threshold_cr) * CRORE
 
     cur = conn.execute(
         "SELECT ts, spot, strike, opt_type, ltp, oi "
@@ -85,27 +85,37 @@ def aggregate_day(
     )
     rows = cur.fetchall()
 
+    candle_cur = conn.execute(
+        "SELECT ts, open, high, low, close, volume "
+        "FROM underlying_candle "
+        "WHERE underlying = ? AND DATE(ts) = ? "
+        "ORDER BY ts",
+        (underlying, date),
+    )
+    candle_rows = candle_cur.fetchall()
+    candles_by_minute = {c["ts"]: c for c in candle_rows}
+
     empty_result = {
         "underlying": underlying, "date": date, "mode": mode,
-        "big_cr": big_cr, "n": n, "lot_size": lot_size, "strike_step": None,
-        "candles": [], "histogram": [], "big_writing_markers": [],
-        "big_prints_top10": [],
-        "summary": {"total_minutes": 0, "n_unique_strikes": 0, "n_big_prints": 0},
+        "score_threshold_cr": score_threshold_cr, "n": n, "atm_band": atm_band,
+        "lot_size": lot_size, "strike_step": None,
+        "candles": [], "score_markers": [], "big_prints_top10": [],
+        "summary": {"total_minutes": 0, "n_unique_strikes": 0,
+                    "n_score_markers": 0, "n_big_prints": 0,
+                    "has_ohlc": False},
     }
-    if not rows:
+    if not rows and not candle_rows:
         return empty_result
 
-    # Group by minute
+    # Group chain by minute
     minutes: dict = defaultdict(list)
     spot_at_minute: dict = {}
     for r in rows:
         minutes[r["ts"]].append(r)
         spot_at_minute[r["ts"]] = r["spot"]
-
     sorted_minutes = sorted(minutes.keys())
     all_strikes = sorted({r["strike"] for r in rows})
 
-    # Detect strike step from sorted strike list
     strike_step = 50
     if len(all_strikes) >= 2:
         diffs = sorted({all_strikes[i + 1] - all_strikes[i] for i in range(len(all_strikes) - 1)})
@@ -113,32 +123,34 @@ def aggregate_day(
         if diffs:
             strike_step = diffs[0]
 
-    # Stateful walk: track per-contract previous OI + LTP to compute deltas
-    prev_oi: dict = {}    # (strike, opt_type) -> oi
-    prev_ltp: dict = {}   # (strike, opt_type) -> ltp
+    prev_oi: dict = {}
+    prev_ltp: dict = {}
 
-    candles = []
-    histogram = []
-    big_prints: list = []   # all BIG prints (any action)
+    # Per-minute pressures, indexed by the END timestamp (ts when we observed
+    # the change). After the walk we re-key by the START timestamp so that
+    # score markers align time-wise with the corresponding underlying candle.
+    pressure_by_minute: dict = {}  # ts -> {"put": ..., "call": ...}
+    big_prints: list = []
 
-    for ts in sorted_minutes:
+    for i, ts in enumerate(sorted_minutes):
         rows_this_min = minutes[ts]
         spot = spot_at_minute[ts]
-        ts_unix = _ts_to_unix(ts)
 
-        # ATM ± N strikes for THIS minute (ATM can shift through the day)
         atm = min(all_strikes, key=lambda s: abs(s - spot))
         atm_idx = all_strikes.index(atm)
-        lo = max(0, atm_idx - n)
-        hi = min(len(all_strikes), atm_idx + n + 1)
-        target_strikes = set(all_strikes[lo:hi])
+        big_lo = max(0, atm_idx - n)
+        big_hi = min(len(all_strikes), atm_idx + n + 1)
+        big_strikes = set(all_strikes[big_lo:big_hi])
+        score_lo = max(0, atm_idx - atm_band)
+        score_hi = min(len(all_strikes), atm_idx + atm_band + 1)
+        score_strikes = set(all_strikes[score_lo:score_hi])
 
-        bullish_writing_amt = 0.0  # Σ put-writing amounts
-        bearish_writing_amt = 0.0  # Σ call-writing amounts
+        put_writing_atm = 0.0
+        call_writing_atm = 0.0
 
         for r in rows_this_min:
             strike = r["strike"]
-            if strike not in target_strikes:
+            if strike not in big_strikes:
                 continue
             opt_type = r["opt_type"]
             ltp = r["ltp"]
@@ -151,31 +163,29 @@ def aggregate_day(
             p_ltp = prev_ltp.get(key)
             prev_oi[key] = oi
             prev_ltp[key] = ltp
-
             if p_oi is None or p_ltp is None:
-                # First observation of this contract today = baseline
                 continue
 
             d_oi = oi - p_oi
             d_ltp = ltp - p_ltp
             if d_oi == 0 or d_ltp == 0:
-                continue  # ambiguous — skip
+                continue
 
-            # ΔOI is in contracts; convert to share-equivalent for ₹ amounts
-            abs_d_oi_shares = abs(d_oi) * lot_size
-            premium = abs_d_oi_shares * ltp
-            notional = abs_d_oi_shares * spot
+            # ΔOI from Kite is in SHARES (share-equivalent quantity), not
+            # contracts. Do NOT multiply by lot_size — that was the bug.
+            abs_d_oi = abs(d_oi)
+            premium = abs_d_oi * ltp
+            notional = abs_d_oi * spot
             margin = notional * margin_pct
-
             amount = {"premium": premium, "notional": notional, "margin": margin}[mode]
 
-            # Classify
             if d_oi > 0 and d_ltp < 0:
                 action = "put_writing" if opt_type == "PE" else "call_writing"
-                if opt_type == "PE":
-                    bullish_writing_amt += amount
-                else:
-                    bearish_writing_amt += amount
+                if strike in score_strikes:
+                    if opt_type == "PE":
+                        put_writing_atm += amount
+                    else:
+                        call_writing_atm += amount
             elif d_oi > 0 and d_ltp > 0:
                 action = "put_buying" if opt_type == "PE" else "call_buying"
             elif d_oi < 0 and d_ltp > 0:
@@ -183,14 +193,14 @@ def aggregate_day(
             else:
                 action = "long_unwinding"
 
-            if amount >= big_threshold:
+            if amount >= threshold_rs:
                 big_prints.append({
-                    "time": ts_unix,
+                    "time": _ts_to_unix(ts),
                     "ts_iso": ts,
                     "strike": strike,
                     "opt_type": opt_type,
                     "action": action,
-                    "delta_oi_lots": int(d_oi),
+                    "delta_oi_lots": int(round(d_oi / max(lot_size, 1))),
                     "amount_rs": amount,
                     "amount_cr": amount / CRORE,
                     "premium": premium,
@@ -200,54 +210,92 @@ def aggregate_day(
                     "ltp": ltp,
                 })
 
-        net_cr = (bullish_writing_amt - bearish_writing_amt) / CRORE
+        # Activity observed at `ts` actually happened during the previous
+        # minute. Anchor pressure to that previous ts so the score marker
+        # lines up with the candle of that minute.
+        if i > 0:
+            anchor_ts = sorted_minutes[i - 1]
+            pressure_by_minute[anchor_ts] = {
+                "put": put_writing_atm,
+                "call": call_writing_atm,
+            }
 
-        candles.append({"time": ts_unix, "value": spot})
-        histogram.append({
-            "time": ts_unix,
-            "value": net_cr,
-            "bullish_cr": bullish_writing_amt / CRORE,
-            "bearish_cr": bearish_writing_amt / CRORE,
+    # Day-max above threshold → max_for_10 (self-calibrating)
+    above = [
+        max(p["put"], p["call"])
+        for p in pressure_by_minute.values()
+        if max(p["put"], p["call"]) >= threshold_rs
+    ]
+    max_for_10 = max(above) if above else threshold_rs
+
+    score_markers = []
+    for ts, p in sorted(pressure_by_minute.items()):
+        put_rs = p["put"]
+        call_rs = p["call"]
+        dominant_side = "put_writing" if put_rs >= call_rs else "call_writing"
+        dominant_rs = max(put_rs, call_rs)
+        if dominant_rs < threshold_rs:
+            continue
+        if max_for_10 > threshold_rs:
+            raw = 1 + 9 * (dominant_rs - threshold_rs) / (max_for_10 - threshold_rs)
+        else:
+            raw = 1
+        score = max(1, min(10, int(round(raw))))
+        score_markers.append({
+            "time": _ts_to_unix(ts),
+            "ts_iso": ts,
+            "score": score,
+            "side": dominant_side,
+            "amount_cr": dominant_rs / CRORE,
+            "put_cr": put_rs / CRORE,
+            "call_cr": call_rs / CRORE,
         })
 
-    # Markers on the candle pane: only BIG writing prints (per spec)
-    big_writing_markers = [
-        {
-            "time": b["time"],
-            "ts_iso": b["ts_iso"],
-            "strike": b["strike"],
-            "opt_type": b["opt_type"],
-            "action": b["action"],
-            "delta_oi_lots": b["delta_oi_lots"],
-            "amount_cr": b["amount_cr"],
-            "premium": b["premium"],
-            "notional": b["notional"],
-            "margin": b["margin"],
-        }
-        for b in big_prints
-        if b["action"] in ("put_writing", "call_writing")
-    ]
+    # Candles — prefer real OHLC; fall back to spot-only synthetic bars
+    candles_out = []
+    has_ohlc = bool(candles_by_minute)
+    if has_ohlc:
+        for c in candle_rows:
+            if c["open"] is None or c["high"] is None or c["low"] is None or c["close"] is None:
+                continue
+            candles_out.append({
+                "time": _ts_to_unix(c["ts"]),
+                "open": float(c["open"]),
+                "high": float(c["high"]),
+                "low": float(c["low"]),
+                "close": float(c["close"]),
+            })
+    else:
+        # Synthetic O=H=L=C=spot for legacy days without OHLC
+        for ts in sorted_minutes:
+            sp = spot_at_minute[ts]
+            candles_out.append({
+                "time": _ts_to_unix(ts),
+                "open": sp, "high": sp, "low": sp, "close": sp,
+            })
 
-    # Top 10 BIG prints by amount for the right-hand panel
     top10 = sorted(big_prints, key=lambda b: -b["amount_rs"])[:10]
 
     return {
         "underlying": underlying,
         "date": date,
         "mode": mode,
-        "big_cr": big_cr,
+        "score_threshold_cr": score_threshold_cr,
         "n": n,
+        "atm_band": atm_band,
         "lot_size": lot_size,
         "strike_step": strike_step,
-        "candles": candles,
-        "histogram": histogram,
-        "big_writing_markers": big_writing_markers,
+        "candles": candles_out,
+        "score_markers": score_markers,
         "big_prints_top10": top10,
         "summary": {
             "total_minutes": len(sorted_minutes),
             "first_ts": sorted_minutes[0] if sorted_minutes else None,
             "last_ts": sorted_minutes[-1] if sorted_minutes else None,
             "n_unique_strikes": len(all_strikes),
+            "n_score_markers": len(score_markers),
             "n_big_prints": len(big_prints),
+            "has_ohlc": has_ohlc,
+            "max_pressure_cr": max_for_10 / CRORE if above else None,
         },
     }

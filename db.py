@@ -59,6 +59,20 @@ CREATE TABLE IF NOT EXISTS recorder_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_recorder_log_ts ON recorder_log(ts);
+
+CREATE TABLE IF NOT EXISTS underlying_candle (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT    NOT NULL,
+    underlying  TEXT    NOT NULL,
+    open        REAL,
+    high        REAL,
+    low         REAL,
+    close       REAL,
+    volume      INTEGER,
+    UNIQUE(ts, underlying)
+);
+
+CREATE INDEX IF NOT EXISTS idx_underlying_candle_ts ON underlying_candle(underlying, ts);
 """
 
 
@@ -95,6 +109,19 @@ def insert_snapshots(conn: sqlite3.Connection, rows: list) -> int:
         f"INSERT OR IGNORE INTO chain_snapshot ({','.join(keys)}) "
         f"VALUES ({','.join('?' for _ in keys)})"
     )
+    data = [tuple(r.get(k) for k in keys) for r in rows]
+    cur = conn.executemany(sql, data)
+    conn.commit()
+    return cur.rowcount
+
+
+def insert_candles(conn: sqlite3.Connection, rows: list) -> int:
+    """rows = list of dicts with ts, underlying, open, high, low, close, volume."""
+    if not rows:
+        return 0
+    keys = ("ts", "underlying", "open", "high", "low", "close", "volume")
+    sql = (f"INSERT OR IGNORE INTO underlying_candle ({','.join(keys)}) "
+           f"VALUES ({','.join('?' for _ in keys)})")
     data = [tuple(r.get(k) for k in keys) for r in rows]
     cur = conn.executemany(sql, data)
     conn.commit()
