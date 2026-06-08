@@ -49,8 +49,13 @@ KNOWN_LOT_SIZES = {"NIFTY": 75, "BANKNIFTY": 15}
 
 
 def _ts_to_unix(ts_iso: str) -> int:
-    """Convert IST ISO timestamp to UTC unix seconds for the chart library."""
-    return int(datetime.fromisoformat(ts_iso).timestamp())
+    """Return a unix-seconds value that, when Lightweight Charts interprets it
+    as UTC (its default), renders as IST on the axis. We shift by +5h30m so
+    "08:15 displayed" actually means "08:15 IST" — which is what an Indian
+    options trader looking at NSE intraday data expects to see. Without the
+    shift the axis reads in UTC (e.g. 03:45 for a 09:15 IST tick), which is
+    actively confusing for this use case."""
+    return int(datetime.fromisoformat(ts_iso).timestamp() + 5.5 * 3600)
 
 
 def aggregate_day(

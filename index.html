@@ -1162,7 +1162,10 @@
       list.innerHTML = `<div class="note">No BIG prints ≥ ₹${d.big_cr}cr today.</div>`;
     } else {
       list.innerHTML = top10.map(b => {
-        const t = new Date(b.time * 1000).toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit", hour12:false});
+        // b.time is IST-shifted (see oi_flow._ts_to_unix). Undo the shift so
+        // we recover the real UTC moment, then format explicitly in IST.
+        const t = new Date((b.time - 5.5*3600) * 1000)
+          .toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit", hour12:false, timeZone:"Asia/Kolkata"});
         return `<div class="oi-big-row ${b.action}">
           <div class="top"><b>${t} · ${b.opt_type} ${b.strike}</b><span>₹${b.amount_cr.toFixed(1)}cr</span></div>
           <div class="sub">${b.action.replace(/_/g," ")} · ΔOI ${b.delta_oi_lots.toLocaleString("en-IN")} lots</div>
