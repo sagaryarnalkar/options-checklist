@@ -228,6 +228,19 @@ def aggregate_day(
     ]
     max_for_10 = max(above) if above else threshold_rs
 
+    # ATM writing volume histogram — one entry per anchored minute, both
+    # PE and CE writing volumes in ₹ crore. The UI plots PE positive (green
+    # above zero) and CE negative (red below zero) so both forces are visible
+    # in the same minute.
+    histogram = [
+        {
+            "time": _ts_to_unix(ts),
+            "put_writing_cr": p["put"] / CRORE,
+            "call_writing_cr": p["call"] / CRORE,
+        }
+        for ts, p in sorted(pressure_by_minute.items())
+    ]
+
     score_markers = []
     for ts, p in sorted(pressure_by_minute.items()):
         put_rs = p["put"]
@@ -287,6 +300,7 @@ def aggregate_day(
         "strike_step": strike_step,
         "candles": candles_out,
         "score_markers": score_markers,
+        "histogram": histogram,
         "big_prints_top10": top10,
         "summary": {
             "total_minutes": len(sorted_minutes),
