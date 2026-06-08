@@ -779,6 +779,8 @@
       dominant (bullish); <span style="color:var(--danger)">Red ▼ above</span> = CALL writing dominant (bearish).
       <em>Lower pane</em>: per-minute writing volume in ₹crore at the ATM band — green bars (above zero) are
       PE writing, red bars (below zero) are CE writing. You can see <em>both</em> forces in the same minute.
+      The dashed ±1σ / ±2σ lines are the day's mean ± standard deviation of writing volume —
+      bars beyond these are statistically unusual relative to today's baseline.
       Aggregate flow only — OI change is anonymous.
     </p>
   </div>
@@ -1009,6 +1011,7 @@
   let _oiChart = null, _oiCandleSeries = null;
   let _oiHistChart = null, _oiPeSeries = null, _oiCeSeries = null;
   let _oiSyncing = false;
+  let _oiRefLines = [];   // [{series, line}] — cleared and re-drawn on each render
 
   function loadOiLib(){
     if (window.LightweightCharts) return Promise.resolve();
@@ -1185,6 +1188,26 @@
     const histogram = d.histogram || [];
     _oiPeSeries.setData(histogram.map(h => ({ time: h.time, value: h.put_writing_cr })));
     _oiCeSeries.setData(histogram.map(h => ({ time: h.time, value: -h.call_writing_cr })));
+
+    // Clear any previously drawn 1σ / 2σ reference lines, then draw fresh.
+    _oiRefLines.forEach(rl => { try { rl.series.removePriceLine(rl.line); } catch(e){} });
+    _oiRefLines = [];
+    const drawRefLine = (series, price, color, title) => {
+      const line = series.createPriceLine({
+        price, color, lineStyle: LightweightCharts.LineStyle.Dashed,
+        lineWidth: 1, axisLabelVisible: true, title,
+      });
+      _oiRefLines.push({ series, line });
+    };
+    if (d.pe_stats) {
+      drawRefLine(_oiPeSeries, d.pe_stats.p1sd, "rgba(123,216,143,0.45)", "+1σ");
+      drawRefLine(_oiPeSeries, d.pe_stats.p2sd, "rgba(123,216,143,0.75)", "+2σ");
+    }
+    if (d.ce_stats) {
+      // CE writing rendered as negative; draw bands as negative too.
+      drawRefLine(_oiCeSeries, -d.ce_stats.p1sd, "rgba(255,107,107,0.45)", "-1σ");
+      drawRefLine(_oiCeSeries, -d.ce_stats.p2sd, "rgba(255,107,107,0.75)", "-2σ");
+    }
 
     // Score markers: one per minute, only when above threshold. Score 1-10
     // is shown as the marker text. Position + colour depend on which side

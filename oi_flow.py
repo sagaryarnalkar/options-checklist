@@ -42,6 +42,7 @@ SCORE (per minute):
 from __future__ import annotations
 
 import sqlite3
+import statistics
 from collections import defaultdict
 from datetime import datetime
 from typing import Optional
@@ -289,6 +290,25 @@ def aggregate_day(
 
     top10 = sorted(big_prints, key=lambda b: -b["amount_rs"])[:10]
 
+    # Day-wide stats for the lower-pane reference lines (1σ / 2σ above the
+    # mean writing volume in ₹cr). Computed across ALL anchored minutes
+    # including zeros — represents "what's a typical writing pressure today".
+    def _stats(values):
+        if len(values) < 5:
+            return None
+        try:
+            m = statistics.mean(values)
+            sd = statistics.stdev(values)
+        except statistics.StatisticsError:
+            return None
+        return {"mean": round(m, 3), "sd": round(sd, 3),
+                "p1sd": round(m + sd, 3), "p2sd": round(m + 2 * sd, 3)}
+
+    pe_values = [h["put_writing_cr"] for h in histogram]
+    ce_values = [h["call_writing_cr"] for h in histogram]
+    pe_stats = _stats(pe_values)
+    ce_stats = _stats(ce_values)
+
     return {
         "underlying": underlying,
         "date": date,
@@ -301,6 +321,8 @@ def aggregate_day(
         "candles": candles_out,
         "score_markers": score_markers,
         "histogram": histogram,
+        "pe_stats": pe_stats,
+        "ce_stats": ce_stats,
         "big_prints_top10": top10,
         "summary": {
             "total_minutes": len(sorted_minutes),

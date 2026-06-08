@@ -187,6 +187,19 @@ async def oi_aggregate(
     return JSONResponse(result)
 
 
+@app.get("/oi/marker_analysis")
+async def oi_marker_analysis():
+    """Aggregate forward-return stats across all stored score markers.
+
+    For each (side, score) bucket and at each horizon (+5/+15/+30 min),
+    returns the sample count, mean return in bps, and the directional
+    hit-rate (put_writing → return > 0 = win; call_writing → return < 0 = win).
+    Also returns per-side aggregates and per-day counts so you can see
+    how the sample size is accumulating."""
+    with db.get_conn() as conn:
+        return JSONResponse(db.marker_outcomes_summary(conn))
+
+
 @app.post("/oi/snapshot-now")
 async def oi_snapshot_now(x_auth_token: Optional[str] = Header(default=None)):
     """Trigger a one-shot snapshot ignoring the market-hours guard. Same auth
