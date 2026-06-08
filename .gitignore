@@ -14,3 +14,9 @@ __pycache__/
 
 # Auto-generated
 data.json
+
+# OI chain SQLite store (lives on the droplet)
+data/
+*.db
+*.db-shm
+*.db-wal
