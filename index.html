@@ -151,7 +151,8 @@
   .oi-chart-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; }
   .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
   .oi-chart { height:260px; width:100%; }
-  .oi-chart-tall { height:480px; }
+  .oi-chart-price { height:360px; }
+  .oi-chart-hist  { height:200px; }
   .oi-side { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
   .oi-side-title { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.06em; font-weight:600; margin-bottom:8px; }
   .oi-side-body { font-family:var(--mono); font-size:12px; }
@@ -759,7 +760,11 @@
       <div class="oi-charts">
         <div class="oi-chart-card">
           <div class="oi-chart-title">Underlying (1-min) · score markers when ATM writing exceeds threshold</div>
-          <div id="oiPriceChart" class="oi-chart oi-chart-tall"></div>
+          <div id="oiPriceChart" class="oi-chart oi-chart-price"></div>
+        </div>
+        <div class="oi-chart-card">
+          <div class="oi-chart-title">ATM CE / PE writing volume (₹ crore) · green ↑ = PE writing (bullish), red ↓ = CE writing (bearish)</div>
+          <div id="oiHistChart" class="oi-chart oi-chart-hist"></div>
         </div>
       </div>
       <aside class="oi-side">
@@ -769,11 +774,12 @@
     </div>
 
     <p class="note" style="margin-top:16px">
-      <b>How to read.</b> Score 1–10 on the candle pane reflects ATM-band writing pressure for that minute.
-      Nothing is drawn below the threshold. <span style="color:var(--accent-2)">Green ▲</span> above the candle
-      = PUT writing dominant (bullish); <span style="color:var(--danger)">Red ▼</span> below the candle
-      = CALL writing dominant (bearish). Higher score = stronger relative to the day's peak. ΔOI in shares,
-      not lots; the side panel converts to lots for readability. Aggregate flow only — OI change is anonymous.
+      <b>How to read.</b> <em>Upper pane</em>: 1-min candles + score 1–10 markers, sparse — only when ATM writing
+      exceeds the threshold. <span style="color:var(--accent-2)">Green ▲ below</span> the candle = PUT writing
+      dominant (bullish); <span style="color:var(--danger)">Red ▼ above</span> = CALL writing dominant (bearish).
+      <em>Lower pane</em>: per-minute writing volume in ₹crore at the ATM band — green bars (above zero) are
+      PE writing, red bars (below zero) are CE writing. You can see <em>both</em> forces in the same minute.
+      Aggregate flow only — OI change is anonymous.
     </p>
   </div>
 
@@ -1001,6 +1007,8 @@
   let _oiLibLoading = null;
   let _oiInited = false;
   let _oiChart = null, _oiCandleSeries = null;
+  let _oiHistChart = null, _oiPeSeries = null, _oiCeSeries = null;
+  let _oiSyncing = false;
 
   function loadOiLib(){
     if (window.LightweightCharts) return Promise.resolve();
@@ -1053,14 +1061,39 @@
   function buildOiChart(){
     if (!window.LightweightCharts) return;
     const priceEl = document.getElementById("oiPriceChart");
-    _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 480 });
+    const histEl  = document.getElementById("oiHistChart");
+    _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 360 });
+    _oiHistChart = LightweightCharts.createChart(histEl, { ...chartTheme(), width: histEl.clientWidth, height: 200 });
     _oiCandleSeries = _oiChart.addCandlestickSeries({
       upColor: "#7bd88f", downColor: "#ff6b6b",
       borderUpColor: "#7bd88f", borderDownColor: "#ff6b6b",
       wickUpColor: "#7bd88f", wickDownColor: "#ff6b6b",
     });
+    // Two histogram series stacked across the zero line:
+    //   PE writing → positive green bars (bullish pressure above zero)
+    //   CE writing → negative red bars   (bearish pressure below zero)
+    _oiPeSeries = _oiHistChart.addHistogramSeries({
+      color: "rgba(123,216,143,0.85)",
+      priceFormat: { type: "price", precision: 0, minMove: 1 },
+      base: 0,
+    });
+    _oiCeSeries = _oiHistChart.addHistogramSeries({
+      color: "rgba(255,107,107,0.85)",
+      priceFormat: { type: "price", precision: 0, minMove: 1 },
+      base: 0,
+    });
+    // Sync visible range between the two panes so panning/zooming feels stacked.
+    const syncFrom = (src, dst) => src.timeScale().subscribeVisibleLogicalRangeChange(r => {
+      if (_oiSyncing || !r) return;
+      _oiSyncing = true;
+      try { dst.timeScale().setVisibleLogicalRange(r); } catch(e){}
+      _oiSyncing = false;
+    });
+    syncFrom(_oiChart, _oiHistChart);
+    syncFrom(_oiHistChart, _oiChart);
     window.addEventListener("resize", () => {
       if (_oiChart) _oiChart.applyOptions({ width: priceEl.clientWidth });
+      if (_oiHistChart) _oiHistChart.applyOptions({ width: histEl.clientWidth });
     });
   }
 
@@ -1122,6 +1155,8 @@
 
   function clearCharts(){
     if (_oiCandleSeries) { _oiCandleSeries.setData([]); _oiCandleSeries.setMarkers([]); }
+    if (_oiPeSeries) _oiPeSeries.setData([]);
+    if (_oiCeSeries) _oiCeSeries.setData([]);
     const list = document.getElementById("oiBigList");
     if (list) list.innerHTML = `<div class="note">No data yet.</div>`;
   }
@@ -1138,6 +1173,12 @@
     }
 
     _oiCandleSeries.setData(candles);
+
+    // Lower pane: ATM writing volume per minute. PE writing positive (green
+    // above zero), CE writing negative (red below zero).
+    const histogram = d.histogram || [];
+    _oiPeSeries.setData(histogram.map(h => ({ time: h.time, value: h.put_writing_cr })));
+    _oiCeSeries.setData(histogram.map(h => ({ time: h.time, value: -h.call_writing_cr })));
 
     // Score markers: one per minute, only when above threshold. Score 1-10
     // is shown as the marker text. Position + colour depend on which side
@@ -1173,6 +1214,7 @@
     const peakLabel = s.max_pressure_cr ? `peak ₹${s.max_pressure_cr.toFixed(0)}cr` : "no scored minutes";
     setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints ≥ ₹${d.score_threshold_cr}cr · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
     _oiChart.timeScale().fitContent();
+    _oiHistChart.timeScale().fitContent();
   }
 
   // ---------- live data (data.json from compute.py) ----------
