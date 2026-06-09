@@ -633,9 +633,197 @@ def _build_gg_leaps(kite, direction, instruments, spot, vix, today):
 
 
 # ====================================================================
+# Schedule-driven builders (Batman, No Brainer NIFTY, Expiry Double Butterfly)
+# ====================================================================
+
+def _format_multileg(strategy: str, structure: str, expiry, lot_size: int,
+                     legs_in: list, kite) -> dict:
+    """Helper for non-credit-spread structures (flies, broken-wing condors).
+    `legs_in` is a list of dicts: {action, transaction_type, tradingsymbol,
+    strike, option_type, premium, quantity}. Computes net cash + margin."""
+    net_premium_per_unit = 0.0
+    for leg in legs_in:
+        sign = -1 if leg["transaction_type"] == "BUY" else +1
+        net_premium_per_unit += sign * (leg["premium"] or 0)
+    qty = lot_size
+    margin = _basket_margin(kite, legs_in)
+    margin_total = None
+    try:
+        margin_total = float(margin.get("final", {}).get("total"))
+    except Exception:
+        pass
+    return {
+        "strategy": strategy,
+        "structure": structure,
+        "expiry": str(expiry),
+        "lot_size": lot_size,
+        "legs": legs_in,
+        "net_premium_per_unit": round(net_premium_per_unit, 2),
+        "net_premium_total": round(net_premium_per_unit * qty, 2),
+        "margin_total": margin_total,
+        "margin_raw": margin,
+    }
+
+
+def _nearest_strike_in_chain(strikes: list, target: float) -> int:
+    return min(strikes, key=lambda s: abs(s - target))
+
+
+def _build_expiry_double_butterfly(kite, instruments, spot, today):
+    """Mon 3:15 PM build for the Tuesday-weekly Expiry Double Butterfly.
+    X = 0.5% of spot, rounded to strike step. Call fly (1-2-1) above + Put
+    fly (1-2-1) below. Current weekly expiry."""
+    # Find nearest weekly NIFTY expiry (could be tomorrow or up to ~7 days)
+    today_d = today
+    weekly_set = set()
+    for ins in instruments:
+        if (ins.get("name") == "NIFTY"
+            and ins.get("instrument_type") in ("CE", "PE")
+            and ins.get("expiry") and ins["expiry"] >= today_d):
+            weekly_set.add(ins["expiry"])
+    if not weekly_set:
+        return {"strategy": "edb", "error": "no NIFTY option expiry found"}
+    expiry = sorted(weekly_set)[0]
+
+    # All CE strikes for that expiry → detect step
+    chain_ce = _option_chain(instruments, "NIFTY", expiry, "CE")
+    if not chain_ce:
+        return {"strategy": "edb", "error": "no CE chain for weekly expiry"}
+    strikes_sorted = sorted(chain_ce.keys())
+    if len(strikes_sorted) < 2:
+        return {"strategy": "edb", "error": "chain too sparse"}
+    step = min(strikes_sorted[i+1] - strikes_sorted[i]
+               for i in range(len(strikes_sorted)-1)
+               if strikes_sorted[i+1] - strikes_sorted[i] > 0)
+
+    # X = 0.5% of spot, rounded UP to step (so we stay on the grid)
+    x_raw = 0.005 * spot
+    x = max(step, round(x_raw / step) * step)
+
+    def _pick(target):
+        return _nearest_strike_in_chain(strikes_sorted, target)
+
+    call_buy_lo  = _pick(spot + 0.5 * x)
+    call_sell    = _pick(spot + 1.5 * x)
+    call_buy_hi  = _pick(spot + 2.5 * x)
+    chain_pe = _option_chain(instruments, "NIFTY", expiry, "PE")
+    pe_strikes = sorted(chain_pe.keys())
+    put_buy_hi   = _nearest_strike_in_chain(pe_strikes, spot - 0.5 * x)
+    put_sell     = _nearest_strike_in_chain(pe_strikes, spot - 1.5 * x)
+    put_buy_lo   = _nearest_strike_in_chain(pe_strikes, spot - 2.5 * x)
+
+    needed_legs = [
+        ("BUY",  call_buy_lo, "CE", chain_ce, 1),
+        ("SELL", call_sell,   "CE", chain_ce, 2),
+        ("BUY",  call_buy_hi, "CE", chain_ce, 1),
+        ("BUY",  put_buy_hi,  "PE", chain_pe, 1),
+        ("SELL", put_sell,    "PE", chain_pe, 2),
+        ("BUY",  put_buy_lo,  "PE", chain_pe, 1),
+    ]
+    sample = chain_ce[call_sell]
+    lot_size = int(sample.get("lot_size") or 75)
+
+    # Batch LTPs
+    syms = set()
+    for _, strike, _, chain, _ in needed_legs:
+        ins = chain.get(strike)
+        if not ins:
+            return {"strategy": "edb",
+                    "error": f"strike {strike} missing from chain"}
+        syms.add(ins["tradingsymbol"])
+    ltps = _ltp_batch(kite, [f"NFO:{s}" for s in syms])
+
+    legs = []
+    for action, strike, opt_type, chain, mult in needed_legs:
+        ins = chain[strike]
+        ts = ins["tradingsymbol"]
+        prem = ltps.get(f"NFO:{ts}", {}).get("last_price")
+        legs.append({
+            "action": action, "transaction_type": action,
+            "tradingsymbol": ts, "strike": strike,
+            "option_type": opt_type, "premium": prem,
+            "quantity": lot_size * mult,
+        })
+
+    return _format_multileg(
+        strategy="edb",
+        structure=f"Expiry Double Butterfly · X={int(x)} pts · Call fly 1-2-1 + Put fly 1-2-1",
+        expiry=expiry, lot_size=lot_size,
+        legs_in=legs, kite=kite,
+    )
+
+
+def _build_call_broken_wing_121(kite, instruments, spot, today, strategy: str,
+                                 structure_label: str,
+                                 plus_short: int = 600,
+                                 plus_long_near: int = 300,
+                                 plus_long_far: int = 1600):
+    """Generic 1-2-1 call structure used by Batman and No Brainer NIFTY:
+    Buy 1× (spot+300) CE / Sell 2× (spot+600) CE / Buy 1× (spot+1600) CE.
+    Next monthly expiry. Last-Friday entry; the calendar gate is in the
+    caller — this builder just constructs the trade for the given spot."""
+    fut_exps = _futures_expiries(instruments, "NIFTY", today)
+    if not fut_exps:
+        return {"strategy": strategy, "error": "no monthly expiry found"}
+    # Next month: skip the closest if today is on or after current expiry day
+    expiry = fut_exps[1] if len(fut_exps) > 1 else fut_exps[0]
+
+    chain = _option_chain(instruments, "NIFTY", expiry, "CE")
+    if not chain:
+        return {"strategy": strategy, "error": "no CE chain"}
+    strikes_sorted = sorted(chain.keys())
+
+    s_near = _nearest_strike_in_chain(strikes_sorted, spot + plus_long_near)
+    s_short = _nearest_strike_in_chain(strikes_sorted, spot + plus_short)
+    s_far  = _nearest_strike_in_chain(strikes_sorted, spot + plus_long_far)
+
+    lot_size = int(chain[s_short].get("lot_size") or 75)
+    needed = [
+        ("BUY",  s_near, 1),
+        ("SELL", s_short, 2),
+        ("BUY",  s_far,  1),
+    ]
+    syms = {chain[strike]["tradingsymbol"] for _, strike, _ in needed}
+    ltps = _ltp_batch(kite, [f"NFO:{s}" for s in syms])
+
+    legs = []
+    for action, strike, mult in needed:
+        ins = chain[strike]
+        ts = ins["tradingsymbol"]
+        prem = ltps.get(f"NFO:{ts}", {}).get("last_price")
+        legs.append({
+            "action": action, "transaction_type": action,
+            "tradingsymbol": ts, "strike": strike,
+            "option_type": "CE", "premium": prem,
+            "quantity": lot_size * mult,
+        })
+    return _format_multileg(
+        strategy=strategy, structure=structure_label, expiry=expiry,
+        lot_size=lot_size, legs_in=legs, kite=kite,
+    )
+
+
+def _build_batman(kite, instruments, spot, today):
+    return _build_call_broken_wing_121(
+        kite, instruments, spot, today,
+        strategy="batman",
+        structure_label="Batman · Buy 1× (+300) CE / Sell 2× (+600) CE / Buy 1× (+1600) CE",
+    )
+
+
+def _build_no_brainer(kite, instruments, spot, today):
+    return _build_call_broken_wing_121(
+        kite, instruments, spot, today,
+        strategy="no_brainer",
+        structure_label="No Brainer NIFTY · Buy 1× (+300) CE / Sell 2× (+600) CE / Buy 1× (+1600) CE",
+    )
+
+
+# ====================================================================
 # Public entry point
 # ====================================================================
 
+# Signal-driven (fire on '*_cross' in signals dict)
 BUILDERS = {
     "nidhi_kalash":   _build_nidhi_kalash,
     "golden_goose":   _build_golden_goose,
@@ -644,9 +832,24 @@ BUILDERS = {
     "gg_leaps":       _build_gg_leaps,
 }
 
+# Schedule-driven (fire on calendar flags)
+SCHEDULE_BUILDERS = {
+    "edb":        _build_expiry_double_butterfly,
+    "batman":     _build_batman,
+    "no_brainer": _build_no_brainer,
+}
 
-def build_recommendations(kite, signals: dict, blocks: dict) -> dict:
-    """For each *_cross signal, return a dict of trade recommendations."""
+
+def build_recommendations(kite, signals: dict, blocks: dict,
+                          calendar_flags: Optional[dict] = None) -> dict:
+    """Build the per-strategy trade recommendations.
+
+    Signal-driven strategies (GG / Panther / NK / OT / GG_LEAPS) fire on
+    '*_cross' values in `signals`. Schedule-driven strategies (EDB /
+    Batman / No Brainer NIFTY) fire on `calendar_flags` keys:
+        is_mon_before_weekly  → edb
+        is_last_friday        → batman + no_brainer
+    """
     out: dict = {}
     today = datetime.now(IST).date()
 
@@ -664,14 +867,14 @@ def build_recommendations(kite, signals: dict, blocks: dict) -> dict:
             instruments_cache = kite.instruments("NFO")
         return instruments_cache
 
+    # Signal-driven
     for strategy, signal in (signals or {}).items():
         if "cross" not in (signal or ""):
             continue
         builder = BUILDERS.get(strategy)
         if builder is None:
             out[strategy] = {
-                "strategy": strategy,
-                "signal": signal,
+                "strategy": strategy, "signal": signal,
                 "note": "trade builder not yet implemented for this strategy",
             }
             continue
@@ -679,5 +882,26 @@ def build_recommendations(kite, signals: dict, blocks: dict) -> dict:
         try:
             out[strategy] = builder(kite, direction, _get_instruments(), spot, vix, today)
         except Exception as e:
-            out[strategy] = {"strategy": strategy, "error": f"{type(e).__name__}: {e}"}
+            out[strategy] = {"strategy": strategy,
+                             "error": f"{type(e).__name__}: {e}"}
+
+    # Schedule-driven
+    flags = calendar_flags or {}
+    schedule_triggers = [
+        ("is_mon_before_weekly", ["edb"]),
+        ("is_last_friday",       ["batman", "no_brainer"]),
+    ]
+    for flag_key, strategies in schedule_triggers:
+        if not flags.get(flag_key):
+            continue
+        for strategy in strategies:
+            builder = SCHEDULE_BUILDERS.get(strategy)
+            if builder is None:
+                continue
+            try:
+                out[strategy] = builder(kite, _get_instruments(), spot, today)
+            except Exception as e:
+                out[strategy] = {"strategy": strategy,
+                                 "error": f"{type(e).__name__}: {e}"}
+
     return out

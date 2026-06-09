@@ -138,6 +138,12 @@
   .rec-alts summary { cursor:pointer; color:var(--accent); padding:4px 0; }
   .rec-alts ul { margin:6px 0 0; padding-left:20px; font-family:var(--mono); }
   .rec-error { background:rgba(255,107,107,.1); border:1px solid rgba(255,107,107,.3); color:var(--danger); padding:10px 12px; border-radius:6px; font-size:13px; }
+  /* Inline strategy-card recommendation block (live trade for that strategy) */
+  .inline-rec:empty { display:none; }
+  .inline-rec { background:linear-gradient(180deg,rgba(123,216,143,.05),rgba(123,216,143,0)); border:1px solid rgba(123,216,143,.25); border-radius:8px; padding:10px 12px; margin:10px 0 14px; }
+  .inline-rec .ir-head { font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--accent-2); font-weight:600; margin-bottom:6px; }
+  .inline-rec table.rec-legs { margin:6px 0; }
+  .inline-rec .rec-summary { padding:8px; margin-top:6px; }
   /* ===== OI Flow tab ===== */
   .oi-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:end; background:var(--panel); border:1px solid var(--border); padding:10px 12px; border-radius:var(--radius); margin-bottom:12px; }
   .oi-controls label { display:flex; flex-direction:column; gap:4px; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
@@ -422,6 +428,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">Daily · BB-21 centerline · Monthly credit spread · Roll T-7</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Signal scan (3:15–3:20 PM)</div>
         <ul class="checks">
@@ -459,6 +466,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">Daily · CMF zero-line · Monthly credit spread · Roll T-8</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Signal scan (3:15–3:20 PM)</div>
         <ul class="checks">
@@ -496,6 +504,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">Daily 3:20 PM · EMA-53 daily-close cross · Monthly <b>credit</b> spread · Roll 2nd-last Wed of sold-leg month</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Signal scan (3:20 PM, act on daily close only)</div>
         <ul class="checks">
@@ -539,6 +548,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">Last Friday · 3:15 PM · Call-side 1-2-1 asymmetric · Next-month expiry</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Entry build (last Friday only)</div>
         <ul class="checks">
@@ -569,6 +579,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">Last Friday · 3:16 PM · Call-side 1-2-1 · Target +2.5% / Stop −3%</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Entry build (last Friday only)</div>
         <ul class="checks">
@@ -601,6 +612,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">Mon before weekly expiry · 3:15 PM · Call fly + Put fly (0.5% wings) · Exit Tue</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Entry build (Monday)</div>
         <ul class="checks">
@@ -631,6 +643,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">Daily 3:15 PM · BB-21 midline · LEAPS short + monthly hedge · Hedge roll 18th · LEAPS flip on signal</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Signal scan (3:15 PM, once per day)</div>
         <ul class="checks">
@@ -672,6 +685,7 @@
       </summary>
       <div class="section-body">
         <div class="strat-meta">2h VWMA-21 cross (bull or bear) · Sell quarter-end put/call + same-month hedge · Hedge roll T-4 · Position flips on signal change</div>
+        <div class="inline-rec" data-strat-rec></div>
 
         <div class="subhead">Signal scan (on 2h VWMA-21 cross)</div>
         <ul class="checks">
@@ -1390,6 +1404,8 @@
     const signals = d.signals || {};
     const portfolio = d.portfolio || {};
     const fired = Object.entries(recs).filter(([k,v]) => v && Object.keys(v).length > 0);
+    // Always refresh inline rec slots so we clear stale content too
+    renderInlineRecommendations(d);
     if (fired.length === 0){
       container.innerHTML = "";
       return;
@@ -1399,6 +1415,70 @@
       <h3>🎯 Trade Recommendations <span class="rec-count">${fired.length} actionable signal${fired.length>1?"s":""}</span></h3>
       ${cards}
     </div>`;
+  }
+
+  // Map from data-strat (HTML id) → recommendations dict key (Python side)
+  const STRAT_REC_KEY = {
+    gg: "golden_goose", panther: "panther", nk: "nidhi_kalash",
+    ot: "ocean_treasure", gg_leaps: "gg_leaps",
+    batman: "batman", nb: "no_brainer", edb: "edb",
+  };
+  function renderInlineLegs(rec){
+    if (!rec.legs || !rec.legs.length) return "";
+    return `<table class="rec-legs">
+      <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Premium</th><th>Qty</th></tr></thead>
+      <tbody>${rec.legs.map(l => `
+        <tr>
+          <td class="act-${l.action.toLowerCase()}">${l.action}</td>
+          <td>${l.strike.toLocaleString("en-IN")} ${l.option_type}</td>
+          <td>${l.tradingsymbol}</td>
+          <td>${l.premium == null ? "—" : "₹" + fmtNum(l.premium)}</td>
+          <td>${l.quantity}</td>
+        </tr>`).join("")}</tbody>
+    </table>`;
+  }
+  function renderInlineSummary(rec, portfolio){
+    const margin = rec.margin_total;
+    const cash = portfolio?.available_cash;
+    const rows = [];
+    if (rec.credit_per_unit != null){
+      rows.push(`<div class="rec-stat"><span>Net credit</span><b>₹${fmtNum(rec.credit_per_unit)}/unit · ${fmtINR(rec.credit_total)}/lot</b></div>`);
+    } else if (rec.net_premium_per_unit != null){
+      const ntot = rec.net_premium_total;
+      const debit = (rec.net_premium_per_unit || 0) < 0;
+      rows.push(`<div class="rec-stat"><span>Net ${debit ? "debit" : "premium"}</span><b>${rec.net_premium_per_unit > 0 ? "+" : ""}₹${fmtNum(rec.net_premium_per_unit)}/unit · ${fmtINR(Math.abs(ntot))} ${debit ? "paid" : "received"}</b></div>`);
+    }
+    if (rec.wing != null) rows.push(`<div class="rec-stat"><span>Wing</span><b>${rec.wing} pts · ${fmtNum(rec.wing_pct)}%</b></div>`);
+    if (rec.max_profit != null) rows.push(`<div class="rec-stat"><span>Max profit (1 lot)</span><b class="profit">${fmtINR(rec.max_profit)}</b></div>`);
+    if (rec.max_loss != null) rows.push(`<div class="rec-stat"><span>Max loss (1 lot)</span><b class="loss">−${fmtINR(rec.max_loss)}</b></div>`);
+    if (margin != null) rows.push(`<div class="rec-stat"><span>Margin (1 lot)</span><b>${fmtINR(margin)}</b></div>`);
+    if (cash != null)   rows.push(`<div class="rec-stat"><span>Available cash</span><b>${fmtINR(cash)}</b></div>`);
+    return `<div class="rec-summary">${rows.join("")}</div>`;
+  }
+  function renderInlineRecommendations(d){
+    const recs = d.recommendations || {};
+    const portfolio = d.portfolio || {};
+    document.querySelectorAll("[data-strat-rec]").forEach(slot => {
+      const card = slot.closest("details[data-strat]");
+      if (!card) return;
+      const stratHtml = card.dataset.strat;
+      const recKey = STRAT_REC_KEY[stratHtml];
+      const rec = recs[recKey];
+      if (!rec){ slot.innerHTML = ""; return; }
+      if (rec.error){
+        slot.innerHTML = `<div class="ir-head">Today's trade — error</div><div class="rec-error">${rec.error}</div>`;
+        return;
+      }
+      if (rec.note){
+        slot.innerHTML = `<div class="ir-head">Today's trade</div><div class="rec-error">${rec.note}</div>`;
+        return;
+      }
+      slot.innerHTML = `
+        <div class="ir-head">Today's trade · ${rec.structure || ""}</div>
+        <div class="rec-meta">Expiry: ${rec.expiry} · Lot size: ${rec.lot_size}</div>
+        ${renderInlineLegs(rec)}
+        ${renderInlineSummary(rec, portfolio)}`;
+    });
   }
 
   let refreshing = false;
