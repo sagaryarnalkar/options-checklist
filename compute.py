@@ -294,6 +294,72 @@ def derive_signals(blocks: dict) -> dict:
 
 # ---------- portfolio summary ----------
 
+def compute_calendar_flags(today) -> dict:
+    """IST calendar flags used by schedule-driven recommendation builders.
+    Mirrors the JS logic in index.html (computeFlags) so server-side and
+    client-side stay in agreement.
+
+    NIFTY weekly expiry = Tuesday; NIFTY monthly expiry = last Tuesday."""
+    from datetime import date as _date, timedelta as _timedelta
+
+    def _last_weekday_of_month(y, m, weekday):
+        if m == 12:
+            first_next = _date(y + 1, 1, 1)
+        else:
+            first_next = _date(y, m + 1, 1)
+        last_day = first_next - _timedelta(days=1)
+        for offset in range(7):
+            d = last_day - _timedelta(days=offset)
+            if d.weekday() == weekday:
+                return d
+        return None
+
+    weekday = today.weekday()  # Mon=0 .. Sun=6
+
+    # Days until next Tuesday (=weekly NIFTY expiry). 0 means today is Tue.
+    days_to_tue = (1 - weekday) % 7
+
+    # Monthly expiry = last Tuesday of (this month / next month if past)
+    last_tue_this = _last_weekday_of_month(today.year, today.month, 1)
+    if today > last_tue_this:
+        next_m = today.month + 1
+        next_y = today.year + (1 if next_m > 12 else 0)
+        next_m = 1 if next_m > 12 else next_m
+        next_monthly = _last_weekday_of_month(next_y, next_m, 1)
+    else:
+        next_monthly = last_tue_this
+    days_to_monthly = (next_monthly - today).days if next_monthly else None
+
+    last_friday_this = _last_weekday_of_month(today.year, today.month, 4)
+    is_last_friday = (today == last_friday_this)
+
+    # Second-last Wednesday of the sold-leg expiry month (= next_monthly's month)
+    second_last_wed = None
+    if next_monthly:
+        last_wed = _last_weekday_of_month(next_monthly.year, next_monthly.month, 2)
+        if last_wed:
+            second_last_wed = last_wed - _timedelta(days=7)
+
+    return {
+        "is_mon_before_weekly":   weekday == 0 and days_to_tue == 1,
+        "is_tuesday_expiry":      weekday == 1 and days_to_tue == 0,
+        "is_last_friday":         is_last_friday,
+        "is_18th":                today.day == 18,
+        "is_second_last_wed_of_expiry_month":
+                                  (second_last_wed is not None
+                                   and today == second_last_wed),
+        "days_to_monthly":        days_to_monthly,
+        "days_to_weekly":         days_to_tue,
+        "weekday":                weekday,
+        "today_iso":              today.isoformat(),
+        "next_monthly_iso":       next_monthly.isoformat() if next_monthly else None,
+        "is_t7":                  days_to_monthly == 7,
+        "is_t8":                  days_to_monthly == 8,
+        "is_t9":                  days_to_monthly == 9,
+        "is_t4":                  days_to_monthly == 4,
+    }
+
+
 def portfolio_summary(kite) -> dict:
     out: dict = {}
     try:
@@ -351,9 +417,10 @@ def main() -> None:
     portfolio = portfolio_summary(kite)
 
     signals = derive_signals(blocks)
+    calendar_flags = compute_calendar_flags(datetime.now(IST).date())
 
-    print("Building trade recommendations for fresh signals...")
-    recommendations = build_recommendations(kite, signals, blocks)
+    print("Building trade recommendations for fresh signals + calendar...")
+    recommendations = build_recommendations(kite, signals, blocks, calendar_flags)
     for strat, rec in recommendations.items():
         if not rec:
             continue
@@ -374,6 +441,7 @@ def main() -> None:
         "as_of": datetime.now(IST).isoformat(),
         "instruments": blocks,
         "signals": signals,
+        "calendar_flags": calendar_flags,
         "recommendations": recommendations,
         "portfolio": portfolio,
     }
