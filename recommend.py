@@ -840,18 +840,44 @@ SCHEDULE_BUILDERS = {
 }
 
 
+# Maps a signal strategy to the calendar flag that makes today a rollover day
+# for that strategy. OT and GG_LEAPS roll only the hedge, not the full short
+# leg, so they aren't included here (different builder shape needed).
+ROLLOVER_FLAG = {
+    "golden_goose": "is_t7",
+    "panther":      "is_t8",
+    "nidhi_kalash": "is_second_last_wed_of_expiry_month",
+}
+
+
+def _signal_context(strategy: str, signal: str, flags: dict) -> str:
+    """Return one of: 'fresh' (signal crossed today), 'rollover' (today is the
+    scheduled rollover day for this strategy), 'late' (signal is in a hold
+    state — the trade is still buildable but you've missed the entry day)."""
+    if "cross" in (signal or ""):
+        return "fresh"
+    rollover_flag = ROLLOVER_FLAG.get(strategy)
+    if rollover_flag and flags.get(rollover_flag):
+        return "rollover"
+    return "late"
+
+
 def build_recommendations(kite, signals: dict, blocks: dict,
                           calendar_flags: Optional[dict] = None) -> dict:
     """Build the per-strategy trade recommendations.
 
-    Signal-driven strategies (GG / Panther / NK / OT / GG_LEAPS) fire on
-    '*_cross' values in `signals`. Schedule-driven strategies (EDB /
-    Batman / No Brainer NIFTY) fire on `calendar_flags` keys:
-        is_mon_before_weekly  → edb
-        is_last_friday        → batman + no_brainer
-    """
+    Signal-driven strategies build on ANY directional signal (bull/bear),
+    with a 'context' tag explaining whether today is the fresh-entry day,
+    a scheduled rollover, or a late entry (you missed the cross day but
+    the structure is still buildable).
+
+    Schedule-driven strategies build only on their scheduled calendar day.
+    Late entry isn't offered there because the entry day is structurally
+    important (EDB depends on overnight theta; Batman / No Brainer are
+    monthly carries anchored to the last-Friday cycle)."""
     out: dict = {}
     today = datetime.now(IST).date()
+    flags = calendar_flags or {}
 
     nifty = blocks.get("nifty") or {}
     spot = nifty.get("spot")
@@ -867,26 +893,38 @@ def build_recommendations(kite, signals: dict, blocks: dict,
             instruments_cache = kite.instruments("NFO")
         return instruments_cache
 
-    # Signal-driven
+    # Signal-driven: build on any bull/bear signal, label by context
     for strategy, signal in (signals or {}).items():
-        if "cross" not in (signal or ""):
+        if not signal or signal == "unknown":
+            continue
+        if "bull" in signal:
+            direction = "bull"
+        elif "bear" in signal:
+            direction = "bear"
+        else:
             continue
         builder = BUILDERS.get(strategy)
         if builder is None:
             out[strategy] = {
                 "strategy": strategy, "signal": signal,
+                "context": _signal_context(strategy, signal, flags),
                 "note": "trade builder not yet implemented for this strategy",
             }
             continue
-        direction = "bull" if "bull" in signal else "bear"
+        context = _signal_context(strategy, signal, flags)
         try:
-            out[strategy] = builder(kite, direction, _get_instruments(), spot, vix, today)
+            result = builder(kite, direction, _get_instruments(), spot, vix, today)
+            if isinstance(result, dict):
+                result["context"] = context
+                result["direction"] = direction
+                result["signal"] = signal
+            out[strategy] = result
         except Exception as e:
-            out[strategy] = {"strategy": strategy,
+            out[strategy] = {"strategy": strategy, "context": context,
+                             "direction": direction, "signal": signal,
                              "error": f"{type(e).__name__}: {e}"}
 
-    # Schedule-driven
-    flags = calendar_flags or {}
+    # Schedule-driven: only fire on the scheduled day (no late entry).
     schedule_triggers = [
         ("is_mon_before_weekly", ["edb"]),
         ("is_last_friday",       ["batman", "no_brainer"]),
@@ -899,9 +937,12 @@ def build_recommendations(kite, signals: dict, blocks: dict,
             if builder is None:
                 continue
             try:
-                out[strategy] = builder(kite, _get_instruments(), spot, today)
+                result = builder(kite, _get_instruments(), spot, today)
+                if isinstance(result, dict):
+                    result["context"] = "scheduled"
+                out[strategy] = result
             except Exception as e:
-                out[strategy] = {"strategy": strategy,
+                out[strategy] = {"strategy": strategy, "context": "scheduled",
                                  "error": f"{type(e).__name__}: {e}"}
 
     return out
