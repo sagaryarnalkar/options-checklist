@@ -163,8 +163,7 @@
   .oi-chart-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; }
   .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
   .oi-chart { height:260px; width:100%; }
-  .oi-chart-price { height:360px; }
-  .oi-chart-hist  { height:200px; }
+  .oi-chart-merged { height:560px; }
   .oi-side { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
   .oi-side-title { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.06em; font-weight:600; margin-bottom:8px; }
   .oi-side-body { font-family:var(--mono); font-size:12px; }
@@ -762,7 +761,13 @@
           <option value="margin">Margin (est)</option>
         </select>
       </label>
-      <label>Score ≥ ₹cr
+      <label>Threshold
+        <select id="oiThrMode">
+          <option value="adaptive" selected>Adaptive (2σ)</option>
+          <option value="absolute">Absolute ₹cr</option>
+        </select>
+      </label>
+      <label>Floor ₹cr
         <input type="number" id="oiThresholdCr" value="10" min="1" step="1" style="width:70px">
       </label>
       <label>ATM ± (score)
@@ -779,12 +784,10 @@
     <div class="oi-layout">
       <div class="oi-charts">
         <div class="oi-chart-card">
-          <div class="oi-chart-title">Underlying (1-min) · score markers when ATM writing exceeds threshold</div>
-          <div id="oiPriceChart" class="oi-chart oi-chart-price"></div>
-        </div>
-        <div class="oi-chart-card">
-          <div class="oi-chart-title">ATM CE / PE writing volume (₹ crore) · green ↑ = PE writing (bullish), red ↓ = CE writing (bearish)</div>
-          <div id="oiHistChart" class="oi-chart oi-chart-hist"></div>
+          <div class="oi-chart-title">Underlying (1-min) + ATM flow (₹cr) ·
+            <span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:#1b8a3a">▮ CE buy</span> bullish ↑ ·
+            <span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span> bearish ↓</div>
+          <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
         </div>
       </div>
       <aside class="oi-side">
@@ -794,14 +797,18 @@
     </div>
 
     <p class="note" style="margin-top:16px">
-      <b>How to read.</b> <em>Upper pane</em>: 1-min candles + score 1–10 markers, sparse — only when ATM writing
-      exceeds the threshold. <span style="color:var(--accent-2)">Green ▲ below</span> the candle = PUT writing
-      dominant (bullish); <span style="color:var(--danger)">Red ▼ above</span> = CALL writing dominant (bearish).
-      <em>Lower pane</em>: per-minute writing volume in ₹crore at the ATM band — green bars (above zero) are
-      PE writing, red bars (below zero) are CE writing. You can see <em>both</em> forces in the same minute.
-      The dashed ±1σ / ±2σ lines are the day's mean ± standard deviation of writing volume —
-      bars beyond these are statistically unusual relative to today's baseline.
-      Aggregate flow only — OI change is anonymous.
+      <b>How to read.</b> One window, two sections sharing the same time axis. <em>Top ~70%</em>: 1-min candles +
+      score 1–10 markers — only when ATM writing exceeds the threshold (adaptive default = today's mean + 2σ, so
+      quiet days still surface their relative spikes). <span style="color:var(--accent-2)">Green ▲ below</span>
+      the candle = PUT writing dominant (bullish); <span style="color:var(--danger)">Red ▼ above</span> = CALL
+      writing dominant (bearish). <em>Bottom strip</em>: stacked per-minute flow at the ATM band — above zero the
+      bullish flows (<span style="color:var(--accent-2)">light green = PE writing</span>,
+      <span style="color:#1b8a3a">deep green = CE buying</span>), below zero the bearish flows
+      (<span style="color:var(--danger)">light red = CE writing</span>, <span style="color:#b3261e">deep red =
+      PE buying</span>). Writing vs buying is inferred from the price direction of the OI change: OI↑ with price↓ =
+      sellers aggressing (writing); OI↑ with price↑ = buyers aggressing (buying) — every contract has both a buyer
+      and a seller, so this is an aggressor heuristic, not a fact. Dashed ±1σ/±2σ lines = today's mean ± SD of
+      total flow per side. Aggregate flow only — OI change is anonymous.
     </p>
   </div>
 
@@ -1029,8 +1036,11 @@
   let _oiLibLoading = null;
   let _oiInited = false;
   let _oiChart = null, _oiCandleSeries = null;
-  let _oiHistChart = null, _oiPeSeries = null, _oiCeSeries = null;
-  let _oiSyncing = false;
+  // Flow strip series (overlay scale at the bottom of the same chart).
+  // Stacking trick: the TOTAL series is drawn first (taller bar), then the
+  // writing series over it — the visible top segment is the buying flow.
+  let _oiBullTotalSeries = null, _oiPeWriteSeries = null;
+  let _oiBearTotalSeries = null, _oiCeWriteSeries = null;
   let _oiRefLines = [];   // [{series, line}] — cleared and re-drawn on each render
 
   function loadOiLib(){
@@ -1064,6 +1074,7 @@
     document.getElementById("oiReload").addEventListener("click", oiReload);
     document.getElementById("oiDay").addEventListener("change", oiReload);
     document.getElementById("oiMode").addEventListener("change", oiReload);
+    document.getElementById("oiThrMode").addEventListener("change", oiReload);
     document.getElementById("oiThresholdCr").addEventListener("change", oiReload);
     document.getElementById("oiAtmBand").addEventListener("change", oiReload);
     document.getElementById("oiN").addEventListener("change", oiReload);
@@ -1084,45 +1095,39 @@
   function buildOiChart(){
     if (!window.LightweightCharts) return;
     const priceEl = document.getElementById("oiPriceChart");
-    const histEl  = document.getElementById("oiHistChart");
-    _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 360 });
-    _oiHistChart = LightweightCharts.createChart(histEl, { ...chartTheme(), width: histEl.clientWidth, height: 200 });
+    // ONE chart, two visual sections. Candles use the right price scale with
+    // margins reserving the bottom ~28%; the flow histograms live on an
+    // overlay price scale squeezed into that bottom strip. Single time scale
+    // means perfect vertical alignment by construction — no sync code needed.
+    _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 560 });
     _oiCandleSeries = _oiChart.addCandlestickSeries({
       upColor: "#7bd88f", downColor: "#ff6b6b",
       borderUpColor: "#7bd88f", borderDownColor: "#ff6b6b",
       wickUpColor: "#7bd88f", wickDownColor: "#ff6b6b",
     });
-    // Two histogram series stacked across the zero line:
-    //   PE writing → positive green bars (bullish pressure above zero)
-    //   CE writing → negative red bars   (bearish pressure below zero)
-    _oiPeSeries = _oiHistChart.addHistogramSeries({
-      color: "rgba(123,216,143,0.85)",
-      priceFormat: { type: "price", precision: 0, minMove: 1 },
+    _oiCandleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.03, bottom: 0.32 } });
+
+    // Flow strip: 4 histogram series on a shared overlay scale.
+    // Stacked rendering via paint order: totals first, writing on top.
+    //   Above zero: deep green total (PE write + CE buy), light green PE write
+    //               → visible deep-green cap = CE buying.
+    //   Below zero: deep red total (CE write + PE buy), light red CE write
+    //               → visible deep-red cap = PE buying.
+    const flowOpts = {
+      priceScaleId: "oiflow",
+      priceFormat: { type: "price", precision: 1, minMove: 0.1 },
       base: 0,
-    });
-    _oiCeSeries = _oiHistChart.addHistogramSeries({
-      color: "rgba(255,107,107,0.85)",
-      priceFormat: { type: "price", precision: 0, minMove: 1 },
-      base: 0,
-    });
-    // Sync the visible TIME range (not bar-index range) — the two series can
-    // have different bar counts (e.g. candles miss minutes where Kite returned
-    // no data; histogram skips the first minute since it has no prior to
-    // compare ΔOI against). Logical-range sync uses bar indices, so "0..50"
-    // means different times on each chart and the two panes drift apart.
-    // Time-range sync uses actual unix-second timestamps, so 14:45 above
-    // sits over 14:45 below regardless of how many bars each side has.
-    const syncFrom = (src, dst) => src.timeScale().subscribeVisibleTimeRangeChange(r => {
-      if (_oiSyncing || !r) return;
-      _oiSyncing = true;
-      try { dst.timeScale().setVisibleRange(r); } catch(e){}
-      _oiSyncing = false;
-    });
-    syncFrom(_oiChart, _oiHistChart);
-    syncFrom(_oiHistChart, _oiChart);
+      lastValueVisible: false,
+      priceLineVisible: false,
+    };
+    _oiBullTotalSeries = _oiChart.addHistogramSeries({ ...flowOpts, color: "#1b8a3a" });
+    _oiPeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: "rgba(123,216,143,0.95)" });
+    _oiBearTotalSeries = _oiChart.addHistogramSeries({ ...flowOpts, color: "#b3261e" });
+    _oiCeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: "rgba(255,107,107,0.9)" });
+    _oiChart.priceScale("oiflow").applyOptions({ scaleMargins: { top: 0.74, bottom: 0.02 } });
+
     window.addEventListener("resize", () => {
       if (_oiChart) _oiChart.applyOptions({ width: priceEl.clientWidth });
-      if (_oiHistChart) _oiHistChart.applyOptions({ width: histEl.clientWidth });
     });
   }
 
@@ -1164,6 +1169,7 @@
     const day = document.getElementById("oiDay").value;
     if (!day) return;
     const mode = document.getElementById("oiMode").value;
+    const thrMode = document.getElementById("oiThrMode").value;
     const threshold = document.getElementById("oiThresholdCr").value;
     const atmBand = document.getElementById("oiAtmBand").value;
     const n = document.getElementById("oiN").value;
@@ -1172,6 +1178,7 @@
       const qs = new URLSearchParams({
         underlying: under, date: day, mode,
         score_threshold_cr: threshold, n, atm_band: atmBand,
+        threshold_mode: thrMode,
       });
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1184,8 +1191,8 @@
 
   function clearCharts(){
     if (_oiCandleSeries) { _oiCandleSeries.setData([]); _oiCandleSeries.setMarkers([]); }
-    if (_oiPeSeries) _oiPeSeries.setData([]);
-    if (_oiCeSeries) _oiCeSeries.setData([]);
+    [_oiBullTotalSeries, _oiPeWriteSeries, _oiBearTotalSeries, _oiCeWriteSeries]
+      .forEach(s => { if (s) s.setData([]); });
     const list = document.getElementById("oiBigList");
     if (list) list.innerHTML = `<div class="note">No data yet.</div>`;
   }
@@ -1203,11 +1210,16 @@
 
     _oiCandleSeries.setData(candles);
 
-    // Lower pane: ATM writing volume per minute. PE writing positive (green
-    // above zero), CE writing negative (red below zero).
+    // Flow strip: stacked 4-flow rendering. Totals are drawn first (taller
+    // bars), writing series on top — the visible cap beyond the writing bar
+    // is the buying flow in the deeper shade.
+    //   Above zero: bullish = PE writing (light green) + CE buying (deep green cap)
+    //   Below zero: bearish = CE writing (light red) + PE buying (deep red cap)
     const histogram = d.histogram || [];
-    _oiPeSeries.setData(histogram.map(h => ({ time: h.time, value: h.put_writing_cr })));
-    _oiCeSeries.setData(histogram.map(h => ({ time: h.time, value: -h.call_writing_cr })));
+    _oiBullTotalSeries.setData(histogram.map(h => ({ time: h.time, value: h.bullish_cr })));
+    _oiPeWriteSeries.setData(histogram.map(h => ({ time: h.time, value: h.put_writing_cr })));
+    _oiBearTotalSeries.setData(histogram.map(h => ({ time: h.time, value: -h.bearish_cr })));
+    _oiCeWriteSeries.setData(histogram.map(h => ({ time: h.time, value: -h.call_writing_cr })));
 
     // Clear any previously drawn 1σ / 2σ reference lines, then draw fresh.
     _oiRefLines.forEach(rl => { try { rl.series.removePriceLine(rl.line); } catch(e){} });
@@ -1215,18 +1227,18 @@
     const drawRefLine = (series, price, color, title) => {
       const line = series.createPriceLine({
         price, color, lineStyle: LightweightCharts.LineStyle.Dashed,
-        lineWidth: 1, axisLabelVisible: true, title,
+        lineWidth: 1, axisLabelVisible: false, title,
       });
       _oiRefLines.push({ series, line });
     };
-    if (d.pe_stats) {
-      drawRefLine(_oiPeSeries, d.pe_stats.p1sd, "rgba(123,216,143,0.45)", "+1σ");
-      drawRefLine(_oiPeSeries, d.pe_stats.p2sd, "rgba(123,216,143,0.75)", "+2σ");
+    if (d.bull_stats) {
+      drawRefLine(_oiBullTotalSeries, d.bull_stats.p1sd, "rgba(123,216,143,0.45)", "+1σ");
+      drawRefLine(_oiBullTotalSeries, d.bull_stats.p2sd, "rgba(123,216,143,0.75)", "+2σ");
     }
-    if (d.ce_stats) {
-      // CE writing rendered as negative; draw bands as negative too.
-      drawRefLine(_oiCeSeries, -d.ce_stats.p1sd, "rgba(255,107,107,0.45)", "-1σ");
-      drawRefLine(_oiCeSeries, -d.ce_stats.p2sd, "rgba(255,107,107,0.75)", "-2σ");
+    if (d.bear_stats) {
+      // Bearish flows rendered as negative; draw bands as negative too.
+      drawRefLine(_oiBearTotalSeries, -d.bear_stats.p1sd, "rgba(255,107,107,0.45)", "-1σ");
+      drawRefLine(_oiBearTotalSeries, -d.bear_stats.p2sd, "rgba(255,107,107,0.75)", "-2σ");
     }
 
     // Score markers: one per minute, only when above threshold. Score 1-10
@@ -1246,7 +1258,7 @@
     // Right-hand BIG-prints list
     const list = document.getElementById("oiBigList");
     if (top10.length === 0){
-      list.innerHTML = `<div class="note">No prints ≥ ₹${d.score_threshold_cr}cr today.</div>`;
+      list.innerHTML = `<div class="note">No prints ≥ ₹${(d.effective_threshold_cr ?? d.score_threshold_cr)}cr today.</div>`;
     } else {
       list.innerHTML = top10.map(b => {
         // b.time is IST-shifted (see oi_flow._ts_to_unix). Undo the shift so
@@ -1260,24 +1272,15 @@
       }).join("");
     }
 
-    // Status: minutes / strikes / marked / max-pressure / OHLC flag
+    // Status: minutes / strikes / marked / threshold actually in force / OHLC flag
     const s = d.summary || {};
     const ohlcLabel = s.has_ohlc ? "OHLC" : "spot fallback";
     const peakLabel = s.max_pressure_cr ? `peak ₹${s.max_pressure_cr.toFixed(0)}cr` : "no scored minutes";
-    setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints ≥ ₹${d.score_threshold_cr}cr · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
-    // Fit candles to their data range, then mirror the resulting time window
-    // onto the histogram pane so the two charts START aligned. Future
-    // pan/zoom is handled by the subscribeVisibleTimeRangeChange sync.
+    const thrLabel = d.threshold_mode === "adaptive"
+      ? `₹${(d.effective_threshold_cr ?? 0).toFixed(1)}cr (adaptive 2σ)`
+      : `₹${d.score_threshold_cr}cr`;
+    setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints ≥ ${thrLabel} · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
     _oiChart.timeScale().fitContent();
-    // Defer to let fitContent settle, then sync.
-    requestAnimationFrame(() => {
-      const range = _oiChart.timeScale().getVisibleRange();
-      if (range && _oiHistChart) {
-        _oiSyncing = true;
-        try { _oiHistChart.timeScale().setVisibleRange(range); } catch(e){}
-        _oiSyncing = false;
-      }
-    });
   }
 
   // ---------- live data (data.json from compute.py) ----------

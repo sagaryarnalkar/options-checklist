@@ -150,9 +150,10 @@ async def oi_aggregate(
     mode: str = "premium",      # premium matches the reference HFT Algo
                                  # Scanner scale (peak ~10-30 cr/min on NIFTY
                                  # vs ~hundreds-of-cr if we used notional).
-    score_threshold_cr: float = 10.0,  # tuned for premium-mode realistic peaks
+    score_threshold_cr: float = 10.0,  # absolute floor; see threshold_mode
     n: int = 10,
     atm_band: int = 2,
+    threshold_mode: str = "adaptive",  # adaptive (mean+2σ of day) | absolute
 ):
     """Return minute-aggregates + score markers + BIG-print list."""
     underlying = underlying.upper()
@@ -160,6 +161,8 @@ async def oi_aggregate(
         raise HTTPException(status_code=400, detail=f"underlying must be one of {SUPPORTED_UNDERLYINGS}")
     if mode not in ("premium", "notional", "margin"):
         raise HTTPException(status_code=400, detail="mode must be premium|notional|margin")
+    if threshold_mode not in ("adaptive", "absolute"):
+        raise HTTPException(status_code=400, detail="threshold_mode must be adaptive|absolute")
     try:
         thr = float(score_threshold_cr)
         n_i = int(n)
@@ -178,11 +181,13 @@ async def oi_aggregate(
                 return JSONResponse(oi_flow.aggregate_day(
                     conn, underlying=underlying, date="",
                     mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
+                    threshold_mode=threshold_mode,
                 ))
             date = days[0]
         result = oi_flow.aggregate_day(
             conn, underlying=underlying, date=date,
             mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
+            threshold_mode=threshold_mode,
         )
     return JSONResponse(result)
 
