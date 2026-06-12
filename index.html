@@ -1515,28 +1515,32 @@
   }
 
   let refreshing = false;
-  async function triggerRefresh(){
+  async function triggerRefresh(opts){
+    const silent = !!(opts && opts.silent);
     if (refreshing) return;
     refreshing = true;
     const btn = document.getElementById("liveRefresh");
     const origText = btn ? btn.textContent : null;
-    if (btn) { btn.disabled = true; btn.textContent = "Refreshing… (~30s)"; }
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = silent ? "Auto-refreshing…" : "Refreshing… (~30s)";
+    }
     try {
       const r = await fetch("/refresh", { method: "POST", cache: "no-store" });
       if (r.status === 401){
-        // Not logged in — bounce to /login
+        // Not logged in — bounce to /login (auto-refresh and manual both)
         window.location.href = "/login";
         return;
       }
       if (!r.ok){
         const txt = await r.text();
-        alert("Refresh failed (HTTP " + r.status + "):\n" + txt.slice(0, 400));
+        if (!silent) alert("Refresh failed (HTTP " + r.status + "):\n" + txt.slice(0, 400));
         return;
       }
       // Successful refresh: reload data.json
-      await loadSignals();
+      await loadSignals({ skipAutoRefresh: true });
     } catch (e) {
-      alert("Refresh error: " + e.message);
+      if (!silent) alert("Refresh error: " + e.message);
     } finally {
       refreshing = false;
       if (btn) { btn.disabled = false; btn.textContent = origText || "Refresh"; }
@@ -1562,7 +1566,23 @@
       btn._refreshBound = true;
     }
   }
-  async function loadSignals(){
+  // Auto-refresh runs at most once per page load. The flag survives across
+  // the success path (set before kicking refresh) so a slow Kite call can't
+  // trigger a second auto-refresh while the first is in flight.
+  let _autoRefreshAttempted = false;
+  const STALE_HOURS = 6;
+  function maybeAutoRefresh(d){
+    if (_autoRefreshAttempted || refreshing) return;
+    const asof = d && d.as_of ? new Date(d.as_of) : null;
+    if (!asof || isNaN(asof.getTime())) return;
+    const ageHours = (Date.now() - asof.getTime()) / 3600000;
+    if (ageHours < STALE_HOURS) return;
+    _autoRefreshAttempted = true;
+    console.log(`Auto-refresh: data is ${ageHours.toFixed(1)}h old (threshold ${STALE_HOURS}h)`);
+    triggerRefresh({ silent: true });
+  }
+  async function loadSignals(opts){
+    const skipAutoRefresh = !!(opts && opts.skipAutoRefresh);
     ensureLiveCardSkeleton();
     try {
       const r = await fetch("data.json?_=" + Date.now(), { cache: "no-store" });
@@ -1571,6 +1591,7 @@
       renderLiveData(d);
       decorateStrategyCards(d.signals || {});
       renderRecommendations(d);
+      if (!skipAutoRefresh) maybeAutoRefresh(d);
     } catch (e) {
       // Keep header + Refresh button visible; show stale message inside the grid slot.
       document.getElementById("liveSpots").innerHTML = "";
