@@ -1112,7 +1112,7 @@
   // writing series over it — the visible top segment is the buying flow.
   let _oiBullTotalSeries = null, _oiPeWriteSeries = null;
   let _oiBearTotalSeries = null, _oiCeWriteSeries = null;
-  let _oiRegimeSeries = null;  // full-height background shading (regime)
+  let _oiRegimeBullArea = null, _oiRegimeBearArea = null;  // background shading
   let _oiRefLines = [];   // [{series, line}] — cleared and re-drawn on each render
 
   function loadOiLib(){
@@ -1174,14 +1174,25 @@
     // means perfect vertical alignment by construction — no sync code needed.
     _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 560 });
     // Regime shading — added FIRST so it renders behind every other series.
-    // Constant value-1 bars on a hidden full-height scale; per-bar colour
-    // (faint green/red) shades the whole column by regime side.
-    _oiRegimeSeries = _oiChart.addHistogramSeries({
+    // Two AREA series (value 1 inside a regime, 0 outside) on a hidden
+    // full-height scale. Area fills are continuous, so a regime renders as
+    // one solid block instead of per-minute histogram columns whose gaps
+    // looked like vertical stripes.
+    const regimeOpts = {
       priceScaleId: "regime",
-      base: 0,
+      lineColor: "rgba(0,0,0,0)",
+      lineWidth: 1,
       lastValueVisible: false,
       priceLineVisible: false,
-      priceFormat: { type: "volume" },
+      crosshairMarkerVisible: false,
+    };
+    _oiRegimeBullArea = _oiChart.addAreaSeries({
+      ...regimeOpts,
+      topColor: "rgba(123,216,143,0.09)", bottomColor: "rgba(123,216,143,0.09)",
+    });
+    _oiRegimeBearArea = _oiChart.addAreaSeries({
+      ...regimeOpts,
+      topColor: "rgba(255,107,107,0.09)", bottomColor: "rgba(255,107,107,0.09)",
     });
     _oiChart.priceScale("regime").applyOptions({ scaleMargins: { top: 0, bottom: 0 } });
     _oiCandleSeries = _oiChart.addCandlestickSeries({
@@ -1276,7 +1287,8 @@
 
   function clearCharts(){
     if (_oiCandleSeries) { _oiCandleSeries.setData([]); _oiCandleSeries.setMarkers([]); }
-    [_oiBullTotalSeries, _oiPeWriteSeries, _oiBearTotalSeries, _oiCeWriteSeries, _oiRegimeSeries]
+    [_oiBullTotalSeries, _oiPeWriteSeries, _oiBearTotalSeries, _oiCeWriteSeries,
+     _oiRegimeBullArea, _oiRegimeBearArea]
       .forEach(s => { if (s) s.setData([]); });
     const list = document.getElementById("oiBigList");
     if (list) list.innerHTML = `<div class="note">No data yet.</div>`;
@@ -1309,11 +1321,16 @@
     // is the buying flow in the deeper shade.
     //   Above zero: bullish = PE writing (light green) + CE buying (deep green cap)
     //   Below zero: bearish = CE writing (light red) + PE buying (deep red cap)
+    // Only SIGNIFICANT minutes are drawn (dominant flow ≥ 50% of that
+    // minute's threshold) — the reference indicator's pane is empty most of
+    // the time, and that sparseness is what makes events readable. The full
+    // series still feeds the stats/fund-flow/regime on the backend.
     const histogram = d.histogram || [];
-    _oiBullTotalSeries.setData(histogram.map(h => ({ time: h.time, value: h.bullish_cr })));
-    _oiPeWriteSeries.setData(histogram.map(h => ({ time: h.time, value: h.put_writing_cr })));
-    _oiBearTotalSeries.setData(histogram.map(h => ({ time: h.time, value: -h.bearish_cr })));
-    _oiCeWriteSeries.setData(histogram.map(h => ({ time: h.time, value: -h.call_writing_cr })));
+    const sigHist = histogram.filter(h => h.significant !== false);
+    _oiBullTotalSeries.setData(sigHist.map(h => ({ time: h.time, value: h.bullish_cr })));
+    _oiPeWriteSeries.setData(sigHist.map(h => ({ time: h.time, value: h.put_writing_cr })));
+    _oiBearTotalSeries.setData(sigHist.map(h => ({ time: h.time, value: -h.bearish_cr })));
+    _oiCeWriteSeries.setData(sigHist.map(h => ({ time: h.time, value: -h.call_writing_cr })));
 
     // Clear any previously drawn 1σ / 2σ reference lines, then draw fresh.
     _oiRefLines.forEach(rl => { try { rl.series.removePriceLine(rl.line); } catch(e){} });
@@ -1335,18 +1352,12 @@
       drawRefLine(_oiBearTotalSeries, -d.bear_stats.p2sd, "rgba(255,107,107,0.75)", "-2σ");
     }
 
-    // Regime background shading — full-height columns coloured by the
-    // rolling-30-min net flow side. Neutral minutes (dead-zone: net < 15% of
-    // gross, or warmup) get a fully transparent bar — keeps the series
-    // continuous while rendering as clean unshaded space, so shading reads
-    // as solid zones instead of alternating noise stripes.
+    // Regime background shading — continuous area fills (1 inside a regime,
+    // 0 outside). Neutral minutes (dead-zone / warmup) sit at 0 on both
+    // series, rendering as clean unshaded space.
     const regime = d.regime || [];
-    _oiRegimeSeries.setData(regime.map(r => ({
-      time: r.time, value: 1,
-      color: r.side === "bull" ? "rgba(123,216,143,0.10)"
-           : r.side === "bear" ? "rgba(255,107,107,0.10)"
-           : "rgba(0,0,0,0)",
-    })));
+    _oiRegimeBullArea.setData(regime.map(r => ({ time: r.time, value: r.side === "bull" ? 1 : 0 })));
+    _oiRegimeBearArea.setData(regime.map(r => ({ time: r.time, value: r.side === "bear" ? 1 : 0 })));
 
     // Score markers: one per minute, only when above threshold. Side is
     // 'bullish'/'bearish' in combined basis, 'put_writing'/'call_writing' in

@@ -320,6 +320,13 @@ def aggregate_day(
     # ₹ crore. The UI stacks bullish flows above zero (PE writing light green
     # + CE buying deep green) and bearish flows below zero (CE writing light
     # red + PE buying deep red), matching the reference indicator's language.
+    #
+    # `significant` marks minutes whose dominant (score-basis) flow reaches at
+    # least half of that minute's threshold. The UI draws flow bars ONLY for
+    # significant minutes — the reference indicator's pane is empty most of
+    # the time, and that sparseness is what makes its events readable. The
+    # full series is still emitted (stats, fund-flow, regime all use it).
+    FLOW_RENDER_FRACTION = 0.5
     histogram = [
         {
             "time": _ts_to_unix(ts),
@@ -329,6 +336,7 @@ def aggregate_day(
             "call_buying_cr": p["call_buy"] / CRORE,
             "bullish_cr": (p["put"] + p["call_buy"]) / CRORE,
             "bearish_cr": (p["call"] + p["put_buy"]) / CRORE,
+            "significant": dom_by_minute[ts][0] >= FLOW_RENDER_FRACTION * thr_by_minute[ts],
         }
         for ts, p in sorted_pressure
     ]
