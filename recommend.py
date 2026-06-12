@@ -401,10 +401,21 @@ def _find_naked_short_with_hedge(
     short_expiry, hedge_expiry,
     short_premium_band: tuple, hedge_premium_band: tuple,
     max_hedge_distance: int, strike_multiples: list,
+    spot: float = None,
 ) -> dict:
     """
     Pick the OTM short strike whose premium is closest to mid-band; pair with
     a hedge whose premium is closest to mid-band AND within `max_hedge_distance`.
+
+    Nearest-fit fallback: when NO strike quotes inside a premium band (common
+    in low-VIX regimes — e.g. every OTM quarter-end put under ₹200), the band
+    is relaxed to "closest premium to the band's midpoint" and the result is
+    flagged so the UI can warn the user that a saved rule was bent:
+      - short leg fallback additionally requires the strike to be OTM
+        (the band normally guarantees that implicitly; without the band an
+        ITM strike could win on premium-distance alone)
+      - hedge fallback keeps the max-distance constraint HARD — that's the
+        protective constraint — and relaxes only the premium band
     """
     opt_type = "PE" if direction == "bull" else "CE"
     short_chain = _option_chain(instruments, name, short_expiry, opt_type)
@@ -429,6 +440,11 @@ def _find_naked_short_with_hedge(
     def _ltp(ts):
         return ltps.get(f"NFO:{ts}", {}).get("last_price")
 
+    def _is_otm(strike):
+        if spot is None:
+            return True  # can't verify; preserve old behaviour
+        return strike < spot if opt_type == "PE" else strike > spot
+
     sp_min, sp_max = short_premium_band
     hp_min, hp_max = hedge_premium_band
     sp_target = (sp_min + sp_max) / 2
@@ -445,34 +461,53 @@ def _find_naked_short_with_hedge(
         short_options.append((strike, ins, prem))
     short_options.sort(key=lambda x: abs(x[2] - sp_target))
 
+    short_band_relaxed = False
     if not short_options:
-        return {"best": None, "alternatives": [], "tried": [],
-                "error": f"no short strike with premium in {short_premium_band}"}
+        # Nearest-fit fallback: any OTM strike with a live quote, ranked by
+        # premium distance to the band midpoint. Cap at 5 candidates.
+        fallback = []
+        for strike, ins in short_chain.items():
+            prem = _ltp(ins["tradingsymbol"])
+            if prem is None or prem <= 0 or not _is_otm(strike):
+                continue
+            fallback.append((strike, ins, prem))
+        fallback.sort(key=lambda x: abs(x[2] - sp_target))
+        short_options = fallback[:5]
+        short_band_relaxed = True
+        if not short_options:
+            return {"best": None, "alternatives": [], "tried": [],
+                    "error": f"no OTM short strike with any live quote (band {short_premium_band} also empty)"}
 
     # Candidate hedge strikes (in band) — collected once
     hedge_options = []
+    hedge_all = []
     for strike, ins in hedge_chain.items():
         prem = _ltp(ins["tradingsymbol"])
-        if prem is None:
+        if prem is None or prem <= 0:
             continue
-        if not (hp_min <= prem <= hp_max):
-            continue
-        hedge_options.append((strike, ins, prem))
+        hedge_all.append((strike, ins, prem))
+        if hp_min <= prem <= hp_max:
+            hedge_options.append((strike, ins, prem))
+
+    def _best_hedge_for(sstrike, pool):
+        best, best_score = None, math.inf
+        for hstrike, hins, hprem in pool:
+            if abs(hstrike - sstrike) > max_hedge_distance:
+                continue
+            score = abs(hprem - hp_target)
+            if score < best_score:
+                best_score = score
+                best = (hstrike, hins, hprem)
+        return best
 
     candidates = []
     for sstrike, sins, sprem in short_options:
-        # Find best hedge within distance
-        best_hedge = None
-        best_dist = math.inf
-        for hstrike, hins, hprem in hedge_options:
-            dist = abs(hstrike - sstrike)
-            if dist > max_hedge_distance:
-                continue
-            # Score by closeness to target premium
-            score = abs(hprem - hp_target)
-            if score < best_dist:
-                best_dist = score
-                best_hedge = (hstrike, hins, hprem)
+        hedge_band_relaxed = False
+        best_hedge = _best_hedge_for(sstrike, hedge_options)
+        if not best_hedge:
+            # Relax the hedge premium band; distance stays hard.
+            best_hedge = _best_hedge_for(sstrike, hedge_all)
+            hedge_band_relaxed = best_hedge is not None
         if not best_hedge:
             continue
         hstrike, hins, hprem = best_hedge
@@ -488,15 +523,24 @@ def _find_naked_short_with_hedge(
             "short_tradingsymbol": sins["tradingsymbol"],
             "hedge_tradingsymbol": hins["tradingsymbol"],
             "lot_size": int(sins.get("lot_size") or 75),
+            "short_band_relaxed": short_band_relaxed,
+            "hedge_band_relaxed": hedge_band_relaxed,
         })
 
     if not candidates:
         return {"best": None, "alternatives": [], "tried": [],
-                "error": "no hedge strike found within distance + premium band"}
+                "error": f"no hedge strike within {max_hedge_distance} pts of any short candidate"}
 
-    # Best = highest net credit (we still want premium for income)
-    candidates.sort(key=lambda c: -c["net_credit"])
-    return {"best": candidates[0], "alternatives": candidates[1:5], "tried": []}
+    # Best = in-band hedge preferred, then highest net credit
+    candidates.sort(key=lambda c: (c["hedge_band_relaxed"], -c["net_credit"]))
+    return {
+        "best": candidates[0],
+        "alternatives": candidates[1:5],
+        "tried": [],
+        "short_premium_band": list(short_premium_band),
+        "hedge_premium_band": list(hedge_premium_band),
+        "max_hedge_distance": max_hedge_distance,
+    }
 
 
 def _format_naked_with_hedge(strategy: str, structure_name: str, direction: str,
@@ -531,6 +575,31 @@ def _format_naked_with_hedge(strategy: str, structure_name: str, direction: str,
         margin_total = float(margin.get("final", {}).get("total"))
     except Exception:
         pass
+
+    # Human-readable warnings when a saved rule was bent to produce this trade.
+    # The UI renders these prominently — the user must consciously accept the
+    # deviation before trading.
+    relaxations = []
+    if best.get("short_band_relaxed"):
+        lo, hi = result.get("short_premium_band") or [None, None]
+        band_txt = f"₹{lo:.0f}–₹{hi:.0f}" if lo is not None else "the saved band"
+        relaxations.append(
+            f"Short-leg premium rule RELAXED: the strategy wants the sold option "
+            f"to quote {band_txt}, but no {best['short_expiry']} strike does today "
+            f"(low-VIX premiums). Closest OTM fit chosen: "
+            f"{best['short_tradingsymbol']} @ ₹{best['short_premium']}. "
+            f"Income and risk will differ from the strategy's reference numbers."
+        )
+    if best.get("hedge_band_relaxed"):
+        lo, hi = result.get("hedge_premium_band") or [None, None]
+        band_txt = f"₹{lo:.0f}–₹{hi:.0f}" if lo is not None else "the saved band"
+        relaxations.append(
+            f"Hedge premium rule RELAXED: no {best['hedge_expiry']} hedge within "
+            f"{result.get('max_hedge_distance')} pts quotes {band_txt}. Closest fit: "
+            f"{best['hedge_tradingsymbol']} @ ₹{best['hedge_premium']} "
+            f"(distance constraint was NOT relaxed)."
+        )
+
     return {
         "strategy": strategy,
         "direction": direction,
@@ -546,6 +615,7 @@ def _format_naked_with_hedge(strategy: str, structure_name: str, direction: str,
         "max_loss": None,    # capped by hedge but only same-month
         "margin_total": margin_total,
         "margin_raw": margin,
+        "relaxations": relaxations,
         "alternatives": [
             {
                 "short_strike": c["short_strike"],
@@ -587,6 +657,7 @@ def _build_ocean_treasure(kite, direction, instruments, spot, vix, today):
         hedge_premium_band=(20.0, 50.0),
         max_hedge_distance=700,
         strike_multiples=[500, 1000],
+        spot=spot,
     )
     structure = (
         "Bull: Sell quarter-end PUT + buy near-month PUT hedge"
@@ -623,6 +694,7 @@ def _build_gg_leaps(kite, direction, instruments, spot, vix, today):
         hedge_premium_band=(20.0, 50.0),
         max_hedge_distance=700,
         strike_multiples=[500, 1000],
+        spot=spot,
     )
     structure = (
         "Bull: Sell PUT LEAPS + buy near-month PUT hedge"

@@ -174,6 +174,10 @@
   .rec-alts summary { cursor:pointer; color:var(--accent); padding:4px 0; }
   .rec-alts ul { margin:6px 0 0; padding-left:20px; font-family:var(--mono); }
   .rec-error { background:rgba(255,107,107,.1); border:1px solid rgba(255,107,107,.3); color:var(--danger); padding:10px 12px; border-radius:6px; font-size:13px; }
+  .rec-relaxed { background:rgba(255,180,84,.1); border:1px solid rgba(255,180,84,.35); color:var(--warn); padding:10px 12px; border-radius:6px; font-size:13px; margin:8px 0; line-height:1.5; }
+  .rec-relaxed ul { margin:6px 0 0; padding-left:18px; }
+  .rec-relaxed li { margin-bottom:4px; }
+  .rec-relaxed li:last-child { margin-bottom:0; }
   /* Inline strategy-card recommendation block (live trade for that strategy) */
   .inline-rec:empty { display:none; }
   .inline-rec { background:linear-gradient(180deg,rgba(123,216,143,.05),rgba(123,216,143,0)); border:1px solid rgba(123,216,143,.25); border-radius:8px; padding:10px 12px; margin:10px 0 14px; }
@@ -1398,6 +1402,11 @@
     nidhi_kalash:"Nidhi Kalash", golden_goose:"Golden Goose", panther:"Panther",
     ocean_treasure:"Ocean Treasure", gg_leaps:"Golden Goose LEAPS",
   };
+  function renderRelaxations(rec){
+    if (!rec.relaxations || !rec.relaxations.length) return "";
+    return `<div class="rec-relaxed"><b>⚠ Saved rule relaxed — review before trading.</b>
+      <ul>${rec.relaxations.map(r => `<li>${r}</li>`).join("")}</ul></div>`;
+  }
   function renderRecCard(strategy, rec, portfolio, signal){
     if (!rec) return "";
     if (rec.error){
@@ -1427,6 +1436,7 @@
     return `<div class="rec-strategy">
       <h4>${STRAT_LABELS[strategy] || strategy} · ${rec.structure} <span class="sig ${sigClass(signal)}">${sigText(signal)}</span></h4>
       <div class="rec-meta">Expiry: ${rec.expiry} · Lot size: ${rec.lot_size}</div>
+      ${renderRelaxations(rec)}
       <table class="rec-legs">
         <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Premium</th><th>Qty</th></tr></thead>
         <tbody>${legsHtml}</tbody>
@@ -1548,6 +1558,7 @@
 
       slot.innerHTML = headLine + lateBanner + `
         <div class="rec-meta" style="margin-top:6px">${rec.structure || ""} · Expiry ${rec.expiry} · Lot size ${rec.lot_size}</div>
+        ${renderRelaxations(rec)}
         ${renderInlineLegs(rec)}
         ${renderInlineSummary(rec, portfolio)}`;
     });
