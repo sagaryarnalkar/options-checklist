@@ -302,12 +302,14 @@ def _refresh_marker_outcomes(conn, underlying: str, date_str: str) -> int:
         score_threshold_cr=TRACK_THRESHOLD_CR,
         n=10,
         atm_band=TRACK_ATM_BAND,
-        # Keep tracking on a FIXED absolute threshold even though the UI
-        # defaults to adaptive. An adaptive threshold changes through the day
-        # as the mean/σ evolve, which would make the tracked marker set
-        # unstable under the (ts, …, threshold_cr) UNIQUE key and pollute the
-        # forward-return analysis with a moving definition of "marker".
+        # Keep tracking on a FIXED absolute threshold + writing-only basis,
+        # even though the UI defaults to adaptive + combined. An adaptive
+        # threshold changes through the day as the mean/σ evolve, and a basis
+        # change renames marker sides — either would make the tracked marker
+        # set unstable under the (ts, …, threshold_cr) UNIQUE key and pollute
+        # the forward-return analysis with a moving definition of "marker".
         threshold_mode="absolute",
+        score_basis="writing",
     )
     markers = result.get("score_markers") or []
     candles = result.get("candles") or []

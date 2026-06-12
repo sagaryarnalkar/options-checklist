@@ -32,18 +32,21 @@ AMOUNTS, FIXED IN THIS REVISION:
 
 SCORE (per minute):
     atm_strikes = ATM ± atm_band
-    put_writing_rs  = Σ PE-writing amounts at atm_strikes
-    call_writing_rs = Σ CE-writing amounts at atm_strikes
-    dominant = max(put_writing_rs, call_writing_rs)
-    if dominant < threshold_rs: no marker
-    else: score = clamp(1 + 9 * (dominant - threshold) / (max_for_10 - threshold), 1, 10)
-    max_for_10 is the day's max above threshold (self-calibrating).
+    basis 'combined' (default): bullish = PE writing + CE buying;
+                                bearish = CE writing + PE buying
+    basis 'writing':            bullish = PE writing; bearish = CE writing
+    dominant = max(bullish, bearish)
+    threshold: absolute (fixed ₹cr) or adaptive (trailing-60-min mean + 2σ,
+               current minute excluded — live-equivalent, no lookahead)
+    if dominant < threshold: no marker
+    else: score = clamp(1 + 9 * (dominant/threshold − 1) / 3, 1, 10)
+          (ratio scaling: 1× threshold → 1, ≥4× threshold → 10)
 """
 from __future__ import annotations
 
 import sqlite3
 import statistics
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime
 from typing import Optional
 
@@ -70,17 +73,33 @@ def aggregate_day(
     margin_pct: float = DEFAULT_MARGIN_PCT,
     lot_size: Optional[int] = None,
     threshold_mode: str = "absolute",
+    score_basis: str = "combined",
 ) -> dict:
     """threshold_mode:
         'absolute' — score/print threshold is score_threshold_cr, fixed.
-        'adaptive' — threshold = mean + 2σ of the day's per-minute dominant
-                     ATM writing (floored at 0.5cr). A quiet day where the
-                     biggest minute is ₹6cr still scores its relative spikes;
-                     a wild day self-raises so only true outliers mark."""
+        'adaptive' — per-minute threshold = mean + 2σ of the TRAILING 60
+                     anchored minutes' dominant flow (floored at 0.5cr; falls
+                     back to score_threshold_cr during the first few minutes).
+                     Trailing-only stats mean the score you'd see live at
+                     12:41 equals the score replay shows — no lookahead.
+
+    score_basis:
+        'combined' — bullish = PE writing + CE buying; bearish = CE writing +
+                     PE buying. Marker side is 'bullish'/'bearish'. This is
+                     the basis the reference HFT Algo Scanner appears to use
+                     (its callouts pair put-writing with call-buying).
+        'writing'  — original spec: only writing flows drive the score; side
+                     stays 'put_writing'/'call_writing' (forward-return
+                     tracking uses this for series stability).
+
+    Score scaling is ratio-based, not day-max-based (which would also be
+    lookahead): score 1 at the threshold, score 10 at ≥4× the threshold."""
     if mode not in ("premium", "notional", "margin"):
         raise ValueError(f"unknown mode: {mode}")
     if threshold_mode not in ("absolute", "adaptive"):
         raise ValueError(f"unknown threshold_mode: {threshold_mode}")
+    if score_basis not in ("writing", "combined"):
+        raise ValueError(f"unknown score_basis: {score_basis}")
     if lot_size is None:
         lot_size = KNOWN_LOT_SIZES.get(underlying, 75)
 
@@ -112,10 +131,12 @@ def aggregate_day(
         "underlying": underlying, "date": date, "mode": mode,
         "score_threshold_cr": score_threshold_cr,
         "threshold_mode": threshold_mode,
+        "score_basis": score_basis,
         "effective_threshold_cr": score_threshold_cr,
         "n": n, "atm_band": atm_band,
         "lot_size": lot_size, "strike_step": None,
         "candles": [], "score_markers": [], "histogram": [],
+        "regime": [], "fund_flow": None,
         "bull_stats": None, "bear_stats": None, "big_prints_top10": [],
         "summary": {"total_minutes": 0, "n_unique_strikes": 0,
                     "n_score_markers": 0, "n_big_prints": 0,
@@ -246,27 +267,53 @@ def aggregate_day(
                 "call_buy": call_buying_atm,
             }
 
-    # Effective score threshold. Adaptive = mean + 2σ of the day's per-minute
-    # dominant WRITING pressure (score stays writer-driven per the original
-    # spec; buying flows are display-only context).
-    dom_values = [max(p["put"], p["call"]) for p in pressure_by_minute.values()]
-    effective_threshold_rs = threshold_rs
-    if threshold_mode == "adaptive" and len(dom_values) >= 5:
-        try:
-            m = statistics.mean(dom_values)
-            sd = statistics.stdev(dom_values)
-            effective_threshold_rs = max(m + 2 * sd, 0.5 * CRORE)
-        except statistics.StatisticsError:
-            pass
+    sorted_pressure = sorted(pressure_by_minute.items())
 
-    # Post-filter prints by the effective threshold (they were collected
-    # above a low floor so adaptive thresholds below the absolute input
-    # still have candidates to keep).
-    big_prints = [b for b in big_prints if b["amount_rs"] >= effective_threshold_rs]
+    def _basis_flows(p):
+        """(bullish_rs, bearish_rs) under the selected score basis."""
+        if score_basis == "combined":
+            return p["put"] + p["call_buy"], p["call"] + p["put_buy"]
+        return p["put"], p["call"]
 
-    # Day-max above threshold → max_for_10 (self-calibrating)
-    above = [v for v in dom_values if v >= effective_threshold_rs]
-    max_for_10 = max(above) if above else effective_threshold_rs
+    # Rolling adaptive threshold — stats over the TRAILING window only, and
+    # the current minute is appended AFTER its threshold is computed, so a
+    # spike never raises the bar it is judged against. The first few minutes
+    # fall back to the absolute floor. This is intentionally live-equivalent:
+    # replaying a day gives the same thresholds the live page would have had.
+    ROLL_WINDOW = 60
+    MIN_SAMPLES = 5
+    RATIO_FOR_10 = 4.0  # dominant ≥ 4× threshold → score 10
+    window = deque(maxlen=ROLL_WINDOW)
+    thr_by_minute = {}
+    dom_by_minute = {}
+    for ts, p in sorted_pressure:
+        bull_rs, bear_rs = _basis_flows(p)
+        dom = max(bull_rs, bear_rs)
+        dom_by_minute[ts] = (dom, bull_rs, bear_rs)
+        if threshold_mode == "adaptive" and len(window) >= MIN_SAMPLES:
+            try:
+                m = statistics.mean(window)
+                sd = statistics.stdev(window)
+                thr = max(m + 2 * sd, 0.5 * CRORE)
+            except statistics.StatisticsError:
+                thr = threshold_rs
+        else:
+            thr = threshold_rs
+        thr_by_minute[ts] = thr
+        window.append(dom)
+
+    effective_threshold_rs = (
+        thr_by_minute[sorted_pressure[-1][0]] if sorted_pressure else threshold_rs
+    )
+
+    # Post-filter prints by their own minute's threshold. Prints carry the
+    # OBSERVATION minute; pressure/thresholds are keyed by the ANCHOR minute
+    # (one minute earlier), so look up at time-60s with the floor as fallback.
+    thr_by_unix = {_ts_to_unix(ts): thr for ts, thr in thr_by_minute.items()}
+    big_prints = [
+        b for b in big_prints
+        if b["amount_rs"] >= thr_by_unix.get(b["time"] - 60, threshold_rs)
+    ]
 
     # ATM flow histogram — one entry per anchored minute, all four flows in
     # ₹ crore. The UI stacks bullish flows above zero (PE writing light green
@@ -282,31 +329,67 @@ def aggregate_day(
             "bullish_cr": (p["put"] + p["call_buy"]) / CRORE,
             "bearish_cr": (p["call"] + p["put_buy"]) / CRORE,
         }
-        for ts, p in sorted(pressure_by_minute.items())
+        for ts, p in sorted_pressure
     ]
 
+    # Score markers — ratio-based scaling (1 at threshold, 10 at ≥4×) so the
+    # score is computable live without knowing the day's eventual maximum.
     score_markers = []
-    for ts, p in sorted(pressure_by_minute.items()):
-        put_rs = p["put"]
-        call_rs = p["call"]
-        dominant_side = "put_writing" if put_rs >= call_rs else "call_writing"
-        dominant_rs = max(put_rs, call_rs)
-        if dominant_rs < effective_threshold_rs:
+    for ts, p in sorted_pressure:
+        dom, bull_rs, bear_rs = dom_by_minute[ts]
+        thr = thr_by_minute[ts]
+        if dom < thr or thr <= 0:
             continue
-        if max_for_10 > effective_threshold_rs:
-            raw = 1 + 9 * (dominant_rs - effective_threshold_rs) / (max_for_10 - effective_threshold_rs)
-        else:
-            raw = 1
+        ratio = dom / thr
+        raw = 1 + 9 * (ratio - 1) / (RATIO_FOR_10 - 1)
         score = max(1, min(10, int(round(raw))))
+        if score_basis == "combined":
+            side = "bullish" if bull_rs >= bear_rs else "bearish"
+        else:
+            side = "put_writing" if bull_rs >= bear_rs else "call_writing"
         score_markers.append({
             "time": _ts_to_unix(ts),
             "ts_iso": ts,
             "score": score,
-            "side": dominant_side,
-            "amount_cr": dominant_rs / CRORE,
-            "put_cr": put_rs / CRORE,
-            "call_cr": call_rs / CRORE,
+            "side": side,
+            "amount_cr": dom / CRORE,
+            "threshold_cr": thr / CRORE,
+            "bull_cr": bull_rs / CRORE,
+            "bear_cr": bear_rs / CRORE,
         })
+
+    # Regime — rolling 30-minute net flow (always all four flows, regardless
+    # of score basis: regime is context, not signal). Sign drives the chart's
+    # background shading.
+    REGIME_WINDOW = 30
+    net_window = deque(maxlen=REGIME_WINDOW)
+    regime = []
+    for ts, p in sorted_pressure:
+        net_window.append((p["put"] + p["call_buy"]) - (p["call"] + p["put_buy"]))
+        net_sum = sum(net_window)
+        regime.append({
+            "time": _ts_to_unix(ts),
+            "net30_cr": round(net_sum / CRORE, 2),
+            "side": "bull" if net_sum >= 0 else "bear",
+        })
+
+    # Fund-flow summary — rolling last-60-minutes + day totals per flow,
+    # mirroring the reference indicator's table.
+    def _sum_flows(items):
+        out = {"put_writing_cr": 0.0, "call_writing_cr": 0.0,
+               "call_buying_cr": 0.0, "put_buying_cr": 0.0}
+        for _, p in items:
+            out["put_writing_cr"] += p["put"] / CRORE
+            out["call_writing_cr"] += p["call"] / CRORE
+            out["call_buying_cr"] += p["call_buy"] / CRORE
+            out["put_buying_cr"] += p["put_buy"] / CRORE
+        return {k: round(v, 1) for k, v in out.items()}
+
+    fund_flow = {
+        "last_60min": _sum_flows(sorted_pressure[-60:]),
+        "day": _sum_flows(sorted_pressure),
+        "n_minutes": len(sorted_pressure),
+    } if sorted_pressure else None
 
     # Candles — prefer real OHLC; fall back to spot-only synthetic bars
     candles_out = []
@@ -354,12 +437,15 @@ def aggregate_day(
     bull_stats = _stats(bull_values)
     bear_stats = _stats(bear_values)
 
+    max_dom_rs = max((v[0] for v in dom_by_minute.values()), default=None)
+
     return {
         "underlying": underlying,
         "date": date,
         "mode": mode,
         "score_threshold_cr": score_threshold_cr,
         "threshold_mode": threshold_mode,
+        "score_basis": score_basis,
         "effective_threshold_cr": round(effective_threshold_rs / CRORE, 2),
         "n": n,
         "atm_band": atm_band,
@@ -368,6 +454,8 @@ def aggregate_day(
         "candles": candles_out,
         "score_markers": score_markers,
         "histogram": histogram,
+        "regime": regime,
+        "fund_flow": fund_flow,
         "bull_stats": bull_stats,
         "bear_stats": bear_stats,
         "big_prints_top10": top10,
@@ -379,6 +467,6 @@ def aggregate_day(
             "n_score_markers": len(score_markers),
             "n_big_prints": len(big_prints),
             "has_ohlc": has_ohlc,
-            "max_pressure_cr": max_for_10 / CRORE if above else None,
+            "max_pressure_cr": round(max_dom_rs / CRORE, 1) if max_dom_rs else None,
         },
     }

@@ -153,7 +153,8 @@ async def oi_aggregate(
     score_threshold_cr: float = 10.0,  # absolute floor; see threshold_mode
     n: int = 10,
     atm_band: int = 2,
-    threshold_mode: str = "adaptive",  # adaptive (mean+2σ of day) | absolute
+    threshold_mode: str = "adaptive",  # adaptive (trailing 60-min mean+2σ) | absolute
+    score_basis: str = "combined",     # combined (write+buy) | writing (write only)
 ):
     """Return minute-aggregates + score markers + BIG-print list."""
     underlying = underlying.upper()
@@ -163,6 +164,8 @@ async def oi_aggregate(
         raise HTTPException(status_code=400, detail="mode must be premium|notional|margin")
     if threshold_mode not in ("adaptive", "absolute"):
         raise HTTPException(status_code=400, detail="threshold_mode must be adaptive|absolute")
+    if score_basis not in ("combined", "writing"):
+        raise HTTPException(status_code=400, detail="score_basis must be combined|writing")
     try:
         thr = float(score_threshold_cr)
         n_i = int(n)
@@ -181,13 +184,13 @@ async def oi_aggregate(
                 return JSONResponse(oi_flow.aggregate_day(
                     conn, underlying=underlying, date="",
                     mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
-                    threshold_mode=threshold_mode,
+                    threshold_mode=threshold_mode, score_basis=score_basis,
                 ))
             date = days[0]
         result = oi_flow.aggregate_day(
             conn, underlying=underlying, date=date,
             mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
-            threshold_mode=threshold_mode,
+            threshold_mode=threshold_mode, score_basis=score_basis,
         )
     return JSONResponse(result)
 
