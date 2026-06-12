@@ -69,13 +69,25 @@ def aggregate_day(
     atm_band: int = 2,
     margin_pct: float = DEFAULT_MARGIN_PCT,
     lot_size: Optional[int] = None,
+    threshold_mode: str = "absolute",
 ) -> dict:
+    """threshold_mode:
+        'absolute' — score/print threshold is score_threshold_cr, fixed.
+        'adaptive' — threshold = mean + 2σ of the day's per-minute dominant
+                     ATM writing (floored at 0.5cr). A quiet day where the
+                     biggest minute is ₹6cr still scores its relative spikes;
+                     a wild day self-raises so only true outliers mark."""
     if mode not in ("premium", "notional", "margin"):
         raise ValueError(f"unknown mode: {mode}")
+    if threshold_mode not in ("absolute", "adaptive"):
+        raise ValueError(f"unknown threshold_mode: {threshold_mode}")
     if lot_size is None:
         lot_size = KNOWN_LOT_SIZES.get(underlying, 75)
 
     threshold_rs = float(score_threshold_cr) * CRORE
+    # In adaptive mode we can't know the final threshold until the full walk
+    # is done, so collect candidate prints above a low floor and post-filter.
+    PRINT_COLLECT_FLOOR_RS = min(threshold_rs, 1.0 * CRORE)
 
     cur = conn.execute(
         "SELECT ts, spot, strike, opt_type, ltp, oi "
@@ -98,9 +110,13 @@ def aggregate_day(
 
     empty_result = {
         "underlying": underlying, "date": date, "mode": mode,
-        "score_threshold_cr": score_threshold_cr, "n": n, "atm_band": atm_band,
+        "score_threshold_cr": score_threshold_cr,
+        "threshold_mode": threshold_mode,
+        "effective_threshold_cr": score_threshold_cr,
+        "n": n, "atm_band": atm_band,
         "lot_size": lot_size, "strike_step": None,
-        "candles": [], "score_markers": [], "big_prints_top10": [],
+        "candles": [], "score_markers": [], "histogram": [],
+        "bull_stats": None, "bear_stats": None, "big_prints_top10": [],
         "summary": {"total_minutes": 0, "n_unique_strikes": 0,
                     "n_score_markers": 0, "n_big_prints": 0,
                     "has_ohlc": False},
@@ -148,6 +164,8 @@ def aggregate_day(
 
         put_writing_atm = 0.0
         call_writing_atm = 0.0
+        put_buying_atm = 0.0
+        call_buying_atm = 0.0
 
         for r in rows_this_min:
             strike = r["strike"]
@@ -189,12 +207,17 @@ def aggregate_day(
                         call_writing_atm += amount
             elif d_oi > 0 and d_ltp > 0:
                 action = "put_buying" if opt_type == "PE" else "call_buying"
+                if strike in score_strikes:
+                    if opt_type == "PE":
+                        put_buying_atm += amount
+                    else:
+                        call_buying_atm += amount
             elif d_oi < 0 and d_ltp > 0:
                 action = "short_covering"
             else:
                 action = "long_unwinding"
 
-            if amount >= threshold_rs:
+            if amount >= PRINT_COLLECT_FLOOR_RS:
                 big_prints.append({
                     "time": _ts_to_unix(ts),
                     "ts_iso": ts,
@@ -219,25 +242,45 @@ def aggregate_day(
             pressure_by_minute[anchor_ts] = {
                 "put": put_writing_atm,
                 "call": call_writing_atm,
+                "put_buy": put_buying_atm,
+                "call_buy": call_buying_atm,
             }
 
-    # Day-max above threshold → max_for_10 (self-calibrating)
-    above = [
-        max(p["put"], p["call"])
-        for p in pressure_by_minute.values()
-        if max(p["put"], p["call"]) >= threshold_rs
-    ]
-    max_for_10 = max(above) if above else threshold_rs
+    # Effective score threshold. Adaptive = mean + 2σ of the day's per-minute
+    # dominant WRITING pressure (score stays writer-driven per the original
+    # spec; buying flows are display-only context).
+    dom_values = [max(p["put"], p["call"]) for p in pressure_by_minute.values()]
+    effective_threshold_rs = threshold_rs
+    if threshold_mode == "adaptive" and len(dom_values) >= 5:
+        try:
+            m = statistics.mean(dom_values)
+            sd = statistics.stdev(dom_values)
+            effective_threshold_rs = max(m + 2 * sd, 0.5 * CRORE)
+        except statistics.StatisticsError:
+            pass
 
-    # ATM writing volume histogram — one entry per anchored minute, both
-    # PE and CE writing volumes in ₹ crore. The UI plots PE positive (green
-    # above zero) and CE negative (red below zero) so both forces are visible
-    # in the same minute.
+    # Post-filter prints by the effective threshold (they were collected
+    # above a low floor so adaptive thresholds below the absolute input
+    # still have candidates to keep).
+    big_prints = [b for b in big_prints if b["amount_rs"] >= effective_threshold_rs]
+
+    # Day-max above threshold → max_for_10 (self-calibrating)
+    above = [v for v in dom_values if v >= effective_threshold_rs]
+    max_for_10 = max(above) if above else effective_threshold_rs
+
+    # ATM flow histogram — one entry per anchored minute, all four flows in
+    # ₹ crore. The UI stacks bullish flows above zero (PE writing light green
+    # + CE buying deep green) and bearish flows below zero (CE writing light
+    # red + PE buying deep red), matching the reference indicator's language.
     histogram = [
         {
             "time": _ts_to_unix(ts),
             "put_writing_cr": p["put"] / CRORE,
             "call_writing_cr": p["call"] / CRORE,
+            "put_buying_cr": p["put_buy"] / CRORE,
+            "call_buying_cr": p["call_buy"] / CRORE,
+            "bullish_cr": (p["put"] + p["call_buy"]) / CRORE,
+            "bearish_cr": (p["call"] + p["put_buy"]) / CRORE,
         }
         for ts, p in sorted(pressure_by_minute.items())
     ]
@@ -248,10 +291,10 @@ def aggregate_day(
         call_rs = p["call"]
         dominant_side = "put_writing" if put_rs >= call_rs else "call_writing"
         dominant_rs = max(put_rs, call_rs)
-        if dominant_rs < threshold_rs:
+        if dominant_rs < effective_threshold_rs:
             continue
-        if max_for_10 > threshold_rs:
-            raw = 1 + 9 * (dominant_rs - threshold_rs) / (max_for_10 - threshold_rs)
+        if max_for_10 > effective_threshold_rs:
+            raw = 1 + 9 * (dominant_rs - effective_threshold_rs) / (max_for_10 - effective_threshold_rs)
         else:
             raw = 1
         score = max(1, min(10, int(round(raw))))
@@ -304,16 +347,20 @@ def aggregate_day(
         return {"mean": round(m, 3), "sd": round(sd, 3),
                 "p1sd": round(m + sd, 3), "p2sd": round(m + 2 * sd, 3)}
 
-    pe_values = [h["put_writing_cr"] for h in histogram]
-    ce_values = [h["call_writing_cr"] for h in histogram]
-    pe_stats = _stats(pe_values)
-    ce_stats = _stats(ce_values)
+    # SD bands on the TOTAL bullish / bearish flow (writing + buying), since
+    # that's what the stacked histogram displays.
+    bull_values = [h["bullish_cr"] for h in histogram]
+    bear_values = [h["bearish_cr"] for h in histogram]
+    bull_stats = _stats(bull_values)
+    bear_stats = _stats(bear_values)
 
     return {
         "underlying": underlying,
         "date": date,
         "mode": mode,
         "score_threshold_cr": score_threshold_cr,
+        "threshold_mode": threshold_mode,
+        "effective_threshold_cr": round(effective_threshold_rs / CRORE, 2),
         "n": n,
         "atm_band": atm_band,
         "lot_size": lot_size,
@@ -321,8 +368,8 @@ def aggregate_day(
         "candles": candles_out,
         "score_markers": score_markers,
         "histogram": histogram,
-        "pe_stats": pe_stats,
-        "ce_stats": ce_stats,
+        "bull_stats": bull_stats,
+        "bear_stats": bear_stats,
         "big_prints_top10": top10,
         "summary": {
             "total_minutes": len(sorted_minutes),
