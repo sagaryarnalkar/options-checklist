@@ -310,6 +310,10 @@ def _refresh_marker_outcomes(conn, underlying: str, date_str: str) -> int:
         # the forward-return analysis with a moving definition of "marker".
         threshold_mode="absolute",
         score_basis="writing",
+        # Raw per-minute markers — episode collapsing would change which
+        # minutes get tracked depending on neighbours, making the series
+        # definition path-dependent.
+        collapse_episodes=False,
     )
     markers = result.get("score_markers") or []
     candles = result.get("candles") or []

@@ -74,6 +74,7 @@ def aggregate_day(
     lot_size: Optional[int] = None,
     threshold_mode: str = "absolute",
     score_basis: str = "combined",
+    collapse_episodes: bool = True,
 ) -> dict:
     """threshold_mode:
         'absolute' — score/print threshold is score_threshold_cr, fixed.
@@ -334,7 +335,7 @@ def aggregate_day(
 
     # Score markers — ratio-based scaling (1 at threshold, 10 at ≥4×) so the
     # score is computable live without knowing the day's eventual maximum.
-    score_markers = []
+    raw_hits = []
     for ts, p in sorted_pressure:
         dom, bull_rs, bear_rs = dom_by_minute[ts]
         thr = thr_by_minute[ts]
@@ -347,7 +348,7 @@ def aggregate_day(
             side = "bullish" if bull_rs >= bear_rs else "bearish"
         else:
             side = "put_writing" if bull_rs >= bear_rs else "call_writing"
-        score_markers.append({
+        raw_hits.append({
             "time": _ts_to_unix(ts),
             "ts_iso": ts,
             "score": score,
@@ -358,19 +359,57 @@ def aggregate_day(
             "bear_cr": bear_rs / CRORE,
         })
 
+    # Collapse bursts into EPISODES — one marker per burst, at its peak.
+    # Consecutive above-threshold minutes of the same side with gaps ≤ 3 min
+    # belong to one episode; a flow burst that persists for six minutes is one
+    # event, not six. This is what makes the reference indicator look sparse:
+    # it marks bursts, not minutes. Tracking callers pass
+    # collapse_episodes=False to keep the raw per-minute series stable.
+    EPISODE_GAP_S = 3 * 60
+    if collapse_episodes and raw_hits:
+        episodes = []
+        cur = [raw_hits[0]]
+        for h in raw_hits[1:]:
+            if h["side"] == cur[-1]["side"] and h["time"] - cur[-1]["time"] <= EPISODE_GAP_S:
+                cur.append(h)
+            else:
+                episodes.append(cur)
+                cur = [h]
+        episodes.append(cur)
+        score_markers = []
+        for ep in episodes:
+            peak = max(ep, key=lambda h: h["amount_cr"])
+            peak = dict(peak)
+            peak["episode_minutes"] = len(ep)
+            score_markers.append(peak)
+    else:
+        score_markers = raw_hits
+
     # Regime — rolling 30-minute net flow (always all four flows, regardless
-    # of score basis: regime is context, not signal). Sign drives the chart's
-    # background shading.
+    # of score basis: regime is context, not signal). Neutral dead-zone: only
+    # call a side when the window has enough samples AND the net is at least
+    # 15% of the gross flow — otherwise the early-session window flips sign
+    # minute-to-minute and the shading renders as alternating noise stripes
+    # instead of zones.
     REGIME_WINDOW = 30
-    net_window = deque(maxlen=REGIME_WINDOW)
+    REGIME_MIN_SAMPLES = 10
+    REGIME_DEADZONE = 0.15
+    flow_window = deque(maxlen=REGIME_WINDOW)  # (bull_rs, bear_rs)
     regime = []
     for ts, p in sorted_pressure:
-        net_window.append((p["put"] + p["call_buy"]) - (p["call"] + p["put_buy"]))
-        net_sum = sum(net_window)
+        flow_window.append((p["put"] + p["call_buy"], p["call"] + p["put_buy"]))
+        bull_sum = sum(f[0] for f in flow_window)
+        bear_sum = sum(f[1] for f in flow_window)
+        net_sum = bull_sum - bear_sum
+        gross = bull_sum + bear_sum
+        if len(flow_window) < REGIME_MIN_SAMPLES or gross <= 0 or abs(net_sum) < REGIME_DEADZONE * gross:
+            side = "neutral"
+        else:
+            side = "bull" if net_sum > 0 else "bear"
         regime.append({
             "time": _ts_to_unix(ts),
             "net30_cr": round(net_sum / CRORE, 2),
-            "side": "bull" if net_sum >= 0 else "bear",
+            "side": side,
         })
 
     # Fund-flow summary — rolling last-60-minutes + day totals per flow,

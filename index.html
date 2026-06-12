@@ -1335,13 +1335,17 @@
       drawRefLine(_oiBearTotalSeries, -d.bear_stats.p2sd, "rgba(255,107,107,0.75)", "-2σ");
     }
 
-    // Regime background shading — faint full-height columns coloured by the
-    // rolling-30-min net flow side. Gives the sustained-bias context that the
-    // per-minute markers alone don't convey.
+    // Regime background shading — full-height columns coloured by the
+    // rolling-30-min net flow side. Neutral minutes (dead-zone: net < 15% of
+    // gross, or warmup) get a fully transparent bar — keeps the series
+    // continuous while rendering as clean unshaded space, so shading reads
+    // as solid zones instead of alternating noise stripes.
     const regime = d.regime || [];
     _oiRegimeSeries.setData(regime.map(r => ({
       time: r.time, value: 1,
-      color: r.side === "bull" ? "rgba(123,216,143,0.07)" : "rgba(255,107,107,0.07)",
+      color: r.side === "bull" ? "rgba(123,216,143,0.10)"
+           : r.side === "bear" ? "rgba(255,107,107,0.10)"
+           : "rgba(0,0,0,0)",
     })));
 
     // Score markers: one per minute, only when above threshold. Side is
