@@ -24,7 +24,43 @@
   *{box-sizing:border-box}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:var(--sans);-webkit-text-size-adjust:100%}
   body{padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
-  .wrap{max-width:820px;margin:0 auto;padding:16px 14px 80px}
+  .wrap{max-width:1380px;margin:0 auto;padding:16px 16px 80px}
+  /* Wide screens: two-column dashboard. Live data sits left, triggers right;
+     recommendations / tabs / panels span full width. grid-auto-flow dense
+     lets .triggers (later in DOM) backfill the cell beside #liveCard. */
+  @media (min-width:1100px){
+    .wrap{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(0,1fr);gap:0 16px;align-items:start;grid-auto-flow:row dense}
+    .wrap > .top{grid-column:1/-1}
+    .wrap > #liveCard{grid-column:1}
+    .wrap > .triggers{grid-column:2;margin-top:14px}
+    .wrap > #recBlock{grid-column:1/-1}
+    .wrap > .tabs{grid-column:1/-1}
+    .wrap > .tab-panel{grid-column:1/-1}
+    .wrap > .footer{grid-column:1/-1}
+  }
+  #recBlock:empty{display:none}
+  /* Small screens: tighter chrome, horizontally scrollable trade tables. */
+  @media (max-width:760px){
+    .wrap{padding:10px 10px 70px}
+    h1{font-size:19px}
+    .clock{font-size:12px}
+    .badge{font-size:11px;padding:3px 7px}
+    .tab{padding:9px 6px;font-size:13px}
+    .live-card{padding:10px 12px}
+    .triggers{padding:10px 12px}
+    .spot-pill{padding:5px 8px;font-size:11px}
+    .spot-pill b{font-size:13px}
+    .live-row{font-size:12px}
+    .rec-summary{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+    .rec-strategy{overflow-x:auto}
+    .inline-rec{overflow-x:auto}
+    table.rec-legs{min-width:480px}
+    summary{padding:11px 10px}
+    .section-body{padding:4px 10px 12px}
+    .oi-controls{gap:8px;padding:8px 10px}
+    .oi-chart-merged{height:420px}
+    .oi-side-body{font-size:11px}
+  }
   h1{font-size:22px;margin:6px 0 2px;letter-spacing:-0.01em}
   h2{font-size:15px;margin:0 0 10px;color:var(--muted);font-weight:600;letter-spacing:.02em;text-transform:uppercase}
   h3{font-size:16px;margin:0 0 8px}
