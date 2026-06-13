@@ -75,7 +75,8 @@ def aggregate_day(
     threshold_mode: str = "absolute",
     score_basis: str = "combined",
     collapse_episodes: bool = True,
-    cooldown_minutes: int = 15,
+    cooldown_minutes: int = 10,
+    roll_window_minutes: int = 20,
 ) -> dict:
     """threshold_mode:
         'absolute' — score/print threshold is score_threshold_cr, fixed.
@@ -282,7 +283,14 @@ def aggregate_day(
     # spike never raises the bar it is judged against. The first few minutes
     # fall back to the absolute floor. This is intentionally live-equivalent:
     # replaying a day gives the same thresholds the live page would have had.
-    ROLL_WINDOW = 60
+    #
+    # Window length matters a lot: the market-open flow spike is genuinely the
+    # day's largest, so a long window keeps the bar elevated for its full
+    # length and suppresses every midday signal (the symptom: all markers
+    # cluster at 09:15). A short window lets the opening spike age out fast so
+    # midday turning points clear the bar — matching the reference indicator's
+    # ~25-min-after-open first signal. Default 20 min.
+    ROLL_WINDOW = max(5, roll_window_minutes)
     MIN_SAMPLES = 5
     RATIO_FOR_10 = 4.0  # dominant ≥ 4× threshold → score 10
     window = deque(maxlen=ROLL_WINDOW)
@@ -293,10 +301,15 @@ def aggregate_day(
         dom = max(bull_rs, bear_rs)
         dom_by_minute[ts] = (dom, bull_rs, bear_rs)
         if threshold_mode == "adaptive" and len(window) >= MIN_SAMPLES:
+            # Median + 2·MAD is robust to a single opening outlier in a way
+            # mean + 2σ is not — one ₹62cr open shouldn't define "normal" for
+            # the next 20 minutes. Falls back to mean/σ shape via MAD scaling.
             try:
-                m = statistics.mean(window)
-                sd = statistics.stdev(window)
-                thr = max(m + 2 * sd, 0.5 * CRORE)
+                vals = sorted(window)
+                med = statistics.median(vals)
+                mad = statistics.median([abs(v - med) for v in vals])
+                # 1.4826 scales MAD to be a σ-equivalent for normal data.
+                thr = max(med + 2 * 1.4826 * mad, 0.5 * CRORE)
             except statistics.StatisticsError:
                 thr = threshold_rs
         else:
