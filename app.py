@@ -155,6 +155,7 @@ async def oi_aggregate(
     atm_band: int = 2,
     threshold_mode: str = "adaptive",  # adaptive (trailing 60-min mean+2σ) | absolute
     score_basis: str = "combined",     # combined (write+buy) | writing (write only)
+    cooldown_minutes: int = 15,        # min spacing between markers (non-max suppression)
 ):
     """Return minute-aggregates + score markers + BIG-print list."""
     underlying = underlying.upper()
@@ -170,12 +171,15 @@ async def oi_aggregate(
         thr = float(score_threshold_cr)
         n_i = int(n)
         atm_i = int(atm_band)
+        cooldown_i = int(cooldown_minutes)
     except Exception:
-        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band must be integers")
+        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band + cooldown_minutes must be integers")
     if n_i < 1 or n_i > 50:
         raise HTTPException(status_code=400, detail="n must be 1..50")
     if atm_i < 0 or atm_i > 10:
         raise HTTPException(status_code=400, detail="atm_band must be 0..10")
+    if cooldown_i < 0 or cooldown_i > 120:
+        raise HTTPException(status_code=400, detail="cooldown_minutes must be 0..120")
 
     with db.get_conn() as conn:
         if date is None:
@@ -185,12 +189,14 @@ async def oi_aggregate(
                     conn, underlying=underlying, date="",
                     mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
                     threshold_mode=threshold_mode, score_basis=score_basis,
+                    cooldown_minutes=cooldown_i,
                 ))
             date = days[0]
         result = oi_flow.aggregate_day(
             conn, underlying=underlying, date=date,
             mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
             threshold_mode=threshold_mode, score_basis=score_basis,
+            cooldown_minutes=cooldown_i,
         )
     return JSONResponse(result)
 

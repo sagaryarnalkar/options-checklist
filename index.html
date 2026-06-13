@@ -832,6 +832,15 @@
       <label>ATM ± N (scan)
         <input type="number" id="oiN" value="10" min="1" max="50" step="1" style="width:70px">
       </label>
+      <label>Cooldown (min)
+        <input type="number" id="oiCooldown" value="15" min="0" max="120" step="1" style="width:70px">
+      </label>
+      <label>Regime BG
+        <select id="oiRegime">
+          <option value="off" selected>Off</option>
+          <option value="on">On</option>
+        </select>
+      </label>
       <button type="button" id="oiReload" class="live-refresh">Reload</button>
     </div>
 
@@ -1151,6 +1160,8 @@
     document.getElementById("oiThresholdCr").addEventListener("change", oiReload);
     document.getElementById("oiAtmBand").addEventListener("change", oiReload);
     document.getElementById("oiN").addEventListener("change", oiReload);
+    document.getElementById("oiCooldown").addEventListener("change", oiReload);
+    document.getElementById("oiRegime").addEventListener("change", oiReload);
     buildOiChart();
     await loadOiDays();
   }
@@ -1269,12 +1280,14 @@
     const threshold = document.getElementById("oiThresholdCr").value;
     const atmBand = document.getElementById("oiAtmBand").value;
     const n = document.getElementById("oiN").value;
+    const cooldown = document.getElementById("oiCooldown").value;
     setOiStatus("Loading aggregates for " + under + " · " + day + "…");
     try {
       const qs = new URLSearchParams({
         underlying: under, date: day, mode,
         score_threshold_cr: threshold, n, atm_band: atmBand,
         threshold_mode: thrMode, score_basis: basis,
+        cooldown_minutes: cooldown,
       });
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1353,9 +1366,11 @@
     }
 
     // Regime background shading — continuous area fills (1 inside a regime,
-    // 0 outside). Neutral minutes (dead-zone / warmup) sit at 0 on both
-    // series, rendering as clean unshaded space.
-    const regime = d.regime || [];
+    // 0 outside). Off by default (cleaner, matches the reference's plain
+    // background); toggle on via the Regime BG control. Neutral minutes sit
+    // at 0 on both series, rendering as clean unshaded space.
+    const regimeOn = document.getElementById("oiRegime").value === "on";
+    const regime = (regimeOn ? (d.regime || []) : []);
     _oiRegimeBullArea.setData(regime.map(r => ({ time: r.time, value: r.side === "bull" ? 1 : 0 })));
     _oiRegimeBearArea.setData(regime.map(r => ({ time: r.time, value: r.side === "bear" ? 1 : 0 })));
 
