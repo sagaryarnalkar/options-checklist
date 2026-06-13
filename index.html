@@ -819,9 +819,12 @@
       </label>
       <label>Threshold
         <select id="oiThrMode">
-          <option value="adaptive" selected>Rolling 2σ (60m)</option>
+          <option value="adaptive" selected>Rolling median+MAD</option>
           <option value="absolute">Absolute ₹cr</option>
         </select>
+      </label>
+      <label>Roll window (min)
+        <input type="number" id="oiRollWindow" value="20" min="5" max="120" step="1" style="width:70px">
       </label>
       <label>Floor ₹cr
         <input type="number" id="oiThresholdCr" value="10" min="1" step="1" style="width:70px">
@@ -833,7 +836,7 @@
         <input type="number" id="oiN" value="10" min="1" max="50" step="1" style="width:70px">
       </label>
       <label>Cooldown (min)
-        <input type="number" id="oiCooldown" value="15" min="0" max="120" step="1" style="width:70px">
+        <input type="number" id="oiCooldown" value="10" min="0" max="120" step="1" style="width:70px">
       </label>
       <label>Regime BG
         <select id="oiRegime">
@@ -1161,6 +1164,7 @@
     document.getElementById("oiAtmBand").addEventListener("change", oiReload);
     document.getElementById("oiN").addEventListener("change", oiReload);
     document.getElementById("oiCooldown").addEventListener("change", oiReload);
+    document.getElementById("oiRollWindow").addEventListener("change", oiReload);
     document.getElementById("oiRegime").addEventListener("change", oiReload);
     buildOiChart();
     await loadOiDays();
@@ -1281,13 +1285,14 @@
     const atmBand = document.getElementById("oiAtmBand").value;
     const n = document.getElementById("oiN").value;
     const cooldown = document.getElementById("oiCooldown").value;
+    const rollWindow = document.getElementById("oiRollWindow").value;
     setOiStatus("Loading aggregates for " + under + " · " + day + "…");
     try {
       const qs = new URLSearchParams({
         underlying: under, date: day, mode,
         score_threshold_cr: threshold, n, atm_band: atmBand,
         threshold_mode: thrMode, score_basis: basis,
-        cooldown_minutes: cooldown,
+        cooldown_minutes: cooldown, roll_window_minutes: rollWindow,
       });
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1413,7 +1418,7 @@
     const ohlcLabel = s.has_ohlc ? "OHLC" : "spot fallback";
     const peakLabel = s.max_pressure_cr ? `peak ₹${s.max_pressure_cr.toFixed(0)}cr` : "no scored minutes";
     const thrLabel = d.threshold_mode === "adaptive"
-      ? `₹${(d.effective_threshold_cr ?? 0).toFixed(1)}cr now (rolling 60m 2σ)`
+      ? `₹${(d.effective_threshold_cr ?? 0).toFixed(1)}cr now (rolling median+MAD)`
       : `₹${d.score_threshold_cr}cr`;
     setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints ≥ ${thrLabel} · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
     _oiChart.timeScale().fitContent();
