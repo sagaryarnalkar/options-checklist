@@ -75,6 +75,7 @@ def aggregate_day(
     threshold_mode: str = "absolute",
     score_basis: str = "combined",
     collapse_episodes: bool = True,
+    cooldown_minutes: int = 15,
 ) -> dict:
     """threshold_mode:
         'absolute' — score/print threshold is score_threshold_cr, fixed.
@@ -384,12 +385,36 @@ def aggregate_day(
                 episodes.append(cur)
                 cur = [h]
         episodes.append(cur)
-        score_markers = []
+        episode_peaks = []
         for ep in episodes:
-            peak = max(ep, key=lambda h: h["amount_cr"])
-            peak = dict(peak)
+            peak = dict(max(ep, key=lambda h: h["amount_cr"]))
             peak["episode_minutes"] = len(ep)
-            score_markers.append(peak)
+            episode_peaks.append(peak)
+
+        # Cooldown / non-maximum suppression. Episode collapsing handles
+        # CONSECUTIVE minutes, but a choppy stretch still produces episodes
+        # only a few minutes apart (Buy 13:28 / Sell 13:31 / Buy 13:34) whose
+        # labels collide. The reference indicator stays quiet for a spell
+        # after firing. We keep a marker only if no STRONGER marker exists
+        # within ±COOLDOWN — so within any cooldown-wide window exactly one
+        # (the strongest) survives. This both spaces them out and prevents
+        # label overlap, regardless of side.
+        COOLDOWN_S = cooldown_minutes * 60
+        kept = []
+        for i, m in enumerate(episode_peaks):
+            dominated = False
+            for j, other in enumerate(episode_peaks):
+                if i == j:
+                    continue
+                if abs(other["time"] - m["time"]) <= COOLDOWN_S:
+                    # Stronger neighbour, or equal-strength earlier one, wins.
+                    if (other["amount_cr"] > m["amount_cr"] or
+                            (other["amount_cr"] == m["amount_cr"] and other["time"] < m["time"])):
+                        dominated = True
+                        break
+            if not dominated:
+                kept.append(m)
+        score_markers = kept
     else:
         score_markers = raw_hits
 
