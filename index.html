@@ -852,9 +852,9 @@
     <div class="oi-layout">
       <div class="oi-charts">
         <div class="oi-chart-card">
-          <div class="oi-chart-title">Underlying (1-min) + ATM flow (₹cr) ·
-            <span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:#1b8a3a">▮ CE buy</span> bullish ↑ ·
-            <span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span> bearish ↓</div>
+          <div class="oi-chart-title">Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
+            green = bullish (<span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:#1b8a3a">▮ CE buy</span>) ·
+            red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span>)</div>
           <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
         </div>
       </div>
@@ -883,15 +883,16 @@
       hindsight. Score 1 = at threshold, 10 = ≥4× threshold. <span style="color:var(--accent-2)">Green ▲ below</span>
       = bullish dominant; <span style="color:var(--danger)">Red ▼ above</span> = bearish dominant. The faint
       green/red <em>background shading</em> is the regime: sign of the rolling 30-min net flow (all four flows).
-      <em>Bottom strip</em>: stacked per-minute flow at the ATM band — above zero the bullish flows
-      (<span style="color:var(--accent-2)">light green = PE writing</span>,
-      <span style="color:#1b8a3a">deep green = CE buying</span>), below zero the bearish flows
-      (<span style="color:var(--danger)">light red = CE writing</span>, <span style="color:#b3261e">deep red =
-      PE buying</span>). Writing vs buying is inferred from the price direction of the OI change: OI↑ with price↓ =
-      sellers aggressing (writing); OI↑ with price↑ = buyers aggressing (buying) — every contract has both a buyer
-      and a seller, so this is an aggressor heuristic, not a fact. Dashed ±1σ/±2σ lines = today's mean ± SD of
-      total flow per side. The side panel's fund-flow table mirrors the reference indicator: last-60-minute and
-      day totals per flow. Aggregate flow only — OI change is anonymous.
+      <em>Bottom strip</em>: per-minute ATM flow, one bar per significant minute, all rising UPWARD by magnitude.
+      Each minute shows only its dominant side — green when bullish
+      (<span style="color:var(--accent-2)">light green = PE writing</span> +
+      <span style="color:#1b8a3a">deep green cap = CE buying</span>), red when bearish
+      (<span style="color:var(--danger)">light red = CE writing</span> +
+      <span style="color:#b3261e">deep red cap = PE buying</span>). Writing vs buying is inferred from the price
+      direction of the OI change: OI↑ with price↓ = sellers aggressing (writing); OI↑ with price↑ = buyers
+      aggressing (buying) — every contract has both a buyer and a seller, so this is an aggressor heuristic, not a
+      fact. The side panel's fund-flow table mirrors the reference indicator: last-60-minute and day totals per
+      flow. Aggregate flow only — OI change is anonymous.
     </p>
   </div>
 
@@ -1217,12 +1218,15 @@
     });
     _oiCandleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.03, bottom: 0.32 } });
 
-    // Flow strip: 4 histogram series on a shared overlay scale.
+    // Flow strip: 4 histogram series on a shared overlay scale, all bars rise
+    // UPWARD from a bottom baseline (single-direction, like the reference).
     // Stacked rendering via paint order: totals first, writing on top.
-    //   Above zero: deep green total (PE write + CE buy), light green PE write
-    //               → visible deep-green cap = CE buying.
-    //   Below zero: deep red total (CE write + PE buy), light red CE write
-    //               → visible deep-red cap = PE buying.
+    //   Bullish minute: deep-green total (PE write + CE buy), light-green PE
+    //                   write on top → exposed deep-green cap = CE buying.
+    //   Bearish minute: deep-red total (CE write + PE buy), light-red CE write
+    //                   on top → exposed deep-red cap = PE buying.
+    // Each minute populates only ONE direction (see renderOiData), so bull and
+    // bear bars never share an x-slot.
     const flowOpts = {
       priceScaleId: "oiflow",
       priceFormat: { type: "price", precision: 1, minMove: 0.1 },
@@ -1334,41 +1338,28 @@
 
     _oiCandleSeries.setData(candles);
 
-    // Flow strip: stacked 4-flow rendering. Totals are drawn first (taller
-    // bars), writing series on top — the visible cap beyond the writing bar
-    // is the buying flow in the deeper shade.
-    //   Above zero: bullish = PE writing (light green) + CE buying (deep green cap)
-    //   Below zero: bearish = CE writing (light red) + PE buying (deep red cap)
-    // Only SIGNIFICANT minutes are drawn (dominant flow ≥ 50% of that
-    // minute's threshold) — the reference indicator's pane is empty most of
-    // the time, and that sparseness is what makes events readable. The full
-    // series still feeds the stats/fund-flow/regime on the backend.
+    // Flow strip — single-direction (all bars rise UPWARD from the baseline),
+    // matching the reference indicator. Each significant minute draws ONLY
+    // its dominant side; height = that side's total flow; colour = direction.
+    //   Bullish minute: deep-green total bar (PE writing + CE buying) with the
+    //     light-green PE-writing portion stacked on top → the deep-green cap
+    //     left exposed is CE buying.
+    //   Bearish minute: deep-red total bar (CE writing + PE buying) with the
+    //     light-red CE-writing portion on top → deep-red cap = PE buying.
+    // Only SIGNIFICANT minutes are drawn (dominant flow ≥ 50% of that minute's
+    // threshold), keeping the pane sparse like the reference.
     const histogram = d.histogram || [];
     const sigHist = histogram.filter(h => h.significant !== false);
-    _oiBullTotalSeries.setData(sigHist.map(h => ({ time: h.time, value: h.bullish_cr })));
-    _oiPeWriteSeries.setData(sigHist.map(h => ({ time: h.time, value: h.put_writing_cr })));
-    _oiBearTotalSeries.setData(sigHist.map(h => ({ time: h.time, value: -h.bearish_cr })));
-    _oiCeWriteSeries.setData(sigHist.map(h => ({ time: h.time, value: -h.call_writing_cr })));
+    const bullMin = sigHist.filter(h => h.bullish_cr >= h.bearish_cr);
+    const bearMin = sigHist.filter(h => h.bearish_cr >  h.bullish_cr);
+    _oiBullTotalSeries.setData(bullMin.map(h => ({ time: h.time, value: h.bullish_cr })));
+    _oiPeWriteSeries.setData(  bullMin.map(h => ({ time: h.time, value: h.put_writing_cr })));
+    _oiBearTotalSeries.setData(bearMin.map(h => ({ time: h.time, value: h.bearish_cr })));   // upward (positive)
+    _oiCeWriteSeries.setData(  bearMin.map(h => ({ time: h.time, value: h.call_writing_cr }))); // upward (positive)
 
-    // Clear any previously drawn 1σ / 2σ reference lines, then draw fresh.
+    // Reference indicator has no σ lines on its flow pane — keep ours clean.
     _oiRefLines.forEach(rl => { try { rl.series.removePriceLine(rl.line); } catch(e){} });
     _oiRefLines = [];
-    const drawRefLine = (series, price, color, title) => {
-      const line = series.createPriceLine({
-        price, color, lineStyle: LightweightCharts.LineStyle.Dashed,
-        lineWidth: 1, axisLabelVisible: false, title,
-      });
-      _oiRefLines.push({ series, line });
-    };
-    if (d.bull_stats) {
-      drawRefLine(_oiBullTotalSeries, d.bull_stats.p1sd, "rgba(123,216,143,0.45)", "+1σ");
-      drawRefLine(_oiBullTotalSeries, d.bull_stats.p2sd, "rgba(123,216,143,0.75)", "+2σ");
-    }
-    if (d.bear_stats) {
-      // Bearish flows rendered as negative; draw bands as negative too.
-      drawRefLine(_oiBearTotalSeries, -d.bear_stats.p1sd, "rgba(255,107,107,0.45)", "-1σ");
-      drawRefLine(_oiBearTotalSeries, -d.bear_stats.p2sd, "rgba(255,107,107,0.75)", "-2σ");
-    }
 
     // Regime background shading — continuous area fills (1 inside a regime,
     // 0 outside). Off by default (cleaner, matches the reference's plain
