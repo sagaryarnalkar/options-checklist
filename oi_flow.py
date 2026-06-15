@@ -292,7 +292,11 @@ def aggregate_day(
     # ~25-min-after-open first signal. Default 20 min.
     ROLL_WINDOW = max(5, roll_window_minutes)
     MIN_SAMPLES = 5
-    RATIO_FOR_10 = 4.0  # dominant ≥ 4× threshold → score 10
+    # Score 10 only at 10× the threshold, so the 1-10 scale SPREADS the way
+    # the reference indicator's does: a 2× signal ≈ 2, a 4× ≈ 4, and 10 is
+    # reserved for genuine monsters. With the old 4× cap almost every signal
+    # pegged at 10 (vs the reference's typical 2-4).
+    RATIO_FOR_10 = 10.0
     window = deque(maxlen=ROLL_WINDOW)
     thr_by_minute = {}
     dom_by_minute = {}
@@ -404,14 +408,16 @@ def aggregate_day(
             peak["episode_minutes"] = len(ep)
             episode_peaks.append(peak)
 
-        # Cooldown / non-maximum suppression. Episode collapsing handles
-        # CONSECUTIVE minutes, but a choppy stretch still produces episodes
-        # only a few minutes apart (Buy 13:28 / Sell 13:31 / Buy 13:34) whose
-        # labels collide. The reference indicator stays quiet for a spell
-        # after firing. We keep a marker only if no STRONGER marker exists
-        # within ±COOLDOWN — so within any cooldown-wide window exactly one
-        # (the strongest) survives. This both spaces them out and prevents
-        # label overlap, regardless of side.
+        # Cooldown / non-maximum suppression — PER SIDE. Episode collapsing
+        # handles consecutive SAME-side minutes; this further thins a choppy
+        # run of same-side episodes a few minutes apart, keeping only the
+        # strongest in each cooldown window. CRITICAL: suppression is
+        # side-scoped. A strong Buy must NOT silence a nearby Sell — they're
+        # opposite signals, and the reference indicator routinely shows a Buy
+        # then a Sell a few minutes later (e.g. open Buy:2 then 09:18 Sell:3).
+        # The earlier global (side-agnostic) version let a giant opening Buy
+        # shadow every signal for 10 minutes, leaving us with a lone marker
+        # while the reference showed four.
         COOLDOWN_S = cooldown_minutes * 60
         kept = []
         for i, m in enumerate(episode_peaks):
@@ -419,6 +425,8 @@ def aggregate_day(
             for j, other in enumerate(episode_peaks):
                 if i == j:
                     continue
+                if other["side"] != m["side"]:
+                    continue  # opposite-side markers never suppress each other
                 if abs(other["time"] - m["time"]) <= COOLDOWN_S:
                     # Stronger neighbour, or equal-strength earlier one, wins.
                     if (other["amount_cr"] > m["amount_cr"] or
