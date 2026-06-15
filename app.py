@@ -147,10 +147,12 @@ async def oi_days(underlying: str = "NIFTY"):
 async def oi_aggregate(
     underlying: str = "NIFTY",
     date: Optional[str] = None,
-    mode: str = "margin",       # margin = capital deployed, which matches the
-                                 # reference indicator's ₹ scale (its "106cr put
-                                 # writing" ≈ ΔOI×spot×~12% margin, ~2× premium).
-                                 # premium / notional still selectable.
+    mode: str = "premium",      # premium matches the reference indicator's ₹
+                                 # scale: fetched same-day (Jun 15) fund-flow
+                                 # totals match his within 0.5-1.3x in premium,
+                                 # vs ~30x in margin and ~250x in notional.
+                                 # (The earlier margin default was a misread of
+                                 # a single big print; the table proves premium.)
     score_threshold_cr: float = 10.0,  # absolute floor; see threshold_mode
     n: int = 10,
     atm_band: int = 2,
