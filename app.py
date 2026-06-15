@@ -147,9 +147,10 @@ async def oi_days(underlying: str = "NIFTY"):
 async def oi_aggregate(
     underlying: str = "NIFTY",
     date: Optional[str] = None,
-    mode: str = "premium",      # premium matches the reference HFT Algo
-                                 # Scanner scale (peak ~10-30 cr/min on NIFTY
-                                 # vs ~hundreds-of-cr if we used notional).
+    mode: str = "margin",       # margin = capital deployed, which matches the
+                                 # reference indicator's ₹ scale (its "106cr put
+                                 # writing" ≈ ΔOI×spot×~12% margin, ~2× premium).
+                                 # premium / notional still selectable.
     score_threshold_cr: float = 10.0,  # absolute floor; see threshold_mode
     n: int = 10,
     atm_band: int = 2,
