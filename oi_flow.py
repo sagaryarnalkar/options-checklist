@@ -563,3 +563,79 @@ def aggregate_day(
             "max_pressure_cr": round(max_dom_rs / CRORE, 1) if max_dom_rs else None,
         },
     }
+
+
+def aggregate_range(conn, underlying, dates, **kwargs):
+    """Run aggregate_day for each date in `dates` (chronological order) and
+    concatenate into one continuous series for a multi-day chart.
+
+    Each day is computed INDEPENDENTLY — the rolling threshold, episode
+    collapse, and cooldown all reset at every market open. That's deliberate:
+    the overnight gap makes a cross-midnight ΔOI meaningless, and each session
+    is its own regime. We only concatenate the rendered outputs (candles,
+    markers, flow bars, regime) so the chart flows continuously; Lightweight
+    Charts collapses the overnight gaps since it spaces bars by index.
+
+    fund_flow reflects the MOST RECENT day (the actionable "today"); the
+    BIG-print list is merged across the whole range and re-topped to 10.
+    """
+    candles, score_markers, histogram, regime = [], [], [], []
+    all_prints = []
+    fund_flow = None
+    last_day_summary = None
+    strike_step = lot_size = None
+    n_unique = 0
+    any_ohlc = False
+    max_dom = 0.0
+
+    for d in dates:
+        r = aggregate_day(conn, underlying, d, **kwargs)
+        candles += r.get("candles", [])
+        score_markers += r.get("score_markers", [])
+        histogram += r.get("histogram", [])
+        regime += r.get("regime", [])
+        all_prints += r.get("big_prints_top10", [])
+        if r.get("fund_flow"):
+            fund_flow = r["fund_flow"]            # last non-empty wins (most recent)
+        strike_step = r.get("strike_step") or strike_step
+        lot_size = r.get("lot_size") or lot_size
+        s = r.get("summary", {})
+        n_unique = max(n_unique, s.get("n_unique_strikes", 0))
+        any_ohlc = any_ohlc or s.get("has_ohlc", False)
+        if s.get("max_pressure_cr"):
+            max_dom = max(max_dom, s["max_pressure_cr"])
+        last_day_summary = s
+
+    top10 = sorted(all_prints, key=lambda b: -b.get("amount_cr", 0))[:10]
+
+    return {
+        "underlying": underlying,
+        "dates": dates,
+        "date": dates[-1] if dates else "",
+        "continuous": True,
+        "mode": kwargs.get("mode"),
+        "score_threshold_cr": kwargs.get("score_threshold_cr"),
+        "threshold_mode": kwargs.get("threshold_mode"),
+        "score_basis": kwargs.get("score_basis"),
+        "n": kwargs.get("n"),
+        "atm_band": kwargs.get("atm_band"),
+        "lot_size": lot_size,
+        "strike_step": strike_step,
+        "candles": candles,
+        "score_markers": score_markers,
+        "histogram": histogram,
+        "regime": regime,
+        "fund_flow": fund_flow,
+        "bull_stats": None,   # σ bands are per-day; omitted on the merged view
+        "bear_stats": None,
+        "big_prints_top10": top10,
+        "summary": {
+            "total_minutes": len(candles),
+            "n_days": len(dates),
+            "n_unique_strikes": n_unique,
+            "n_score_markers": len(score_markers),
+            "n_big_prints": len(all_prints),
+            "has_ohlc": any_ohlc,
+            "max_pressure_cr": max_dom or None,
+        },
+    }

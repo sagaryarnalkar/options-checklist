@@ -158,8 +158,13 @@ async def oi_aggregate(
     score_basis: str = "combined",     # combined (write+buy) | writing (write only)
     cooldown_minutes: int = 10,        # min spacing between markers (non-max suppression)
     roll_window_minutes: int = 20,     # trailing window for the adaptive threshold
+    days: int = 1,                     # 1 = single day; >1 = continuous multi-day view
 ):
-    """Return minute-aggregates + score markers + BIG-print list."""
+    """Return minute-aggregates + score markers + BIG-print list.
+
+    days=1 → single day (the `date` param, or the latest available).
+    days>1 → the most recent N available days concatenated into one
+             continuous series (each day computed independently)."""
     underlying = underlying.upper()
     if underlying not in SUPPORTED_UNDERLYINGS:
         raise HTTPException(status_code=400, detail=f"underlying must be one of {SUPPORTED_UNDERLYINGS}")
@@ -175,8 +180,9 @@ async def oi_aggregate(
         atm_i = int(atm_band)
         cooldown_i = int(cooldown_minutes)
         roll_i = int(roll_window_minutes)
+        days_i = int(days)
     except Exception:
-        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band + cooldown_minutes + roll_window_minutes must be integers")
+        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band + cooldown_minutes + roll_window_minutes + days must be integers")
     if n_i < 1 or n_i > 50:
         raise HTTPException(status_code=400, detail="n must be 1..50")
     if atm_i < 0 or atm_i > 10:
@@ -185,24 +191,31 @@ async def oi_aggregate(
         raise HTTPException(status_code=400, detail="cooldown_minutes must be 0..120")
     if roll_i < 5 or roll_i > 120:
         raise HTTPException(status_code=400, detail="roll_window_minutes must be 5..120")
+    if days_i < 1 or days_i > 30:
+        raise HTTPException(status_code=400, detail="days must be 1..30")
 
+    params = dict(
+        mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
+        threshold_mode=threshold_mode, score_basis=score_basis,
+        cooldown_minutes=cooldown_i, roll_window_minutes=roll_i,
+    )
     with db.get_conn() as conn:
-        if date is None:
-            days = db.available_days(conn, underlying=underlying, limit=1)
-            if not days:
+        if days_i > 1:
+            # Continuous multi-day view: most recent N available days, oldest→newest.
+            recent = db.available_days(conn, underlying=underlying, limit=days_i)
+            recent = list(reversed(recent))  # available_days is newest-first
+            if not recent:
                 return JSONResponse(oi_flow.aggregate_day(
-                    conn, underlying=underlying, date="",
-                    mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
-                    threshold_mode=threshold_mode, score_basis=score_basis,
-                    cooldown_minutes=cooldown_i, roll_window_minutes=roll_i,
-                ))
-            date = days[0]
-        result = oi_flow.aggregate_day(
-            conn, underlying=underlying, date=date,
-            mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
-            threshold_mode=threshold_mode, score_basis=score_basis,
-            cooldown_minutes=cooldown_i, roll_window_minutes=roll_i,
-        )
+                    conn, underlying=underlying, date="", **params))
+            return JSONResponse(oi_flow.aggregate_range(
+                conn, underlying, recent, **params))
+        if date is None:
+            avail = db.available_days(conn, underlying=underlying, limit=1)
+            if not avail:
+                return JSONResponse(oi_flow.aggregate_day(
+                    conn, underlying=underlying, date="", **params))
+            date = avail[0]
+        result = oi_flow.aggregate_day(conn, underlying=underlying, date=date, **params)
     return JSONResponse(result)
 
 
