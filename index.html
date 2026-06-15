@@ -801,8 +801,14 @@
           <option value="BANKNIFTY">BANKNIFTY</option>
         </select>
       </label>
-      <label>Day
-        <select id="oiDay"><option>—</option></select>
+      <label>View
+        <select id="oiDays">
+          <option value="1">Latest day</option>
+          <option value="3">3 days</option>
+          <option value="5" selected>5 days</option>
+          <option value="10">10 days</option>
+          <option value="30">30 days</option>
+        </select>
       </label>
       <label>Mode
         <select id="oiMode">
@@ -1157,7 +1163,7 @@
     }
     document.getElementById("oiUnderlying").addEventListener("change", () => { loadOiDays(); });
     document.getElementById("oiReload").addEventListener("click", oiReload);
-    document.getElementById("oiDay").addEventListener("change", oiReload);
+    document.getElementById("oiDays").addEventListener("change", oiReload);
     document.getElementById("oiMode").addEventListener("change", oiReload);
     document.getElementById("oiBasis").addEventListener("change", oiReload);
     document.getElementById("oiThrMode").addEventListener("change", oiReload);
@@ -1246,18 +1252,15 @@
   }
 
   async function loadOiDays(){
+    // Lightweight data-presence check for the empty state; the actual chart
+    // is driven by the "View" (days) selector via oiReload.
     const under = document.getElementById("oiUnderlying").value;
-    setOiStatus("Loading available days for " + under + "…");
+    setOiStatus("Checking data for " + under + "…");
     try {
       const r = await fetch(`/oi/days?underlying=${encodeURIComponent(under)}`, { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
-      const sel = document.getElementById("oiDay");
-      sel.innerHTML = "";
       if (!d.days || d.days.length === 0){
-        const opt = document.createElement("option");
-        opt.value = ""; opt.textContent = "(no data yet)";
-        sel.appendChild(opt);
         setOiStatus(
           `No data recorded yet for ${under}. The recorder writes one snapshot per minute during NSE F&O hours (09:15–15:30 IST, Mon–Fri), starting from the first minute after you've logged in. Come back tomorrow afternoon or later today after market open.`,
           "warn"
@@ -1265,11 +1268,6 @@
         clearCharts();
         return;
       }
-      d.days.forEach(day => {
-        const opt = document.createElement("option");
-        opt.value = day; opt.textContent = day;
-        sel.appendChild(opt);
-      });
       setOiStatus("");
       await oiReload();
     } catch(e) {
@@ -1280,8 +1278,7 @@
   async function oiReload(){
     if (!_oiChart) return;
     const under = document.getElementById("oiUnderlying").value;
-    const day = document.getElementById("oiDay").value;
-    if (!day) return;
+    const days = document.getElementById("oiDays").value;
     const mode = document.getElementById("oiMode").value;
     const basis = document.getElementById("oiBasis").value;
     const thrMode = document.getElementById("oiThrMode").value;
@@ -1290,10 +1287,10 @@
     const n = document.getElementById("oiN").value;
     const cooldown = document.getElementById("oiCooldown").value;
     const rollWindow = document.getElementById("oiRollWindow").value;
-    setOiStatus("Loading aggregates for " + under + " · " + day + "…");
+    setOiStatus("Loading " + under + " · " + (days === "1" ? "latest day" : days + " days") + "…");
     try {
       const qs = new URLSearchParams({
-        underlying: under, date: day, mode,
+        underlying: under, days, mode,
         score_threshold_cr: threshold, n, atm_band: atmBand,
         threshold_mode: thrMode, score_basis: basis,
         cooldown_minutes: cooldown, roll_window_minutes: rollWindow,
@@ -1408,10 +1405,13 @@
     const s = d.summary || {};
     const ohlcLabel = s.has_ohlc ? "OHLC" : "spot fallback";
     const peakLabel = s.max_pressure_cr ? `peak ₹${s.max_pressure_cr.toFixed(0)}cr` : "no scored minutes";
-    const thrLabel = d.threshold_mode === "adaptive"
-      ? `₹${(d.effective_threshold_cr ?? 0).toFixed(1)}cr now (rolling median+MAD)`
-      : `₹${d.score_threshold_cr}cr`;
-    setOiStatus(`${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints ≥ ${thrLabel} · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
+    const thrLabel = d.continuous
+      ? "rolling median+MAD (per-day)"
+      : (d.threshold_mode === "adaptive"
+          ? `₹${(d.effective_threshold_cr ?? 0).toFixed(1)}cr now (rolling median+MAD)`
+          : `₹${d.score_threshold_cr}cr`);
+    const scope = d.continuous ? `${s.n_days || 0} days · ` : "";
+    setOiStatus(`${scope}${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints · thr ${thrLabel} · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
     _oiChart.timeScale().fitContent();
   }
 
