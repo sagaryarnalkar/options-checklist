@@ -107,6 +107,23 @@ async def storage_info_route():
     return JSONResponse(storage_info())
 
 
+@app.get("/oi/dbdump")
+async def oi_dbdump():
+    """Serve the full SQLite OI database for offline analysis. Checkpoints the
+    WAL first so the served file is complete. Contains only market OI data
+    (no account/position data) — safe to download. Intended for ad-hoc
+    analysis; can be removed once done."""
+    try:
+        with db.get_conn() as conn:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except Exception:
+        pass
+    if db.DB_PATH.exists():
+        return FileResponse(str(db.DB_PATH), media_type="application/octet-stream",
+                            filename="oi_chain.db")
+    return JSONResponse({"error": "db not found"}, status_code=404)
+
+
 # ---------- OI chain recorder status / control ----------
 
 @app.get("/oi/status")
