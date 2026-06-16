@@ -178,6 +178,7 @@ async def oi_aggregate(
     cooldown_minutes: int = 10,        # min spacing between markers (non-max suppression)
     roll_window_minutes: int = 20,     # trailing window for the adaptive threshold
     days: int = 1,                     # 1 = single day; >1 = continuous multi-day view
+    flow_basis: str = "volume",        # volume (reference method) | oi (net positioning)
 ):
     """Return minute-aggregates + score markers + BIG-print list.
 
@@ -193,6 +194,8 @@ async def oi_aggregate(
         raise HTTPException(status_code=400, detail="threshold_mode must be adaptive|absolute")
     if score_basis not in ("combined", "writing"):
         raise HTTPException(status_code=400, detail="score_basis must be combined|writing")
+    if flow_basis not in ("volume", "oi"):
+        raise HTTPException(status_code=400, detail="flow_basis must be volume|oi")
     try:
         thr = float(score_threshold_cr)
         n_i = int(n)
@@ -217,6 +220,7 @@ async def oi_aggregate(
         mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
         threshold_mode=threshold_mode, score_basis=score_basis,
         cooldown_minutes=cooldown_i, roll_window_minutes=roll_i,
+        flow_basis=flow_basis,
     )
     with db.get_conn() as conn:
         if days_i > 1:
