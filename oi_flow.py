@@ -12,12 +12,20 @@ OI Flow aggregation — produces what the OI Flow tab renders:
   - big_prints_top10[] — for the side panel (all actions, top 10 by amount).
   - summary{}          — minute count, # marked minutes, # BIG prints.
 
-CLASSIFICATION (per strike, per minute), unchanged:
-    ΔOI > 0 & Δprice < 0  → WRITING  (PE = put writing / bullish;
-                                       CE = call writing / bearish)
-    ΔOI > 0 & Δprice > 0  → BUYING
-    ΔOI < 0 & Δprice > 0  → SHORT COVERING
-    ΔOI < 0 & Δprice < 0  → LONG UNWINDING
+FLOW BASIS (what drives the ₹ amount per strike-minute):
+    'volume' (default) — traded turnover (Δvolume × price). This is the
+        reference HFT indicator's method, established by reverse-engineering
+        its published fund-flow: the CE/PE balance matches VOLUME (calls trade
+        more), not ΔOI (puts write more). Every trade is writing or buying by
+        the price-aggressor rule below — no OI gate.
+    'oi' — net new positioning (|ΔOI| × price). Our original measure; the
+        forward-return tracker is pinned to this for series stability.
+        Writing/buying require ΔOI > 0; falling OI is covering/unwinding.
+
+CLASSIFICATION (per strike, per minute):
+    price < 0  → WRITING  (PE = put writing / bullish; CE = call writing / bearish)
+    price > 0  → BUYING   (CE = call buying / bullish; PE = put buying / bearish)
+    (oi basis only) ΔOI < 0 & price > 0 → SHORT COVERING; ΔOI < 0 & price < 0 → LONG UNWINDING
 
 AMOUNTS, FIXED IN THIS REVISION:
     Kite's `oi` field for NSE F&O is reported in *share-equivalent quantity*,
@@ -77,6 +85,7 @@ def aggregate_day(
     collapse_episodes: bool = True,
     cooldown_minutes: int = 10,
     roll_window_minutes: int = 20,
+    flow_basis: str = "volume",
 ) -> dict:
     """threshold_mode:
         'absolute' — score/print threshold is score_threshold_cr, fixed.
@@ -103,6 +112,8 @@ def aggregate_day(
         raise ValueError(f"unknown threshold_mode: {threshold_mode}")
     if score_basis not in ("writing", "combined"):
         raise ValueError(f"unknown score_basis: {score_basis}")
+    if flow_basis not in ("volume", "oi"):
+        raise ValueError(f"unknown flow_basis: {flow_basis}")
     if lot_size is None:
         lot_size = KNOWN_LOT_SIZES.get(underlying, 75)
 
@@ -112,7 +123,7 @@ def aggregate_day(
     PRINT_COLLECT_FLOOR_RS = min(threshold_rs, 1.0 * CRORE)
 
     cur = conn.execute(
-        "SELECT ts, spot, strike, opt_type, ltp, oi "
+        "SELECT ts, spot, strike, opt_type, ltp, oi, volume "
         "FROM chain_snapshot "
         "WHERE underlying = ? AND DATE(ts) = ? "
         "ORDER BY ts, strike, opt_type",
@@ -135,6 +146,7 @@ def aggregate_day(
         "score_threshold_cr": score_threshold_cr,
         "threshold_mode": threshold_mode,
         "score_basis": score_basis,
+        "flow_basis": flow_basis,
         "effective_threshold_cr": score_threshold_cr,
         "n": n, "atm_band": atm_band,
         "lot_size": lot_size, "strike_step": None,
@@ -166,6 +178,7 @@ def aggregate_day(
 
     prev_oi: dict = {}
     prev_ltp: dict = {}
+    prev_vol: dict = {}
 
     # Per-minute pressures, indexed by the END timestamp (ts when we observed
     # the change). After the walk we re-key by the START timestamp so that
@@ -198,38 +211,58 @@ def aggregate_day(
             opt_type = r["opt_type"]
             ltp = r["ltp"]
             oi = r["oi"]
+            vol = r["volume"]
             if ltp is None or oi is None:
                 continue
 
             key = (strike, opt_type)
             p_oi = prev_oi.get(key)
             p_ltp = prev_ltp.get(key)
+            p_vol = prev_vol.get(key)
             prev_oi[key] = oi
             prev_ltp[key] = ltp
+            prev_vol[key] = vol
             if p_oi is None or p_ltp is None:
                 continue
 
             d_oi = oi - p_oi
             d_ltp = ltp - p_ltp
-            if d_oi == 0 or d_ltp == 0:
+            # Per-minute traded volume (Kite volume is cumulative for the day).
+            d_vol = (vol - p_vol) if (vol is not None and p_vol is not None) else 0
+            if d_vol < 0:
+                d_vol = 0
+
+            # Quantity that drives the ₹ amount depends on flow_basis:
+            #   'volume' (default, = reference indicator) → traded turnover.
+            #     Reverse-engineered from his published fund-flow: his CE/PE
+            #     balance matches VOLUME (calls trade more), not ΔOI (puts
+            #     write more). Classified purely by price direction.
+            #   'oi' → our original net-positioning measure (ΔOI).
+            if flow_basis == "volume":
+                qty = d_vol
+            else:
+                qty = abs(d_oi)
+            if qty == 0 or d_ltp == 0:
                 continue
 
-            # ΔOI from Kite is in SHARES (share-equivalent quantity), not
-            # contracts. Do NOT multiply by lot_size — that was the bug.
-            abs_d_oi = abs(d_oi)
-            premium = abs_d_oi * ltp
-            notional = abs_d_oi * spot
+            premium = qty * ltp
+            notional = qty * spot
             margin = notional * margin_pct
             amount = {"premium": premium, "notional": notional, "margin": margin}[mode]
 
-            if d_oi > 0 and d_ltp < 0:
+            # Classification. For OI basis, writing/buying require OI to be
+            # rising (new positions); falling OI is covering/unwinding (not a
+            # bucket). For VOLUME basis every trade is writing or buying by the
+            # price-aggressor rule — there's no OI gate.
+            oi_gate = (d_oi > 0) if flow_basis == "oi" else True
+            if oi_gate and d_ltp < 0:
                 action = "put_writing" if opt_type == "PE" else "call_writing"
                 if strike in score_strikes:
                     if opt_type == "PE":
                         put_writing_atm += amount
                     else:
                         call_writing_atm += amount
-            elif d_oi > 0 and d_ltp > 0:
+            elif oi_gate and d_ltp > 0:
                 action = "put_buying" if opt_type == "PE" else "call_buying"
                 if strike in score_strikes:
                     if opt_type == "PE":
@@ -249,6 +282,7 @@ def aggregate_day(
                     "opt_type": opt_type,
                     "action": action,
                     "delta_oi_lots": int(round(d_oi / max(lot_size, 1))),
+                    "traded_lots": int(round(d_vol / max(lot_size, 1))),
                     "amount_rs": amount,
                     "amount_cr": amount / CRORE,
                     "premium": premium,
@@ -539,6 +573,7 @@ def aggregate_day(
         "score_threshold_cr": score_threshold_cr,
         "threshold_mode": threshold_mode,
         "score_basis": score_basis,
+        "flow_basis": flow_basis,
         "effective_threshold_cr": round(effective_threshold_rs / CRORE, 2),
         "n": n,
         "atm_band": atm_band,
@@ -617,6 +652,7 @@ def aggregate_range(conn, underlying, dates, **kwargs):
         "score_threshold_cr": kwargs.get("score_threshold_cr"),
         "threshold_mode": kwargs.get("threshold_mode"),
         "score_basis": kwargs.get("score_basis"),
+        "flow_basis": kwargs.get("flow_basis", "volume"),
         "n": kwargs.get("n"),
         "atm_band": kwargs.get("atm_band"),
         "lot_size": lot_size,

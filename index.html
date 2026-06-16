@@ -810,6 +810,12 @@
           <option value="30">30 days</option>
         </select>
       </label>
+      <label>Flow basis
+        <select id="oiFlowBasis">
+          <option value="volume" selected>Volume (HFT)</option>
+          <option value="oi">OI change</option>
+        </select>
+      </label>
       <label>Mode
         <select id="oiMode">
           <option value="premium" selected>Premium</option>
@@ -894,11 +900,13 @@
       (<span style="color:var(--accent-2)">light green = PE writing</span> +
       <span style="color:#1b8a3a">deep green cap = CE buying</span>), red when bearish
       (<span style="color:var(--danger)">light red = CE writing</span> +
-      <span style="color:#b3261e">deep red cap = PE buying</span>). Writing vs buying is inferred from the price
-      direction of the OI change: OI↑ with price↓ = sellers aggressing (writing); OI↑ with price↑ = buyers
-      aggressing (buying) — every contract has both a buyer and a seller, so this is an aggressor heuristic, not a
-      fact. The side panel's fund-flow table mirrors the reference indicator: last-60-minute and day totals per
-      flow. Aggregate flow only — OI change is anonymous.
+      <span style="color:#b3261e">deep red cap = PE buying</span>). <b>Flow basis</b> (default <em>Volume</em>,
+      matching the reference HFT indicator): each minute's flow = that strike's <em>traded turnover</em>,
+      labelled by price direction — price↓ = writing (sellers aggressing), price↑ = buying (buyers aggressing).
+      Switch to <em>OI change</em> to measure net new positioning (ΔOI) instead — that's the more
+      "committed-money" lens, but it reads put-heavy where volume reads call-heavy (calls trade more, puts write
+      more). Either way it's an aggregate aggressor heuristic, not a fact — every contract has a buyer and a seller.
+      The side panel's fund-flow table mirrors the reference: last-60-minute and day totals per flow.
     </p>
   </div>
 
@@ -1166,6 +1174,7 @@
     document.getElementById("oiDays").addEventListener("change", oiReload);
     document.getElementById("oiMode").addEventListener("change", oiReload);
     document.getElementById("oiBasis").addEventListener("change", oiReload);
+    document.getElementById("oiFlowBasis").addEventListener("change", oiReload);
     document.getElementById("oiThrMode").addEventListener("change", oiReload);
     document.getElementById("oiThresholdCr").addEventListener("change", oiReload);
     document.getElementById("oiAtmBand").addEventListener("change", oiReload);
@@ -1281,6 +1290,7 @@
     const days = document.getElementById("oiDays").value;
     const mode = document.getElementById("oiMode").value;
     const basis = document.getElementById("oiBasis").value;
+    const flowBasis = document.getElementById("oiFlowBasis").value;
     const thrMode = document.getElementById("oiThrMode").value;
     const threshold = document.getElementById("oiThresholdCr").value;
     const atmBand = document.getElementById("oiAtmBand").value;
@@ -1292,7 +1302,7 @@
       const qs = new URLSearchParams({
         underlying: under, days, mode,
         score_threshold_cr: threshold, n, atm_band: atmBand,
-        threshold_mode: thrMode, score_basis: basis,
+        threshold_mode: thrMode, score_basis: basis, flow_basis: flowBasis,
         cooldown_minutes: cooldown, roll_window_minutes: rollWindow,
       });
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
@@ -1394,9 +1404,12 @@
         // we recover the real UTC moment, then format explicitly in IST.
         const t = new Date((b.time - 5.5*3600) * 1000)
           .toLocaleTimeString("en-IN", {hour:"2-digit", minute:"2-digit", hour12:false, timeZone:"Asia/Kolkata"});
+        const detail = (d.flow_basis === "oi")
+          ? `ΔOI ${b.delta_oi_lots.toLocaleString("en-IN")} lots`
+          : `${(b.traded_lots ?? 0).toLocaleString("en-IN")} lots traded`;
         return `<div class="oi-big-row ${b.action}">
           <div class="top"><b>${t} · ${b.opt_type} ${b.strike}</b><span>₹${b.amount_cr.toFixed(1)}cr</span></div>
-          <div class="sub">${b.action.replace(/_/g," ")} · ΔOI ${b.delta_oi_lots.toLocaleString("en-IN")} lots</div>
+          <div class="sub">${b.action.replace(/_/g," ")} · ${detail}</div>
         </div>`;
       }).join("");
     }

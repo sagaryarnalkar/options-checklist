@@ -314,6 +314,10 @@ def _refresh_marker_outcomes(conn, underlying: str, date_str: str) -> int:
         # minutes get tracked depending on neighbours, making the series
         # definition path-dependent.
         collapse_episodes=False,
+        # Pin the tracked flow basis to OI (net positioning) for series
+        # stability, independent of the UI default (volume). Switching basis
+        # mid-week would redefine what a "marker" is.
+        flow_basis="oi",
     )
     markers = result.get("score_markers") or []
     candles = result.get("candles") or []
