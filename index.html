@@ -838,6 +838,9 @@
       <label>Roll window (min)
         <input type="number" id="oiRollWindow" value="20" min="5" max="120" step="1" style="width:70px">
       </label>
+      <label title="Price-trend window for the write/buy split. 1 = raw 1-min tick (default; closest fit to the reference's published fund-flow). Longer windows are experimental — verification showed they pull AWAY from his buckets, not toward them.">Trend window (min)
+        <input type="number" id="oiTrendWindow" value="1" min="1" max="120" step="1" style="width:70px">
+      </label>
       <label>Floor ₹cr
         <input type="number" id="oiThresholdCr" value="10" min="1" step="1" style="width:70px">
       </label>
@@ -1181,6 +1184,7 @@
     document.getElementById("oiN").addEventListener("change", oiReload);
     document.getElementById("oiCooldown").addEventListener("change", oiReload);
     document.getElementById("oiRollWindow").addEventListener("change", oiReload);
+    document.getElementById("oiTrendWindow").addEventListener("change", oiReload);
     document.getElementById("oiRegime").addEventListener("change", oiReload);
     buildOiChart();
     await loadOiDays();
@@ -1297,6 +1301,7 @@
     const n = document.getElementById("oiN").value;
     const cooldown = document.getElementById("oiCooldown").value;
     const rollWindow = document.getElementById("oiRollWindow").value;
+    const trendWindow = document.getElementById("oiTrendWindow").value;
     setOiStatus("Loading " + under + " · " + (days === "1" ? "latest day" : days + " days") + "…");
     try {
       const qs = new URLSearchParams({
@@ -1304,6 +1309,7 @@
         score_threshold_cr: threshold, n, atm_band: atmBand,
         threshold_mode: thrMode, score_basis: basis, flow_basis: flowBasis,
         cooldown_minutes: cooldown, roll_window_minutes: rollWindow,
+        trend_window_minutes: trendWindow,
       });
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1424,7 +1430,8 @@
           ? `₹${(d.effective_threshold_cr ?? 0).toFixed(1)}cr now (rolling median+MAD)`
           : `₹${d.score_threshold_cr}cr`);
     const scope = d.continuous ? `${s.n_days || 0} days · ` : "";
-    setOiStatus(`${scope}${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints · thr ${thrLabel} · ${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
+    const trendLabel = d.trend_window_minutes ? `trend ${d.trend_window_minutes}m · ` : "";
+    setOiStatus(`${scope}${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints · thr ${thrLabel} · ${trendLabel}${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
     _oiChart.timeScale().fitContent();
   }
 

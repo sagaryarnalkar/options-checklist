@@ -318,6 +318,11 @@ def _refresh_marker_outcomes(conn, underlying: str, date_str: str) -> int:
         # stability, independent of the UI default (volume). Switching basis
         # mid-week would redefine what a "marker" is.
         flow_basis="oi",
+        # Pin the trend window to 1 minute so the write/buy split uses the raw
+        # tick (trend == d_ltp). The longer trend lens is a UI-display choice
+        # for matching the reference indicator; the tracked series must stay on
+        # the original definition so forward-return stats aren't redefined.
+        trend_window_minutes=1,
     )
     markers = result.get("score_markers") or []
     candles = result.get("candles") or []

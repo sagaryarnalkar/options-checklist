@@ -179,6 +179,10 @@ async def oi_aggregate(
     roll_window_minutes: int = 20,     # trailing window for the adaptive threshold
     days: int = 1,                     # 1 = single day; >1 = continuous multi-day view
     flow_basis: str = "volume",        # volume (reference method) | oi (net positioning)
+    trend_window_minutes: int = 1,     # price-trend window for the write/buy split.
+                                       # 1 = raw 1-min tick (DEFAULT; verified the
+                                       # closest fit to the reference's Jun-15
+                                       # fund-flow). Longer = experimental knob.
 ):
     """Return minute-aggregates + score markers + BIG-print list.
 
@@ -203,8 +207,9 @@ async def oi_aggregate(
         cooldown_i = int(cooldown_minutes)
         roll_i = int(roll_window_minutes)
         days_i = int(days)
+        trend_i = int(trend_window_minutes)
     except Exception:
-        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band + cooldown_minutes + roll_window_minutes + days must be integers")
+        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band + cooldown_minutes + roll_window_minutes + days + trend_window_minutes must be integers")
     if n_i < 1 or n_i > 50:
         raise HTTPException(status_code=400, detail="n must be 1..50")
     if atm_i < 0 or atm_i > 10:
@@ -215,12 +220,14 @@ async def oi_aggregate(
         raise HTTPException(status_code=400, detail="roll_window_minutes must be 5..120")
     if days_i < 1 or days_i > 30:
         raise HTTPException(status_code=400, detail="days must be 1..30")
+    if trend_i < 1 or trend_i > 120:
+        raise HTTPException(status_code=400, detail="trend_window_minutes must be 1..120")
 
     params = dict(
         mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
         threshold_mode=threshold_mode, score_basis=score_basis,
         cooldown_minutes=cooldown_i, roll_window_minutes=roll_i,
-        flow_basis=flow_basis,
+        flow_basis=flow_basis, trend_window_minutes=trend_i,
     )
     with db.get_conn() as conn:
         if days_i > 1:

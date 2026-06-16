@@ -86,6 +86,7 @@ def aggregate_day(
     cooldown_minutes: int = 10,
     roll_window_minutes: int = 20,
     flow_basis: str = "volume",
+    trend_window_minutes: int = 1,
 ) -> dict:
     """threshold_mode:
         'absolute' — score/print threshold is score_threshold_cr, fixed.
@@ -114,6 +115,8 @@ def aggregate_day(
         raise ValueError(f"unknown score_basis: {score_basis}")
     if flow_basis not in ("volume", "oi"):
         raise ValueError(f"unknown flow_basis: {flow_basis}")
+    if trend_window_minutes < 1:
+        raise ValueError(f"trend_window_minutes must be >= 1: {trend_window_minutes}")
     if lot_size is None:
         lot_size = KNOWN_LOT_SIZES.get(underlying, 75)
 
@@ -147,6 +150,7 @@ def aggregate_day(
         "threshold_mode": threshold_mode,
         "score_basis": score_basis,
         "flow_basis": flow_basis,
+        "trend_window_minutes": trend_window_minutes,
         "effective_threshold_cr": score_threshold_cr,
         "n": n, "atm_band": atm_band,
         "lot_size": lot_size, "strike_step": None,
@@ -179,6 +183,20 @@ def aggregate_day(
     prev_oi: dict = {}
     prev_ltp: dict = {}
     prev_vol: dict = {}
+    # Rolling LTP history per contract for the trend-based write/buy split.
+    # `trend_window_minutes` widens the price-direction lens from the 1-minute
+    # tick to a multi-minute trend. DEFAULT 1 = the original 1-min tick.
+    #
+    # Why default 1: an early throwaway analysis suggested a ~20-min trend
+    # matched the reference indicator's directional decisiveness, but running
+    # the *production* path (which is premium/notional-weighted and accumulates
+    # only over the ATM score-band, unlike that standalone) against the stored
+    # Jun-15 fund-flow shows the 1-min tick is the CLOSEST fit and every longer
+    # window pulls away from his published buckets. So the longer window is
+    # kept only as an experimental knob, not the default. deque[0] is ≈
+    # trend_window in-band minutes ago.
+    trend_w = max(1, int(trend_window_minutes))
+    ltp_window: dict = {}
 
     # Per-minute pressures, indexed by the END timestamp (ts when we observed
     # the change). After the walk we re-key by the START timestamp so that
@@ -222,11 +240,26 @@ def aggregate_day(
             prev_oi[key] = oi
             prev_ltp[key] = ltp
             prev_vol[key] = vol
+            # Rolling LTP history for the trend-based write/buy split. Appended
+            # on EVERY in-band observation — including this contract's first,
+            # which the guard below skips — so window[0] is a genuinely prior
+            # price. deque holds [t-trend_w, …, t-1, t], so window[0] is
+            # ≈ trend_w in-band minutes ago. The 1-min tick (`d_ltp`) is too
+            # noisy and splits a strike's volume ~50/50; the trend recovers the
+            # reference indicator's directional decisiveness. With
+            # trend_window_minutes=1 the deque is [t-1, t] and trend == d_ltp
+            # exactly, so the OI/recorder path is bit-for-bit unchanged.
+            w = ltp_window.get(key)
+            if w is None:
+                w = deque(maxlen=trend_w + 1)
+                ltp_window[key] = w
+            w.append(ltp)
             if p_oi is None or p_ltp is None:
                 continue
 
             d_oi = oi - p_oi
             d_ltp = ltp - p_ltp
+            trend = ltp - w[0]
             # Per-minute traded volume (Kite volume is cumulative for the day).
             d_vol = (vol - p_vol) if (vol is not None and p_vol is not None) else 0
             if d_vol < 0:
@@ -242,7 +275,7 @@ def aggregate_day(
                 qty = d_vol
             else:
                 qty = abs(d_oi)
-            if qty == 0 or d_ltp == 0:
+            if qty == 0 or trend == 0:
                 continue
 
             premium = qty * ltp
@@ -254,22 +287,23 @@ def aggregate_day(
             # rising (new positions); falling OI is covering/unwinding (not a
             # bucket). For VOLUME basis every trade is writing or buying by the
             # price-aggressor rule — there's no OI gate.
+            # Direction comes from the `trend` (see above), not the 1-min tick.
             oi_gate = (d_oi > 0) if flow_basis == "oi" else True
-            if oi_gate and d_ltp < 0:
+            if oi_gate and trend < 0:
                 action = "put_writing" if opt_type == "PE" else "call_writing"
                 if strike in score_strikes:
                     if opt_type == "PE":
                         put_writing_atm += amount
                     else:
                         call_writing_atm += amount
-            elif oi_gate and d_ltp > 0:
+            elif oi_gate and trend > 0:
                 action = "put_buying" if opt_type == "PE" else "call_buying"
                 if strike in score_strikes:
                     if opt_type == "PE":
                         put_buying_atm += amount
                     else:
                         call_buying_atm += amount
-            elif d_oi < 0 and d_ltp > 0:
+            elif d_oi < 0 and trend > 0:
                 action = "short_covering"
             else:
                 action = "long_unwinding"
@@ -574,6 +608,7 @@ def aggregate_day(
         "threshold_mode": threshold_mode,
         "score_basis": score_basis,
         "flow_basis": flow_basis,
+        "trend_window_minutes": trend_window_minutes,
         "effective_threshold_cr": round(effective_threshold_rs / CRORE, 2),
         "n": n,
         "atm_band": atm_band,
@@ -653,6 +688,7 @@ def aggregate_range(conn, underlying, dates, **kwargs):
         "threshold_mode": kwargs.get("threshold_mode"),
         "score_basis": kwargs.get("score_basis"),
         "flow_basis": kwargs.get("flow_basis", "volume"),
+        "trend_window_minutes": kwargs.get("trend_window_minutes", 1),
         "n": kwargs.get("n"),
         "atm_band": kwargs.get("atm_band"),
         "lot_size": lot_size,
