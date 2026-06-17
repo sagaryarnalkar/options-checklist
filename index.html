@@ -1462,9 +1462,9 @@
           : `₹${d.score_threshold_cr}cr`);
     const scope = d.continuous ? `${s.n_days || 0} days · ` : "";
     const trendLabel = d.trend_window_minutes ? `trend ${d.trend_window_minutes}m · ` : "";
-    const sr = d.support_resistance;
-    const srLabel = sr
-      ? `S/R ${(sr.support||[]).map(x=>x.strike).join("/")||"—"} | ${(sr.resistance||[]).map(x=>x.strike).join("/")||"—"} · `
+    const srInfo = d.support_resistance;
+    const srLabel = srInfo
+      ? `S/R ${(srInfo.support||[]).map(x=>x.strike).join("/")||"—"} | ${(srInfo.resistance||[]).map(x=>x.strike).join("/")||"—"} · `
       : "";
     setOiStatus(`${scope}${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints · thr ${thrLabel} · ${trendLabel}${srLabel}${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
     _oiChart.timeScale().fitContent();
