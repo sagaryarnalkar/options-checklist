@@ -841,6 +841,9 @@
       <label title="Price-trend window for the write/buy split. 1 = raw 1-min tick (default; closest fit to the reference's published fund-flow). Longer windows are experimental — verification showed they pull AWAY from his buckets, not toward them.">Trend window (min)
         <input type="number" id="oiTrendWindow" value="1" min="1" max="120" step="1" style="width:70px">
       </label>
+      <label title="Stable baseline (trailing median, in minutes) used as the score denominator — decoupled from the firing gate. Spreads scores 2-5 like the reference instead of pinning at 1. 0 = score off the gate threshold (the old behaviour).">Score base (min)
+        <input type="number" id="oiScoreBase" value="90" min="0" max="375" step="1" style="width:70px">
+      </label>
       <label>Floor ₹cr
         <input type="number" id="oiThresholdCr" value="10" min="1" step="1" style="width:70px">
       </label>
@@ -1185,6 +1188,7 @@
     document.getElementById("oiCooldown").addEventListener("change", oiReload);
     document.getElementById("oiRollWindow").addEventListener("change", oiReload);
     document.getElementById("oiTrendWindow").addEventListener("change", oiReload);
+    document.getElementById("oiScoreBase").addEventListener("change", oiReload);
     document.getElementById("oiRegime").addEventListener("change", oiReload);
     buildOiChart();
     await loadOiDays();
@@ -1302,6 +1306,7 @@
     const cooldown = document.getElementById("oiCooldown").value;
     const rollWindow = document.getElementById("oiRollWindow").value;
     const trendWindow = document.getElementById("oiTrendWindow").value;
+    const scoreBase = document.getElementById("oiScoreBase").value;
     setOiStatus("Loading " + under + " · " + (days === "1" ? "latest day" : days + " days") + "…");
     try {
       const qs = new URLSearchParams({
@@ -1309,7 +1314,7 @@
         score_threshold_cr: threshold, n, atm_band: atmBand,
         threshold_mode: thrMode, score_basis: basis, flow_basis: flowBasis,
         cooldown_minutes: cooldown, roll_window_minutes: rollWindow,
-        trend_window_minutes: trendWindow,
+        trend_window_minutes: trendWindow, score_baseline_minutes: scoreBase,
       });
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -1321,6 +1326,8 @@
   }
 
   function clearCharts(){
+    _oiRefLines.forEach(rl => { try { rl.series.removePriceLine(rl.line); } catch(e){} });
+    _oiRefLines = [];
     if (_oiCandleSeries) { _oiCandleSeries.setData([]); _oiCandleSeries.setMarkers([]); }
     [_oiBullTotalSeries, _oiPeWriteSeries, _oiBearTotalSeries, _oiCeWriteSeries,
      _oiRegimeBullArea, _oiRegimeBearArea]
@@ -1359,8 +1366,9 @@
     //     left exposed is CE buying.
     //   Bearish minute: deep-red total bar (CE writing + PE buying) with the
     //     light-red CE-writing portion on top → deep-red cap = PE buying.
-    // Only SIGNIFICANT minutes are drawn (dominant flow ≥ 50% of that minute's
-    // threshold), keeping the pane sparse like the reference.
+    // Only SIGNIFICANT minutes are drawn (dominant flow clears that minute's
+    // threshold — the same bar a marker fires on), keeping the pane sparse like
+    // the reference (~10% of minutes vs the old half-threshold's 54%).
     const histogram = d.histogram || [];
     const sigHist = histogram.filter(h => h.significant !== false);
     const bullMin = sigHist.filter(h => h.bullish_cr >= h.bearish_cr);
@@ -1370,9 +1378,32 @@
     _oiBearTotalSeries.setData(bearMin.map(h => ({ time: h.time, value: h.bearish_cr })));   // upward (positive)
     _oiCeWriteSeries.setData(  bearMin.map(h => ({ time: h.time, value: h.call_writing_cr }))); // upward (positive)
 
-    // Reference indicator has no σ lines on its flow pane — keep ours clean.
+    // Clear any prior price lines (S/R), then redraw.
     _oiRefLines.forEach(rl => { try { rl.series.removePriceLine(rl.line); } catch(e){} });
     _oiRefLines = [];
+
+    // Support / Resistance — horizontal lines at the max-OI strikes (support =
+    // top Put-OI below spot, resistance = top Call-OI above spot), matching the
+    // reference indicator's levels. Strongest level solid, weaker ones dashed.
+    const sr = d.support_resistance;
+    if (sr) {
+      (sr.resistance || []).forEach((lvl, i) => {
+        const line = _oiCandleSeries.createPriceLine({
+          price: lvl.strike, color: "#e5484d", lineWidth: i === 0 ? 2 : 1,
+          lineStyle: i === 0 ? 0 : 2, axisLabelVisible: true,
+          title: "R " + lvl.strike,
+        });
+        _oiRefLines.push({ series: _oiCandleSeries, line });
+      });
+      (sr.support || []).forEach((lvl, i) => {
+        const line = _oiCandleSeries.createPriceLine({
+          price: lvl.strike, color: "#2e9e4f", lineWidth: i === 0 ? 2 : 1,
+          lineStyle: i === 0 ? 0 : 2, axisLabelVisible: true,
+          title: "S " + lvl.strike,
+        });
+        _oiRefLines.push({ series: _oiCandleSeries, line });
+      });
+    }
 
     // Regime background shading — continuous area fills (1 inside a regime,
     // 0 outside). Off by default (cleaner, matches the reference's plain
@@ -1431,7 +1462,11 @@
           : `₹${d.score_threshold_cr}cr`);
     const scope = d.continuous ? `${s.n_days || 0} days · ` : "";
     const trendLabel = d.trend_window_minutes ? `trend ${d.trend_window_minutes}m · ` : "";
-    setOiStatus(`${scope}${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints · thr ${thrLabel} · ${trendLabel}${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
+    const sr = d.support_resistance;
+    const srLabel = sr
+      ? `S/R ${(sr.support||[]).map(x=>x.strike).join("/")||"—"} | ${(sr.resistance||[]).map(x=>x.strike).join("/")||"—"} · `
+      : "";
+    setOiStatus(`${scope}${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints · thr ${thrLabel} · ${trendLabel}${srLabel}${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
     _oiChart.timeScale().fitContent();
   }
 
