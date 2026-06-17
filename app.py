@@ -183,6 +183,10 @@ async def oi_aggregate(
                                        # 1 = raw 1-min tick (DEFAULT; verified the
                                        # closest fit to the reference's Jun-15
                                        # fund-flow). Longer = experimental knob.
+    score_baseline_minutes: int = 90,  # stable baseline (trailing median) used as
+                                       # the score denominator, decoupled from the
+                                       # firing gate. Spreads scores 2-5 like the
+                                       # reference; 0 = score off the gate threshold.
 ):
     """Return minute-aggregates + score markers + BIG-print list.
 
@@ -208,8 +212,9 @@ async def oi_aggregate(
         roll_i = int(roll_window_minutes)
         days_i = int(days)
         trend_i = int(trend_window_minutes)
+        scorebase_i = int(score_baseline_minutes)
     except Exception:
-        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band + cooldown_minutes + roll_window_minutes + days + trend_window_minutes must be integers")
+        raise HTTPException(status_code=400, detail="score_threshold_cr must be a number; n + atm_band + cooldown_minutes + roll_window_minutes + days + trend_window_minutes + score_baseline_minutes must be integers")
     if n_i < 1 or n_i > 50:
         raise HTTPException(status_code=400, detail="n must be 1..50")
     if atm_i < 0 or atm_i > 10:
@@ -222,12 +227,15 @@ async def oi_aggregate(
         raise HTTPException(status_code=400, detail="days must be 1..30")
     if trend_i < 1 or trend_i > 120:
         raise HTTPException(status_code=400, detail="trend_window_minutes must be 1..120")
+    if scorebase_i < 0 or scorebase_i > 375:
+        raise HTTPException(status_code=400, detail="score_baseline_minutes must be 0..375")
 
     params = dict(
         mode=mode, score_threshold_cr=thr, n=n_i, atm_band=atm_i,
         threshold_mode=threshold_mode, score_basis=score_basis,
         cooldown_minutes=cooldown_i, roll_window_minutes=roll_i,
         flow_basis=flow_basis, trend_window_minutes=trend_i,
+        score_baseline_minutes=scorebase_i,
     )
     with db.get_conn() as conn:
         if days_i > 1:

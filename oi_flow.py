@@ -87,6 +87,7 @@ def aggregate_day(
     roll_window_minutes: int = 20,
     flow_basis: str = "volume",
     trend_window_minutes: int = 1,
+    score_baseline_minutes: int = 90,
 ) -> dict:
     """threshold_mode:
         'absolute' — score/print threshold is score_threshold_cr, fixed.
@@ -117,6 +118,8 @@ def aggregate_day(
         raise ValueError(f"unknown flow_basis: {flow_basis}")
     if trend_window_minutes < 1:
         raise ValueError(f"trend_window_minutes must be >= 1: {trend_window_minutes}")
+    if score_baseline_minutes < 0:
+        raise ValueError(f"score_baseline_minutes must be >= 0: {score_baseline_minutes}")
     if lot_size is None:
         lot_size = KNOWN_LOT_SIZES.get(underlying, 75)
 
@@ -151,11 +154,12 @@ def aggregate_day(
         "score_basis": score_basis,
         "flow_basis": flow_basis,
         "trend_window_minutes": trend_window_minutes,
+        "score_baseline_minutes": score_baseline_minutes,
         "effective_threshold_cr": score_threshold_cr,
         "n": n, "atm_band": atm_band,
         "lot_size": lot_size, "strike_step": None,
         "candles": [], "score_markers": [], "histogram": [],
-        "regime": [], "fund_flow": None,
+        "regime": [], "fund_flow": None, "support_resistance": None,
         "bull_stats": None, "bear_stats": None, "big_prints_top10": [],
         "summary": {"total_minutes": 0, "n_unique_strikes": 0,
                     "n_score_markers": 0, "n_big_prints": 0,
@@ -393,6 +397,30 @@ def aggregate_day(
         thr_by_minute[sorted_pressure[-1][0]] if sorted_pressure else threshold_rs
     )
 
+    # Stable scoring baseline — the score's DENOMINATOR, decoupled from the
+    # firing GATE above. The gate (med+2·MAD over the short roll_window) decides
+    # IF a minute fires and tracks the flow closely; reusing it to also SCORE
+    # the minute pins every score at ~1 (denominator ≈ numerator) with the odd
+    # open spike at 10 — a bimodal {1, 10} with nothing between, unlike the
+    # reference's 2-5 spread. A longer, plain trailing MEDIAN doesn't chase the
+    # flow, so a fired minute reads as 2-5× a calm baseline. Verified on Jun-16:
+    # {1:28,2:6,10:5} → {1:4,2:25,3:4,4:1,10:5}. score_baseline_minutes=0 falls
+    # back to the gate threshold (the original behaviour — pinned by the
+    # recorder so its tracked forward-return series keeps one score definition).
+    SCORE_BASE_WINDOW = int(score_baseline_minutes)
+    SCORE_BASE_MIN_SAMPLES = 10
+    score_base_by_minute = {}
+    if SCORE_BASE_WINDOW > 0:
+        base_window = deque(maxlen=SCORE_BASE_WINDOW)
+        for ts, p in sorted_pressure:
+            if len(base_window) >= SCORE_BASE_MIN_SAMPLES:
+                score_base_by_minute[ts] = max(statistics.median(base_window), 0.5 * CRORE)
+            else:
+                score_base_by_minute[ts] = thr_by_minute[ts]
+            base_window.append(dom_by_minute[ts][0])
+    else:
+        score_base_by_minute = dict(thr_by_minute)
+
     # Post-filter prints by their own minute's threshold. Prints carry the
     # OBSERVATION minute; pressure/thresholds are keyed by the ANCHOR minute
     # (one minute earlier), so look up at time-60s with the floor as fallback.
@@ -407,12 +435,15 @@ def aggregate_day(
     # + CE buying deep green) and bearish flows below zero (CE writing light
     # red + PE buying deep red), matching the reference indicator's language.
     #
-    # `significant` marks minutes whose dominant (score-basis) flow reaches at
-    # least half of that minute's threshold. The UI draws flow bars ONLY for
-    # significant minutes — the reference indicator's pane is empty most of
-    # the time, and that sparseness is what makes its events readable. The
-    # full series is still emitted (stats, fund-flow, regime all use it).
-    FLOW_RENDER_FRACTION = 0.5
+    # `significant` marks minutes whose dominant (score-basis) flow CLEARS that
+    # minute's threshold — the same bar a score marker fires on. The UI draws
+    # flow bars ONLY for significant minutes; the reference indicator's pane is
+    # empty most of the time, and that sparseness is what makes its events
+    # readable. The full series is still emitted (stats, fund-flow, regime all
+    # use it). Calibrated against the reference's Jun-16 pane: at 1.0× only ~10%
+    # of minutes draw a bar (matching his ~10-15%); the old 0.5× lit up 54% of
+    # minutes — a wall of bars with no readable events.
+    FLOW_RENDER_FRACTION = 1.0
     histogram = [
         {
             "time": _ts_to_unix(ts),
@@ -427,15 +458,18 @@ def aggregate_day(
         for ts, p in sorted_pressure
     ]
 
-    # Score markers — ratio-based scaling (1 at threshold, 10 at ≥4×) so the
-    # score is computable live without knowing the day's eventual maximum.
+    # Score markers — a minute FIRES when its dominant flow clears the gate
+    # threshold; the SCORE is then how many multiples of the stable baseline it
+    # is (score_base_by_minute), ratio-based so it's computable live without
+    # knowing the day's eventual maximum.
     raw_hits = []
     for ts, p in sorted_pressure:
         dom, bull_rs, bear_rs = dom_by_minute[ts]
         thr = thr_by_minute[ts]
         if dom < thr or thr <= 0:
             continue
-        ratio = dom / thr
+        base = score_base_by_minute.get(ts, thr) or thr
+        ratio = dom / base
         raw = 1 + 9 * (ratio - 1) / (RATIO_FOR_10 - 1)
         score = max(1, min(10, int(round(raw))))
         if score_basis == "combined":
@@ -600,6 +634,36 @@ def aggregate_day(
 
     max_dom_rs = max((v[0] for v in dom_by_minute.values()), default=None)
 
+    # Support / Resistance from open interest at the LATEST snapshot. Strikes
+    # carrying the most Put OI act as support (put writers defend the floor),
+    # the most Call OI as resistance (call writers cap the ceiling) — the same
+    # max-OI levels the reference indicator draws as horizontal lines. Verified
+    # on Jun-16: max-Call-OI = 24000 matched his resistance; max-Put-OI =
+    # 23950/23900 matched his support band. Levels above spot are only valid as
+    # resistance and below spot only as support, so we filter each side by side
+    # of spot before taking the top strikes (a deep-ITM strike can carry huge
+    # OI yet sit on the wrong side to act as a barrier).
+    support_resistance = None
+    if sorted_minutes:
+        last_ts = sorted_minutes[-1]
+        last_spot = spot_at_minute[last_ts]
+        ce_oi: dict = {}
+        pe_oi: dict = {}
+        for r in minutes[last_ts]:
+            if r["oi"] is None:
+                continue
+            (ce_oi if r["opt_type"] == "CE" else pe_oi)[r["strike"]] = r["oi"]
+        res = sorted([(s, o) for s, o in ce_oi.items() if s >= last_spot],
+                     key=lambda x: -x[1])[:3]
+        sup = sorted([(s, o) for s, o in pe_oi.items() if s <= last_spot],
+                     key=lambda x: -x[1])[:3]
+        support_resistance = {
+            "as_of": _ts_to_unix(last_ts),
+            "spot": last_spot,
+            "resistance": [{"strike": s, "oi": int(o)} for s, o in sorted(res)],
+            "support": [{"strike": s, "oi": int(o)} for s, o in sorted(sup, reverse=True)],
+        }
+
     return {
         "underlying": underlying,
         "date": date,
@@ -609,6 +673,7 @@ def aggregate_day(
         "score_basis": score_basis,
         "flow_basis": flow_basis,
         "trend_window_minutes": trend_window_minutes,
+        "score_baseline_minutes": score_baseline_minutes,
         "effective_threshold_cr": round(effective_threshold_rs / CRORE, 2),
         "n": n,
         "atm_band": atm_band,
@@ -619,6 +684,7 @@ def aggregate_day(
         "histogram": histogram,
         "regime": regime,
         "fund_flow": fund_flow,
+        "support_resistance": support_resistance,
         "bull_stats": bull_stats,
         "bear_stats": bear_stats,
         "big_prints_top10": top10,
@@ -652,6 +718,7 @@ def aggregate_range(conn, underlying, dates, **kwargs):
     candles, score_markers, histogram, regime = [], [], [], []
     all_prints = []
     fund_flow = None
+    support_resistance = None
     last_day_summary = None
     strike_step = lot_size = None
     n_unique = 0
@@ -667,6 +734,8 @@ def aggregate_range(conn, underlying, dates, **kwargs):
         all_prints += r.get("big_prints_top10", [])
         if r.get("fund_flow"):
             fund_flow = r["fund_flow"]            # last non-empty wins (most recent)
+        if r.get("support_resistance"):
+            support_resistance = r["support_resistance"]   # most recent day's OI levels
         strike_step = r.get("strike_step") or strike_step
         lot_size = r.get("lot_size") or lot_size
         s = r.get("summary", {})
@@ -689,6 +758,7 @@ def aggregate_range(conn, underlying, dates, **kwargs):
         "score_basis": kwargs.get("score_basis"),
         "flow_basis": kwargs.get("flow_basis", "volume"),
         "trend_window_minutes": kwargs.get("trend_window_minutes", 1),
+        "score_baseline_minutes": kwargs.get("score_baseline_minutes", 90),
         "n": kwargs.get("n"),
         "atm_band": kwargs.get("atm_band"),
         "lot_size": lot_size,
@@ -698,6 +768,7 @@ def aggregate_range(conn, underlying, dates, **kwargs):
         "histogram": histogram,
         "regime": regime,
         "fund_flow": fund_flow,
+        "support_resistance": support_resistance,
         "bull_stats": None,   # σ bands are per-day; omitted on the merged view
         "bear_stats": None,
         "big_prints_top10": top10,

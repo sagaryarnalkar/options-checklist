@@ -323,6 +323,11 @@ def _refresh_marker_outcomes(conn, underlying: str, date_str: str) -> int:
         # for matching the reference indicator; the tracked series must stay on
         # the original definition so forward-return stats aren't redefined.
         trend_window_minutes=1,
+        # Pin the score baseline to 0 (= score off the gate threshold, the
+        # original definition). The stable 90-min baseline that the UI uses to
+        # spread scores 2-5 would otherwise redefine every tracked score and
+        # break the (side, score) forward-return buckets mid-series.
+        score_baseline_minutes=0,
     )
     markers = result.get("score_markers") or []
     candles = result.get("candles") or []
