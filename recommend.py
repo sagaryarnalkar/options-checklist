@@ -402,6 +402,7 @@ def _find_naked_short_with_hedge(
     short_premium_band: tuple, hedge_premium_band: tuple,
     max_hedge_distance: int, strike_multiples: list,
     spot: float = None,
+    hedge_anchor_pct: float = None,
 ) -> dict:
     """
     Pick the OTM short strike whose premium is closest to mid-band; pair with
@@ -416,6 +417,13 @@ def _find_naked_short_with_hedge(
         ITM strike could win on premium-distance alone)
       - hedge fallback keeps the max-distance constraint HARD — that's the
         protective constraint — and relaxes only the premium band
+
+    hedge_anchor_pct: when set (e.g. 0.02 for GG-LEAPS), the hedge is chosen by
+    DISTANCE, not premium — the strike closest to `hedge_anchor_pct` × short
+    strike away from the sold leg (≈2% ≈ 500 pts), per the IBBM GG-LEAPS rule.
+    The premium band becomes informational only; the max-distance ceiling still
+    applies. This is NOT a fallback/relaxation — it's the intended rule — so it
+    is not flagged as relaxed.
     """
     opt_type = "PE" if direction == "bull" else "CE"
     short_chain = _option_chain(instruments, name, short_expiry, opt_type)
@@ -489,12 +497,15 @@ def _find_naked_short_with_hedge(
         if hp_min <= prem <= hp_max:
             hedge_options.append((strike, ins, prem))
 
-    def _best_hedge_for(sstrike, pool):
+    def _best_hedge_for(sstrike, pool, by_distance=False):
         best, best_score = None, math.inf
+        # Distance-anchored: target ≈ hedge_anchor_pct of the SOLD strike.
+        target_dist = (hedge_anchor_pct or 0) * sstrike
         for hstrike, hins, hprem in pool:
-            if abs(hstrike - sstrike) > max_hedge_distance:
+            dist = abs(hstrike - sstrike)
+            if dist > max_hedge_distance:
                 continue
-            score = abs(hprem - hp_target)
+            score = abs(dist - target_dist) if by_distance else abs(hprem - hp_target)
             if score < best_score:
                 best_score = score
                 best = (hstrike, hins, hprem)
@@ -503,11 +514,17 @@ def _find_naked_short_with_hedge(
     candidates = []
     for sstrike, sins, sprem in short_options:
         hedge_band_relaxed = False
-        best_hedge = _best_hedge_for(sstrike, hedge_options)
-        if not best_hedge:
-            # Relax the hedge premium band; distance stays hard.
-            best_hedge = _best_hedge_for(sstrike, hedge_all)
-            hedge_band_relaxed = best_hedge is not None
+        if hedge_anchor_pct:
+            # Rule-intended distance anchoring (GG-LEAPS): pick the strike
+            # nearest ~hedge_anchor_pct away; premium is informational, so this
+            # is NOT a relaxation. Pool is every live hedge strike.
+            best_hedge = _best_hedge_for(sstrike, hedge_all, by_distance=True)
+        else:
+            best_hedge = _best_hedge_for(sstrike, hedge_options)
+            if not best_hedge:
+                # Relax the hedge premium band; distance stays hard.
+                best_hedge = _best_hedge_for(sstrike, hedge_all)
+                hedge_band_relaxed = best_hedge is not None
         if not best_hedge:
             continue
         hstrike, hins, hprem = best_hedge
@@ -669,8 +686,9 @@ def _build_ocean_treasure(kite, direction, instruments, spot, vix, today):
 
 def _build_gg_leaps(kite, direction, instruments, spot, vix, today):
     """Sell quarter-end OTM LEAPS (premium 200-350, stretch 450), buy near-month
-       hedge (premium 20-50, ~2% / ~500 pts away). 500/1000-pt strikes.
-       (15-20 Feb special rule and 15th-of-month hedge rule not yet enforced.)"""
+       hedge anchored ~2% (≈500 pts) away — per the IBBM GG-LEAPS rule, the hedge
+       is chosen by DISTANCE, not premium. 500/1000-pt strikes.
+       (15-20 Feb special rule not yet enforced.)"""
     option_exps = _option_expiries(instruments, "NIFTY", today)
     if not option_exps:
         return {"strategy": "gg_leaps", "error": "no option expiries found"}
@@ -691,15 +709,16 @@ def _build_gg_leaps(kite, direction, instruments, spot, vix, today):
         kite, instruments, "NIFTY", direction,
         short_expiry=short_expiry, hedge_expiry=hedge_expiry,
         short_premium_band=(200.0, 450.0),  # stretch band
-        hedge_premium_band=(20.0, 50.0),
-        max_hedge_distance=700,
+        hedge_premium_band=(20.0, 50.0),    # informational when anchored by distance
+        max_hedge_distance=700,             # ceiling; ~2% (≈500) sits under it
         strike_multiples=[500, 1000],
         spot=spot,
+        hedge_anchor_pct=0.02,              # hedge ~2% away from the sold strike
     )
     structure = (
-        "Bull: Sell PUT LEAPS + buy near-month PUT hedge"
+        "Bull: Sell PUT LEAPS + buy ~2% PUT hedge (monthly)"
         if direction == "bull"
-        else "Bear: Sell CALL LEAPS + buy near-month CALL hedge"
+        else "Bear: Sell CALL LEAPS + buy ~2% CALL hedge (monthly)"
     )
     return _format_naked_with_hedge("gg_leaps", structure, direction, kite, res)
 
