@@ -14,6 +14,7 @@ Run: uvicorn app:app --host 127.0.0.1 --port 8000
 from __future__ import annotations
 
 import asyncio
+import datetime as _dt
 import json
 import os
 import sys
@@ -282,6 +283,45 @@ async def oi_snapshot_now(x_auth_token: Optional[str] = Header(default=None)):
         if get_kite_from_cache() is None:
             raise HTTPException(status_code=401, detail="not authorised")
     return JSONResponse(recorder.run_snapshot(force=True))
+
+
+@app.post("/oi/backfill")
+async def oi_backfill(
+    date: Optional[str] = None,
+    underlying: Optional[str] = None,
+    x_auth_token: Optional[str] = Header(default=None),
+):
+    """Reconstruct missing chain_snapshot rows for a day from Kite history
+    (fills the gap left when the recorder wasn't running). `date` defaults to
+    today IST; `underlying` (NIFTY|BANKNIFTY) defaults to all. Idempotent —
+    minutes already captured live are dedup-ignored. Same auth as /refresh."""
+    expected = os.environ.get("REFRESH_TOKEN", "")
+    if expected and x_auth_token == expected:
+        pass
+    else:
+        from kite_auth import get_kite_from_cache as _gk
+        if _gk() is None:
+            raise HTTPException(status_code=401, detail="not authorised")
+    from kite_auth import get_kite_from_cache
+    kite = get_kite_from_cache()
+    if kite is None:
+        raise HTTPException(status_code=401, detail="no Kite session")
+
+    day = None
+    if date:
+        try:
+            day = _dt.date.fromisoformat(date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+
+    if underlying:
+        underlying = underlying.upper()
+        if underlying not in recorder.UNDERLYINGS:
+            raise HTTPException(status_code=400, detail=f"underlying must be one of {list(recorder.UNDERLYINGS)}")
+        conf = recorder.UNDERLYINGS[underlying]
+        target_day = day or _dt.datetime.now(recorder.IST).date()
+        return JSONResponse(recorder.backfill_day(kite, underlying, conf, target_day))
+    return JSONResponse(recorder.backfill_underlyings(kite, day=day))
 
 
 @app.get("/login")
