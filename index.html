@@ -207,6 +207,11 @@
   .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
   .oi-chart { height:260px; width:100%; }
   .oi-chart-merged { height:560px; }
+  /* TradingView's internal <table> (pane + time axis) renders ~20px taller than
+     its .tv-lightweight-charts wrapper, whose overflow:hidden was clipping the
+     bottom of the date/time axis labels. Un-clip it and give the card room. */
+  .oi-chart-merged .tv-lightweight-charts { overflow: visible !important; }
+  .oi-chart-card { padding-bottom: 30px; }
   .oi-side { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; }
   .oi-side-title { font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.06em; font-weight:600; margin-bottom:8px; }
   table.oi-ff { width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; margin-bottom:14px; }
@@ -1302,7 +1307,10 @@
     // margins reserving the bottom ~28%; the flow histograms live on an
     // overlay price scale squeezed into that bottom strip. Single time scale
     // means perfect vertical alignment by construction — no sync code needed.
-    _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), width: priceEl.clientWidth, height: 560 });
+    // autoSize lets the chart track the container's box exactly (incl. the
+    // time axis) via ResizeObserver — the old hardcoded height:560 didn't leave
+    // room for the ~28px time axis, so its labels were clipped at the bottom.
+    _oiChart = LightweightCharts.createChart(priceEl, { ...chartTheme(), autoSize: true });
     // Regime shading — added FIRST so it renders behind every other series.
     // Two AREA series (value 1 inside a regime, 0 outside) on a hidden
     // full-height scale. Area fills are continuous, so a regime renders as
