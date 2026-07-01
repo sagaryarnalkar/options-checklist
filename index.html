@@ -1574,7 +1574,7 @@
       </tr>`).join("");
     const altsHtml = rec.alternatives && rec.alternatives.length
       ? `<details class="rec-alts"><summary>Alternatives considered (${rec.alternatives.length})</summary>
-          <ul>${rec.alternatives.map(a=>`<li>Sell ${a.sold_strike.toLocaleString("en-IN")} / Buy ${a.hedge_strike.toLocaleString("en-IN")} · wing ${a.wing} · credit ₹${fmtNum(a.credit)}</li>`).join("")}</ul></details>`
+          <ul>${rec.alternatives.map(a=>{const sold=a.sold_strike??a.short_strike;return `<li>Sell ${sold!=null?sold.toLocaleString("en-IN"):"—"} / Buy ${a.hedge_strike!=null?a.hedge_strike.toLocaleString("en-IN"):"—"} · wing ${a.wing??"—"} · credit ₹${fmtNum(a.credit)}</li>`;}).join("")}</ul></details>`
       : "";
     const cash = portfolio?.available_cash;
     const margin = rec.margin_total;
