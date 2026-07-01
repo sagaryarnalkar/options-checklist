@@ -6,14 +6,17 @@
 <meta name="theme-color" content="#0b0e14" />
 <title>3:15 PM Options Checklist</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><text y='20' font-size='20'>📊</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root{
     --bg:#0b0e14; --panel:#11151d; --panel-2:#171c26; --border:#232a36;
     --text:#e7ecf3; --muted:#8b95a7; --accent:#4ea8ff; --accent-2:#7bd88f;
     --warn:#ffb454; --danger:#ff6b6b; --chip:#1d2430;
     --radius:10px;
-    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif;
   }
   @media (prefers-color-scheme: light){
     :root{
@@ -235,6 +238,73 @@
   .sig-unknown    { background:#e8e8e8; color:#666; }
   @keyframes sigpulse { 0%,100% { opacity:1; box-shadow:0 0 0 0 rgba(0,0,0,0.2); } 50% { opacity:0.85; box-shadow:0 0 0 4px rgba(255,255,255,0); } }
   .stitle .sig { margin-left:8px; }
+
+  /* ============================================================
+     DATA-DENSE PRO overrides — more information per screen:
+     wider canvas, tighter spacing, smaller data type, denser
+     tables. Placed last so it wins on cascade order. Purely
+     presentational — no markup or element IDs changed.
+     ============================================================ */
+  :root{ --radius:8px; }
+  .wrap{ max-width:1680px; padding:12px 14px 56px; }
+  h1{ font-size:19px; margin:2px 0 1px; }
+  h2{ font-size:12px; margin:0 0 6px; }
+  .clock{ font-size:12px; }
+  .badge{ font-size:11px; padding:3px 7px; }
+  /* Header / triggers / live panel */
+  .triggers{ padding:10px 12px; margin-bottom:10px; }
+  .triggers h2{ margin-bottom:6px; }
+  .trigger{ padding:7px 10px; }
+  .trigger .label{ font-size:13px; }
+  .trigger .sub{ font-size:12px; margin-top:1px; }
+  .live-card{ padding:11px 13px; }
+  .live-row{ font-size:12.5px; }
+  .spot-pill{ padding:5px 9px; }
+  /* Tabs — slimmer, still tappable */
+  .tabs{ padding:3px; margin-bottom:10px; gap:3px; }
+  .tab{ padding:8px 10px; font-size:13px; }
+  /* Collapsible sections + checklist rows */
+  summary{ padding:9px 12px; }
+  .section-body{ padding:2px 12px 8px; }
+  .section-body li{ padding:6px 0; }
+  /* Recommendation + OI tables — compact cells, tabular numerals */
+  table{ font-size:12.5px; }
+  th, td{ padding:5px 8px !important; }
+  td, th, .live-row, .oi-status{ font-variant-numeric:tabular-nums; }
+  .rec-strategy{ padding:12px 14px; }
+  /* OI Flow controls — pack the filter bar tighter */
+  .oi-controls{ gap:8px 10px; padding:8px 10px; }
+  .oi-status{ font-size:12px; }
+
+  /* ============================================================
+     SNAZZY POLISH — better type rendering, alignment, depth.
+     ============================================================ */
+  html,body{ -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale;
+             text-rendering:optimizeLegibility; letter-spacing:-0.006em; }
+  h1{ letter-spacing:-0.02em; font-weight:700; }
+  /* Numbers everywhere: monospaced, tabular, slightly tighter — the pro look */
+  .spot-pill b, .live-row b, td, th, .oi-status, .mono, .clock, .badge{
+    font-family:var(--mono); font-variant-numeric:tabular-nums; font-feature-settings:"tnum" 1; }
+  /* Cards get a touch of depth + crisper borders */
+  .triggers, .live-card, .rec-strategy, .trigger, .oi-chart-card{
+    box-shadow:0 1px 2px rgba(0,0,0,.16), 0 1px 0 rgba(255,255,255,.02) inset; }
+  .trigger{ transition:border-color .15s ease, transform .15s ease; }
+  .trigger:hover{ border-color:var(--accent); }
+  .tab{ transition:background .15s ease, color .15s ease; letter-spacing:.01em; }
+  .tab.active{ box-shadow:0 1px 6px rgba(78,168,255,.35); }
+  /* ALIGNMENT: right-align numeric columns in the recommendation tables
+     (Premium + Qty are the last two), keep text columns left. */
+  .rec-strategy table th:nth-child(n+4), .rec-strategy table td:nth-child(n+4){ text-align:right; }
+  .rec-strategy table th:first-child, .rec-strategy table td:first-child{ padding-left:2px !important; }
+  th{ font-weight:600; color:var(--muted); text-transform:uppercase; font-size:11px; letter-spacing:.04em; }
+  /* Section headers + pills a touch more refined */
+  .badge{ letter-spacing:.02em; }
+  .pill{ letter-spacing:.02em; }
+  /* Auto-refresh pulse dot for the OI Flow status */
+  .oi-live-dot{ display:inline-block; width:7px; height:7px; border-radius:50%;
+    background:var(--accent-2); margin-right:6px; vertical-align:middle;
+    box-shadow:0 0 0 0 rgba(123,216,143,.7); animation:oiPulse 2s infinite; }
+  @keyframes oiPulse{ 0%{box-shadow:0 0 0 0 rgba(123,216,143,.6)} 70%{box-shadow:0 0 0 6px rgba(123,216,143,0)} 100%{box-shadow:0 0 0 0 rgba(123,216,143,0)} }
 </style>
 </head>
 <body>
@@ -1148,6 +1218,23 @@
   let _oiRegimeBullArea = null, _oiRegimeBearArea = null;  // background shading
   let _oiRefLines = [];   // [{series, line}] — cleared and re-drawn on each render
 
+  // Auto-refresh: while the OI Flow tab is visible, re-pull the aggregate every
+  // OI_AUTO_MS so the chart tracks the live recorder without a manual Reload.
+  // Pauses when the tab is hidden or the browser tab is backgrounded.
+  const OI_AUTO_MS = 60000;
+  let _oiAutoTimer = null;
+  function _oiTabActive(){
+    const t = document.querySelector('.tab[data-tab="oiflow"]');
+    return !!(t && t.classList.contains("active"));
+  }
+  function startOiAuto(){
+    if (_oiAutoTimer) return;
+    _oiAutoTimer = setInterval(() => {
+      if (document.hidden || !_oiTabActive() || !_oiChart) return;
+      oiReload({ silent: true });
+    }, OI_AUTO_MS);
+  }
+
   function loadOiLib(){
     if (window.LightweightCharts) return Promise.resolve();
     if (_oiLibLoading) return _oiLibLoading;
@@ -1164,11 +1251,14 @@
   function setOiStatus(msg, cls){
     const el = document.getElementById("oiStatus");
     el.className = "oi-status" + (cls ? " " + cls : "");
-    el.textContent = msg || "";
+    const safe = String(msg || "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const live = (cls !== "error" && _oiAutoTimer)
+      ? '<span class="oi-live-dot" title="Auto-refreshing every 60s"></span>' : "";
+    el.innerHTML = live + safe;
   }
 
   async function initOiFlowTab(){
-    if (_oiInited) { oiReload(); return; }
+    if (_oiInited) { oiReload(); startOiAuto(); return; }
     _oiInited = true;
     try {
       await loadOiLib();
@@ -1190,6 +1280,7 @@
     document.getElementById("oiTrendWindow").addEventListener("change", oiReload);
     document.getElementById("oiScoreBase").addEventListener("change", oiReload);
     document.getElementById("oiRegime").addEventListener("change", oiReload);
+    startOiAuto();   // arm before the first render so the live dot shows immediately
     buildOiChart();
     await loadOiDays();
   }
@@ -1292,8 +1383,9 @@
     }
   }
 
-  async function oiReload(){
+  async function oiReload(opts){
     if (!_oiChart) return;
+    const silent = opts && opts.silent;
     const under = document.getElementById("oiUnderlying").value;
     const days = document.getElementById("oiDays").value;
     const mode = document.getElementById("oiMode").value;
@@ -1307,7 +1399,7 @@
     const rollWindow = document.getElementById("oiRollWindow").value;
     const trendWindow = document.getElementById("oiTrendWindow").value;
     const scoreBase = document.getElementById("oiScoreBase").value;
-    setOiStatus("Loading " + under + " · " + (days === "1" ? "latest day" : days + " days") + "…");
+    if (!silent) setOiStatus("Loading " + under + " · " + (days === "1" ? "latest day" : days + " days") + "…");
     try {
       const qs = new URLSearchParams({
         underlying: under, days, mode,
