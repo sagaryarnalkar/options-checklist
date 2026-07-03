@@ -305,6 +305,13 @@
   /* Section headers + pills a touch more refined */
   .badge{ letter-spacing:.02em; }
   .pill{ letter-spacing:.02em; }
+  /* Payoff-at-expiry chart on recommendation cards */
+  .payoff-wrap{ margin:10px 0 4px; }
+  .payoff-head{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:4px; }
+  .payoff-title{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+  .payoff-note{ font-size:11px; color:var(--warn); }
+  .payoff-wrap svg{ display:block; width:100%; height:auto; }
+
   /* Auto-refresh pulse dot for the OI Flow status */
   .oi-live-dot{ display:inline-block; width:7px; height:7px; border-radius:50%;
     background:var(--accent-2); margin-right:6px; vertical-align:middle;
@@ -340,215 +347,12 @@
   </div>
 
   <div class="tabs" role="tablist">
-    <button class="tab active" data-tab="flow" role="tab">By Flow</button>
-    <button class="tab" data-tab="strategy" role="tab">By Strategy</button>
+    <button class="tab active" data-tab="strategy" role="tab">By Strategy</button>
     <button class="tab" data-tab="oiflow" role="tab">OI Flow</button>
   </div>
 
-  <!-- ============================ FLOW TAB ============================ -->
-  <div class="tab-panel active" id="tabFlow">
-
-    <details class="card" open>
-      <summary><span class="stitle"><span class="caret">▸</span> 0. Pre-flight — charts &amp; data</span><span class="count" data-count></span></summary>
-      <div class="section-body">
-        <ul class="checks">
-          <li><input type="checkbox" data-key="pre.bb21"><label>Daily NIFTY chart — Bollinger Bands (21) <span class="pill">Golden Goose</span></label></li>
-          <li><input type="checkbox" data-key="pre.ema53"><label>Daily NIFTY chart — EMA 53 <span class="pill">Nidhi Kalash</span></label></li>
-          <li><input type="checkbox" data-key="pre.cmf"><label>Chaikin Money Flow (CMF) on daily <span class="pill">Panther</span></label></li>
-          <li><input type="checkbox" data-key="pre.vwma"><label>2-hour NIFTY chart — VWMA (21) <span class="pill">Ocean Treasure</span></label></li>
-          <li><input type="checkbox" data-key="pre.spotvix"><label>Note current spot, India VIX</label></li>
-        </ul>
-      </div>
-    </details>
-
-    <details class="card" open>
-      <summary><span class="stitle"><span class="caret">▸</span> 1. Calendar check</span><span class="count" data-count></span></summary>
-      <div class="section-body">
-        <p class="note">Conditions flagged in the badges above are auto-highlighted below.</p>
-        <ul class="checks">
-          <li data-flag="monBeforeExpiry"><input type="checkbox" data-key="cal.edb-enter"><label>Monday before weekly expiry → enter <b>Expiry Double Butterfly</b> at ~3:15 PM</label></li>
-          <li data-flag="tuesdayExpiry"><input type="checkbox" data-key="cal.edb-close"><label>Tuesday (weekly expiry) &amp; EDB open → close EDB at ~3:25 PM</label></li>
-          <li data-flag="lastFriday"><input type="checkbox" data-key="cal.batman-nb"><label>Last Friday of month → build <b>Batman</b> @ 3:15 + <b>No Brainer NIFTY</b> @ 3:16</label></li>
-          <li data-flag="t7"><input type="checkbox" data-key="cal.gg-t7"><label>T-7 from monthly expiry → rollover <b>Golden Goose</b></label></li>
-          <li data-flag="t8"><input type="checkbox" data-key="cal.panther-t8"><label>T-8 from monthly expiry → rollover <b>Panther</b></label></li>
-          <li data-flag="t89"><input type="checkbox" data-key="cal.nk-t89"><label>Second-last Wed of sold-leg expiry month → rollover <b>Nidhi Kalash</b> (skip if Muhurat/Budget/election day)</label></li>
-          <li data-flag="t4"><input type="checkbox" data-key="cal.ot-t4"><label>T-4 from current-month expiry → roll <b>Ocean Treasure</b> hedge only</label></li>
-          <li data-flag="hedge18"><input type="checkbox" data-key="cal.gg-leaps-hedge"><label>18th of month (or prior trading day) → roll <b>Golden Goose LEAPS</b> monthly hedge</label></li>
-        </ul>
-      </div>
-    </details>
-
-    <details class="card">
-      <summary><span class="stitle"><span class="caret">▸</span> 2. Open position review</span><span class="count" data-count></span></summary>
-      <div class="section-body">
-        <div class="subhead">Golden Goose</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg.open.monitor"><label>Monitor — no saved mid-cycle SL (structure is hedged)</label></li>
-          <li><input type="checkbox" data-key="gg.open.t7-roll"><label>If T-7 today → close &amp; rollover per fresh BB-21 signal</label></li>
-        </ul>
-        <div class="subhead">Panther</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="panther.open.monitor"><label>Monitor — no saved mid-cycle SL</label></li>
-          <li><input type="checkbox" data-key="panther.open.t8-roll"><label>If T-8 today → close &amp; rollover per fresh CMF signal</label></li>
-        </ul>
-        <div class="subhead">Nidhi Kalash</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="nk.open.monitor"><label>Monitor — no saved mid-cycle SL</label></li>
-          <li><input type="checkbox" data-key="nk.open.t89-roll"><label>If 2nd-last Wed of sold-leg expiry month → close &amp; rollover per fresh EMA-53 daily-close signal</label></li>
-        </ul>
-        <div class="subhead">Batman</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="batman.open.2pct"><label>MTM ≥ +2% of position cost → book profit</label></li>
-          <li><input type="checkbox" data-key="batman.open.hold"><label>Otherwise hold (self-hedged, no adjustment)</label></li>
-        </ul>
-        <div class="subhead">No Brainer NIFTY</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="nb.open.target"><label>MTM ≥ +2.5% of deployed capital → close all legs</label></li>
-          <li><input type="checkbox" data-key="nb.open.stop"><label>MTM ≤ −3% of deployed capital → close all legs</label></li>
-          <li><input type="checkbox" data-key="nb.open.expiry"><label>Neither hit &amp; at expiry → close at expiry</label></li>
-        </ul>
-        <div class="subhead">Ocean Treasure</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="ot.open.t4-roll"><label>If T-4 current-month expiry → roll same-month hedge only (put or call, matching direction)</label></li>
-          <li><input type="checkbox" data-key="ot.open.keep3m"><label>Keep far-month short leg untouched while VWMA-21 signal holds</label></li>
-          <li><input type="checkbox" data-key="ot.open.flip"><label>If 2h close flipped across VWMA-21 → close existing short + hedge, open opposite side</label></li>
-        </ul>
-        <div class="subhead">Expiry Double Butterfly</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="edb.open.close"><label>If Tuesday (expiry) → close at ~3:25 PM</label></li>
-        </ul>
-
-        <div class="subhead">Golden Goose LEAPS</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg_leaps.open.monitor"><label>Monitor — 3:15 PM daily close vs BB-21 midline (hold until signal flips)</label></li>
-          <li><input type="checkbox" data-key="gg_leaps.open.flip"><label>If 3:15 PM close flipped to the other side → close short LEAPS + hedge, open opposite LEAPS + new hedge</label></li>
-          <li data-flag="hedge18"><input type="checkbox" data-key="gg_leaps.open.hedge-roll"><label>If today is hedge-roll day (18th or prior biz day) → roll monthly hedge only; LEAPS untouched</label></li>
-        </ul>
-      </div>
-    </details>
-
-    <details class="card">
-      <summary><span class="stitle"><span class="caret">▸</span> 3. Fresh-entry signal scan</span><span class="count" data-count></span></summary>
-      <div class="section-body">
-        <p class="note">Only enter if the signal fires AND structural rules validate.</p>
-
-        <div class="subhead">Golden Goose — BB-21 centerline (daily)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg.sig.up"><label>Close crossed BB-21 centerline upward → <b>Bull Put</b> credit spread</label></li>
-          <li><input type="checkbox" data-key="gg.sig.down"><label>Close crossed BB-21 centerline downward → <b>Bear Call</b> credit spread</label></li>
-        </ul>
-        <div class="rules">
-          <div class="rule">100-point strikes only</div>
-          <div class="rule">Sold leg OTM; wing ≤ 2% of sold strike</div>
-          <div class="rule">Net credit ≈ ₹90–₹130</div>
-          <div class="rule">Monthly expiry; if date &gt; 15th, use next month</div>
-        </div>
-
-        <div class="subhead">Panther — CMF zero-line (daily)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="panther.sig.up"><label>CMF crossed neg → pos → <b>Bull Put</b> credit spread</label></li>
-          <li><input type="checkbox" data-key="panther.sig.down"><label>CMF crossed pos → neg → <b>Bear Call</b> credit spread</label></li>
-        </ul>
-        <div class="rules">
-          <div class="rule">100-point strikes</div>
-          <div class="rule">Wing width 200–400 points</div>
-          <div class="rule">Net credit ≥ ~200 points</div>
-          <div class="rule">Monthly expiry</div>
-        </div>
-
-        <div class="subhead">Nidhi Kalash — EMA-53 (daily close, check @ 3:20 PM)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="nk.sig.up"><label>Daily close <b>above</b> EMA-53 → <b>Bull Put credit</b> spread (sell OTM PE + buy further-OTM PE hedge)</label></li>
-          <li><input type="checkbox" data-key="nk.sig.down"><label>Daily close <b>below</b> EMA-53 → <b>Bear Call credit</b> spread (sell OTM CE + buy further-OTM CE hedge)</label></li>
-        </ul>
-        <div class="rules">
-          <div class="rule">Monthly options only — no weeklies</div>
-          <div class="rule">100-point strikes; both legs OTM; sold leg ≥ 0.5% from CMP</div>
-          <div class="rule">Net <b>credit</b>: 90–110 (bull put) / 90–130 (bear call)</div>
-          <div class="rule">Wing ≤ 2.5% of spot (round 500-pt wing acceptable exception)</div>
-          <div class="rule">Expiry by VIX: current month → next month (low VIX) → LEAPS (ultra-low)</div>
-          <div class="rule">Signal flip: wait for daily close; act at next 3:20 PM check</div>
-        </div>
-
-        <div class="subhead">Ocean Treasure — 2h VWMA (21)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="ot.sig.up"><label>2h close crossed VWMA-21 <b>upward</b> → sell far-month <b>OTM PUT</b> + buy same-month PUT hedge</label></li>
-          <li><input type="checkbox" data-key="ot.sig.down"><label>2h close crossed VWMA-21 <b>downward</b> → sell far-month <b>OTM CALL</b> + buy same-month CALL hedge</label></li>
-        </ul>
-        <div class="rules">
-          <div class="rule">Sold leg premium ≈ ₹200–₹220; hedge ≈ ₹20–₹50</div>
-          <div class="rule">500-pt strikes (fall back to 1000-pt)</div>
-          <div class="rule">Hedge strike within 700 pts of short strike</div>
-          <div class="rule">Sold leg → quarter-end expiry (Mar/Jun/Sep/Dec)</div>
-          <div class="rule">If today &gt; 20th of Q's month 2 → shift to next quarter</div>
-          <div class="rule">Universe: NIFTY, Bank Nifty, Sensex</div>
-        </div>
-
-        <div class="subhead">Golden Goose LEAPS — BB-21 midline (daily)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg_leaps.sig.down"><label>1D close BELOW midline → <b>Sell CALL LEAP</b></label></li>
-          <li><input type="checkbox" data-key="gg_leaps.sig.up"><label>1D close ABOVE midline → <b>Sell PUT LEAP</b></label></li>
-        </ul>
-        <div class="rules">
-          <div class="rule">LEAPS expiry by quarter of entry: Q1→Mar, Q2→Jun, Q3→Sep, Q4→Dec</div>
-          <div class="rule">Strike: multiple of 500 or 1000 NIFTY points, OTM</div>
-          <div class="rule">Short premium target ₹200–₹350 (flex ₹200–₹450 on liquidity)</div>
-          <div class="rule">Hedge: current-month option ~2% (~500 pts) away, same direction</div>
-          <div class="rule">If entry signal fires after 15th of month → use next-month hedge</div>
-          <div class="rule">If entry fires ~Feb 15–20 → use June LEAPS (not March)</div>
-        </div>
-      </div>
-    </details>
-
-    <details class="card">
-      <summary><span class="stitle"><span class="caret">▸</span> 4. Scheduled cycle builds</span><span class="count" data-count></span></summary>
-      <div class="section-body">
-        <div class="subhead">Last Friday @ 3:15 — Batman (next month)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="batman.build.near"><label>Buy 1 × (spot + 300) CE</label></li>
-          <li><input type="checkbox" data-key="batman.build.short"><label>Sell 2 × (spot + 600) CE</label></li>
-          <li><input type="checkbox" data-key="batman.build.far"><label>Buy 1 × (spot + 1600) CE</label></li>
-        </ul>
-        <div class="subhead">Last Friday @ 3:16 — No Brainer NIFTY (next month)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="nb.build.near"><label>Buy 1 × (spot + 300) CE</label></li>
-          <li><input type="checkbox" data-key="nb.build.short"><label>Sell 2 × (spot + 600) CE</label></li>
-          <li><input type="checkbox" data-key="nb.build.far"><label>Buy 1 × (spot + 1600) CE</label></li>
-          <li><input type="checkbox" data-key="nb.build.alerts"><label>Set MTM alerts: +2.5% / −3% of deployed capital</label></li>
-        </ul>
-        <div class="subhead">Monday @ 3:15 — Expiry Double Butterfly</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="edb.build.x"><label>S = spot; X = 0.5% of S (round to tradable strike)</label></li>
-          <li><input type="checkbox" data-key="edb.build.callfly"><label>Call fly: Buy S+0.5X / Sell 2× S+1.5X / Buy S+2.5X</label></li>
-          <li><input type="checkbox" data-key="edb.build.putfly"><label>Put fly: Buy S−0.5X / Sell 2× S−1.5X / Buy S−2.5X</label></li>
-          <li><input type="checkbox" data-key="edb.build.exit"><label>Plan exit Tuesday ~3:25 PM</label></li>
-        </ul>
-      </div>
-    </details>
-
-    <details class="card">
-      <summary><span class="stitle"><span class="caret">▸</span> 5. Rule quick-reference</span></summary>
-      <div class="section-body">
-        <table class="ref">
-          <thead><tr><th>Strategy</th><th>Trigger</th><th>Structure</th><th>Roll</th></tr></thead>
-          <tbody>
-            <tr><td>Golden Goose</td><td>BB-21 daily cross</td><td>100-pt credit; wing ≤ 2%; cr ₹90–130</td><td>T-7</td></tr>
-            <tr><td>Panther</td><td>CMF zero cross</td><td>100-pt credit; wing 200–400; cr ≥ 200</td><td>T-8</td></tr>
-            <tr><td>Nidhi Kalash</td><td>EMA-53 daily close</td><td>Credit spread: 90–110 (bull put) / 90–130 (bear call); both legs OTM; sold ≥0.5% CMP</td><td>2nd-last Wed of sold-leg month</td></tr>
-            <tr><td>Batman</td><td>Last Friday</td><td>+300 / 2× +600 / +1600 CE</td><td>Rebuild</td></tr>
-            <tr><td>No Brainer</td><td>Last Friday</td><td>+300 / 2× +600 / +1600 CE</td><td>Rebuild</td></tr>
-            <tr><td>EDB</td><td>Mon before weekly expiry (Tue)</td><td>Call fly + Put fly (0.5% wings); exit Tue ~3:25 PM</td><td>—</td></tr>
-            <tr><td>Ocean Treasure</td><td>2h VWMA-21 cross (both sides)</td><td>Sell qtr-end put/call (500-pt, ₹200–220) + same-month hedge ₹20–50 (≤700 pts)</td><td>Hedge T-4; qtr shift after 20th of month 2</td></tr>
-            <tr><td>Golden Goose LEAPS</td><td>BB-21 midline daily cross</td><td>Sell qtr LEAPS (500/1000 strikes, ₹200–350) + 1M hedge ~2% away</td><td>Hedge 18th; LEAPS on signal flip</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </details>
-
-  </div>
-
   <!-- ============================ STRATEGY TAB ============================ -->
-  <div class="tab-panel" id="tabStrategy">
+  <div class="tab-panel active" id="tabStrategy">
 
     <!-- GOLDEN GOOSE -->
     <details class="card" open data-strat="gg">
@@ -1189,7 +993,11 @@
   // --- tabs ---
   function initTabs(){
     const tabs = document.querySelectorAll(".tab");
-    const panels = { flow: document.getElementById("tabFlow"), strategy: document.getElementById("tabStrategy"), oiflow: document.getElementById("tabOiflow") };
+    // By Flow removed — its manual chart checks are auto-computed in the Live
+    // data panel now, and the calendar reminders live in Today's Triggers. A
+    // stale localStorage tab="flow" falls through the guard below to the
+    // default (By Strategy).
+    const panels = { strategy: document.getElementById("tabStrategy"), oiflow: document.getElementById("tabOiflow") };
     tabs.forEach(t => t.addEventListener("click", ()=>{
       tabs.forEach(x=>x.classList.remove("active"));
       t.classList.add("active");
@@ -1654,7 +1462,87 @@
     return `<div class="rec-relaxed"><b>⚠ Saved rule relaxed — review before trading.</b>
       <ul>${rec.relaxations.map(r => `<li>${r}</li>`).join("")}</ul></div>`;
   }
-  function renderRecCard(strategy, rec, portfolio, signal){
+
+  // ---- Payoff-at-expiry chart (inline SVG, no dependencies) ----
+  // P&L is piecewise-linear in spot: per leg, SELL collects premium and pays
+  // intrinsic, BUY pays premium and collects intrinsic; × quantity (= 1 lot's
+  // units), summed. So the curve is exact for same-expiry structures. For
+  // multi-expiry recs (OT / GG-LEAPS: quarterly short + monthly hedge) this is
+  // the payoff AT THE SHORT LEG'S EXPIRY assuming the hedge is held — labelled
+  // approximate, since the hedge actually expires/rolls earlier.
+  let _payoffUid = 0;
+  function payoffSvg(rec, spot){
+    const legs = (rec.legs || []).filter(l =>
+      l && l.strike != null && l.premium != null && l.quantity &&
+      (l.option_type === "CE" || l.option_type === "PE") &&
+      (l.action === "SELL" || l.action === "BUY"));
+    if (!legs.length) return "";
+    const pl = S => legs.reduce((sum, l) => {
+      const intr = l.option_type === "CE" ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S);
+      return sum + (l.action === "SELL" ? (l.premium - intr) : (intr - l.premium)) * l.quantity;
+    }, 0);
+
+    const ks = [...new Set(legs.map(l => l.strike))].sort((a, b) => a - b);
+    const anchor = spot || ks[Math.floor(ks.length / 2)];
+    let lo = Math.min(ks[0], anchor), hi = Math.max(ks[ks.length - 1], anchor);
+    const pad = Math.max((hi - lo) * 0.35, anchor * 0.02);
+    lo -= pad; hi += pad;
+
+    const N = 240, W = 760, H = 180, PX = 10, PT = 14, PB = 26;
+    const xs = [], ys = [];
+    for (let i = 0; i <= N; i++){ const S = lo + (hi - lo) * i / N; xs.push(S); ys.push(pl(S)); }
+    let ymin = Math.min(...ys, 0), ymax = Math.max(...ys, 0);
+    const yr = (ymax - ymin) || 1; ymin -= yr * 0.08; ymax += yr * 0.08;
+    const X = S => PX + (S - lo) / (hi - lo) * (W - 2 * PX);
+    const Y = v => PT + (ymax - v) / (ymax - ymin) * (H - PT - PB);
+    const y0 = Y(0);
+
+    const line = xs.map((S, i) => `${i ? "L" : "M"}${X(S).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join("");
+    const area = line + `L${X(hi).toFixed(1)},${y0.toFixed(1)}L${X(lo).toFixed(1)},${y0.toFixed(1)}Z`;
+
+    // Breakevens via sign changes (linear interpolation between samples)
+    const bes = [];
+    for (let i = 1; i <= N; i++){
+      if ((ys[i-1] < 0) !== (ys[i] < 0) && ys[i-1] !== ys[i]){
+        bes.push(xs[i-1] + (xs[i] - xs[i-1]) * ys[i-1] / (ys[i-1] - ys[i]));
+      }
+    }
+
+    const uid = "po" + (++_payoffUid);
+    const fmtK = v => Math.round(v).toLocaleString("en-IN");
+    const strikeMarks = ks.map(k =>
+      `<line x1="${X(k).toFixed(1)}" y1="${PT}" x2="${X(k).toFixed(1)}" y2="${H - PB}" stroke="var(--border)" stroke-width="1"/>
+       <text x="${X(k).toFixed(1)}" y="${H - PB + 12}" text-anchor="middle" font-size="9.5" fill="var(--muted)" font-family="var(--mono)">${fmtK(k)}</text>`).join("");
+    const beMarks = bes.map(b =>
+      `<circle cx="${X(b).toFixed(1)}" cy="${y0.toFixed(1)}" r="3" fill="var(--warn)"/>
+       <text x="${X(b).toFixed(1)}" y="${(y0 - 6).toFixed(1)}" text-anchor="middle" font-size="9.5" fill="var(--warn)" font-family="var(--mono)">BE ${fmtK(b)}</text>`).join("");
+    const spotMark = spot ? `
+       <line x1="${X(spot).toFixed(1)}" y1="${PT}" x2="${X(spot).toFixed(1)}" y2="${H - PB}" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3,3"/>
+       <text x="${X(spot).toFixed(1)}" y="${PT - 3}" text-anchor="middle" font-size="9.5" fill="var(--accent)" font-family="var(--mono)">spot ${fmtK(spot)}</text>` : "";
+    const approx = /hedge/i.test(String(rec.expiry || ""));
+
+    return `<div class="payoff-wrap">
+      <div class="payoff-head">
+        <span class="payoff-title">Payoff at expiry (1 lot)</span>
+        ${approx ? `<span class="payoff-note">approximate — legs expire on different dates (shown at short-leg expiry)</span>` : ""}
+      </div>
+      <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Payoff at expiry">
+        <defs>
+          <clipPath id="${uid}a"><rect x="0" y="0" width="${W}" height="${y0.toFixed(1)}"/></clipPath>
+          <clipPath id="${uid}b"><rect x="0" y="${y0.toFixed(1)}" width="${W}" height="${(H - y0).toFixed(1)}"/></clipPath>
+        </defs>
+        ${strikeMarks}
+        <path d="${area}" fill="rgba(123,216,143,.18)" clip-path="url(#${uid}a)"/>
+        <path d="${area}" fill="rgba(255,107,107,.16)" clip-path="url(#${uid}b)"/>
+        <line x1="${PX}" y1="${y0.toFixed(1)}" x2="${W - PX}" y2="${y0.toFixed(1)}" stroke="var(--muted)" stroke-width="1" opacity=".6"/>
+        <path d="${line}" fill="none" stroke="var(--accent-2)" stroke-width="1.8" clip-path="url(#${uid}a)"/>
+        <path d="${line}" fill="none" stroke="var(--danger)" stroke-width="1.8" clip-path="url(#${uid}b)"/>
+        ${spotMark}
+        ${beMarks}
+      </svg>
+    </div>`;
+  }
+  function renderRecCard(strategy, rec, portfolio, signal, spot){
     if (!rec) return "";
     if (rec.error){
       return `<div class="rec-strategy"><h4>${STRAT_LABELS[strategy] || strategy} <span class="sig ${sigClass(signal)}">${sigText(signal)}</span></h4>
@@ -1688,6 +1576,7 @@
         <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Premium</th><th>Qty</th></tr></thead>
         <tbody>${legsHtml}</tbody>
       </table>
+      ${payoffSvg(rec, spot)}
       <div class="rec-summary">
         <div class="rec-stat"><span>Net credit</span><b>₹${fmtNum(rec.credit_per_unit)}/unit · ${fmtINR(rec.credit_total)}/lot</b></div>
         <div class="rec-stat"><span>Wing</span><b>${rec.wing} pts · ${fmtNum(rec.wing_pct)}%</b></div>
@@ -1719,7 +1608,8 @@
       container.innerHTML = "";
       return;
     }
-    const cards = fired.map(([s, rec]) => renderRecCard(s, rec, portfolio, signals[s])).join("");
+    const spot = d.instruments?.nifty?.spot;   // all strategies are NIFTY
+    const cards = fired.map(([s, rec]) => renderRecCard(s, rec, portfolio, signals[s], spot)).join("");
     container.innerHTML = `<div class="rec-card">
       <h3>🎯 Trade Recommendations <span class="rec-count">${fired.length} actionable signal${fired.length>1?"s":""}</span></h3>
       ${cards}
@@ -1773,6 +1663,7 @@
   function renderInlineRecommendations(d){
     const recs = d.recommendations || {};
     const portfolio = d.portfolio || {};
+    const spot = d.instruments?.nifty?.spot;   // all strategies are NIFTY
     document.querySelectorAll("[data-strat-rec]").forEach(slot => {
       const card = slot.closest("details[data-strat]");
       if (!card) return;
@@ -1807,6 +1698,7 @@
         <div class="rec-meta" style="margin-top:6px">${rec.structure || ""} · Expiry ${rec.expiry} · Lot size ${rec.lot_size}</div>
         ${renderRelaxations(rec)}
         ${renderInlineLegs(rec)}
+        ${payoffSvg(rec, spot)}
         ${renderInlineSummary(rec, portfolio)}`;
     });
   }
