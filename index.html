@@ -305,16 +305,27 @@
   /* Section headers + pills a touch more refined */
   .badge{ letter-spacing:.02em; }
   .pill{ letter-spacing:.02em; }
-  /* Payoff-at-expiry chart on recommendation cards */
-  .payoff-wrap{ margin:8px 0 2px; max-width:640px; }
+  /* Legs table + payoff chart side by side inside a rec (stacks on narrow) */
+  .rec-cols{ display:grid; grid-template-columns:minmax(0,1.15fr) minmax(0,1fr); gap:12px; align-items:stretch; margin:8px 0 4px; }
+  .rec-cols table.rec-legs{ margin:0; align-self:start; }
+  @media (max-width:1100px){ .rec-cols{ grid-template-columns:1fr; } }
+  /* Payoff-at-expiry chart — its own bordered panel */
+  .payoff-wrap{ margin:0; background:var(--panel-2); border:1px solid var(--border);
+                border-radius:8px; padding:8px 12px 6px; }
+  .payoff-head{ margin-bottom:2px; }
   /* Auto-checked strategy conditions (replaces the manual checklists) */
-  .strat-status{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; }
+  .strat-status{ display:flex; flex-wrap:wrap; gap:6px; margin:10px 0 0; }
   .strat-status:empty{ display:none; }
   .cond{ font-size:11.5px; font-family:var(--mono); padding:3px 8px; border-radius:6px;
          border:1px solid var(--border); background:var(--panel-2); color:var(--muted); }
   .cond.ok{ color:#2e9e4f; border-color:rgba(123,216,143,.5); background:rgba(123,216,143,.08); }
   .cond.bad{ color:var(--danger); border-color:rgba(255,107,107,.45); background:rgba(255,107,107,.07); }
-  .strat-roll{ font-size:12.5px; color:var(--muted); margin:8px 0 2px; }
+  .strat-roll{ display:flex; align-items:baseline; gap:7px; margin:10px 0 2px; padding:7px 11px;
+               background:var(--panel-2); border:1px solid var(--border); border-radius:8px;
+               font-size:12.5px; color:var(--muted); }
+  .strat-roll:empty{ display:none; }
+  .strat-roll::before{ content:"↻"; color:var(--accent); font-weight:700; }
+  .strat-roll b{ font-family:var(--mono); color:var(--text); white-space:nowrap; }
   .strat-roll b.roll-today{ color:var(--warn); }
   .strat-ref{ font-size:11.5px; color:var(--muted); margin-top:8px; }
   .payoff-head{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:4px; }
@@ -589,7 +600,7 @@
   </div>
 
   <div class="footer">
-    Tick-state saved in this browser, keyed per day (auto-clears after 2 days). <code>Reset</code> clears today.<br/>
+    Conditions are auto-checked from the live built trade — a ✗ means a saved rule was relaxed to build it.<br/>
     All strategies are self-hedged (defined risk) — no discretionary stop-loss.
   </div>
 
@@ -1365,11 +1376,13 @@
       <h4>${STRAT_LABELS[strategy] || strategy} · ${rec.structure} <span class="sig ${sigClass(signal)}">${sigText(signal)}</span></h4>
       <div class="rec-meta">Expiry: ${rec.expiry} · Lot size: ${rec.lot_size}</div>
       ${renderRelaxations(rec)}
-      <table class="rec-legs">
-        <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Premium</th><th>Qty</th></tr></thead>
-        <tbody>${legsHtml}</tbody>
-      </table>
-      ${payoffSvg(rec, spot)}
+      <div class="rec-cols">
+        <table class="rec-legs">
+          <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Premium</th><th>Qty</th></tr></thead>
+          <tbody>${legsHtml}</tbody>
+        </table>
+        ${payoffSvg(rec, spot)}
+      </div>
       ${recSummaryHtml(rec)}
       ${cashWarn}
       ${altsHtml}
@@ -1636,8 +1649,10 @@
       slot.innerHTML = headLine + lateBanner + `
         <div class="rec-meta" style="margin-top:6px">${rec.structure || ""} · Expiry ${rec.expiry} · Lot size ${rec.lot_size}</div>
         ${renderRelaxations(rec)}
-        ${renderInlineLegs(rec)}
-        ${payoffSvg(rec, spot)}
+        <div class="rec-cols">
+          ${renderInlineLegs(rec)}
+          ${payoffSvg(rec, spot)}
+        </div>
         ${renderInlineSummary(rec, portfolio)}`;
     });
   }
