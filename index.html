@@ -306,7 +306,17 @@
   .badge{ letter-spacing:.02em; }
   .pill{ letter-spacing:.02em; }
   /* Payoff-at-expiry chart on recommendation cards */
-  .payoff-wrap{ margin:10px 0 4px; }
+  .payoff-wrap{ margin:8px 0 2px; max-width:640px; }
+  /* Auto-checked strategy conditions (replaces the manual checklists) */
+  .strat-status{ display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 2px; }
+  .strat-status:empty{ display:none; }
+  .cond{ font-size:11.5px; font-family:var(--mono); padding:3px 8px; border-radius:6px;
+         border:1px solid var(--border); background:var(--panel-2); color:var(--muted); }
+  .cond.ok{ color:#2e9e4f; border-color:rgba(123,216,143,.5); background:rgba(123,216,143,.08); }
+  .cond.bad{ color:var(--danger); border-color:rgba(255,107,107,.45); background:rgba(255,107,107,.07); }
+  .strat-roll{ font-size:12.5px; color:var(--muted); margin:8px 0 2px; }
+  .strat-roll b.roll-today{ color:var(--warn); }
+  .strat-ref{ font-size:11.5px; color:var(--muted); margin-top:8px; }
   .payoff-head{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap; margin-bottom:4px; }
   .payoff-title{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
   .payoff-note{ font-size:11px; color:var(--warn); }
@@ -354,318 +364,101 @@
   <!-- ============================ STRATEGY TAB ============================ -->
   <div class="tab-panel active" id="tabStrategy">
 
-    <!-- GOLDEN GOOSE -->
-    <details class="card" open data-strat="gg">
+    <details class="card " open data-strat="gg">
       <summary>
-        <span class="stitle"><span class="caret">▸</span> Golden Goose <span class="today" data-today hidden>Action today</span><span class="sig sig-unknown" data-strat-sig hidden></span></span>
-        <span class="count" data-count></span>
+        <span class="stitle"><span class="caret">▸</span> Golden Goose <span class="today" data-today hidden>Action today</span> <span class="sig sig-unknown" data-strat-sig hidden></span></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">Daily · BB-21 centerline · Monthly credit spread · Roll T-7</div>
+        <div class="strat-meta">Daily 3:15 PM · BB-21 centerline cross · Monthly credit spread · 100-pt strikes, wing ≤ 2%, credit ₹90–130 · Roll T-7</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Signal scan (3:15–3:20 PM)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg.sig.up"><label>BB-21 centerline cross upward → <b>Bull Put</b> credit spread</label></li>
-          <li><input type="checkbox" data-key="gg.sig.down"><label>BB-21 centerline cross downward → <b>Bear Call</b> credit spread</label></li>
-        </ul>
-
-        <div class="subhead">Structure rules</div>
-        <div class="rules">
-          <div class="rule">100-point strikes only</div>
-          <div class="rule">Sold leg OTM; wing ≤ 2% of sold strike</div>
-          <div class="rule">Net credit ≈ ₹90–₹130</div>
-          <div class="rule">Monthly expiry; if date &gt; 15th → next month</div>
-        </div>
-
-        <div class="subhead">Worked example (NIFTY = 25,000)</div>
-        <p class="note"><b>Bullish</b> (BB-21 cross up) → Sell 24,800 PE + Buy 24,400 PE (400-pt wing, 1.6% of sold strike; aim net credit ₹90–130).<br><b>Bearish</b> (BB-21 cross down) → Sell 25,200 CE + Buy 25,600 CE (400-pt wing).<br>If strike premiums don't hit the credit band, step one strike further OTM or use next-month expiry.</p>
-
-        <div class="subhead">If position open</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg.open.monitor"><label>Monitor (self-hedged, no mid-cycle SL)</label></li>
-          <li data-flag="t7"><input type="checkbox" data-key="gg.open.t7-roll"><label>If T-7 today → close &amp; rollover per fresh BB-21 signal</label></li>
-        </ul>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">Close at T-7 from monthly expiry; re-enter based on that day's BB-21 reading (may flip direction).</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
       </div>
     </details>
 
-    <!-- PANTHER -->
     <details class="card" data-strat="panther">
       <summary>
-        <span class="stitle"><span class="caret">▸</span> Panther <span class="today" data-today hidden>Action today</span><span class="sig sig-unknown" data-strat-sig hidden></span></span>
-        <span class="count" data-count></span>
+        <span class="stitle"><span class="caret">▸</span> Panther <span class="today" data-today hidden>Action today</span> <span class="sig sig-unknown" data-strat-sig hidden></span></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">Daily · CMF zero-line · Monthly credit spread · Roll T-8</div>
+        <div class="strat-meta">Daily 3:15 PM · CMF-21 zero-cross · Monthly credit spread · 100-pt strikes, wing 200–400, credit ≥ ₹200 · Roll T-8</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Signal scan (3:15–3:20 PM)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="panther.sig.up"><label>CMF crossed neg → pos → <b>Bull Put</b> credit spread</label></li>
-          <li><input type="checkbox" data-key="panther.sig.down"><label>CMF crossed pos → neg → <b>Bear Call</b> credit spread</label></li>
-        </ul>
-
-        <div class="subhead">Structure rules</div>
-        <div class="rules">
-          <div class="rule">100-point strikes</div>
-          <div class="rule">Wing width 200–400 points</div>
-          <div class="rule">Net credit ≥ ~200 points</div>
-          <div class="rule">Monthly expiry</div>
-        </div>
-
-        <div class="subhead">Worked example (NIFTY = 25,000)</div>
-        <p class="note"><b>Bullish</b> (CMF flipped + ) → Sell 24,700 PE + Buy 24,400 PE (300-pt wing; target net credit ≥ ₹200).<br><b>Bearish</b> (CMF flipped − ) → Sell 25,300 CE + Buy 25,600 CE (300-pt wing).<br>If credit is short of ₹200, widen wing toward 400 pts or step the sold strike closer to ATM.</p>
-
-        <div class="subhead">If position open</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="panther.open.monitor"><label>Monitor (self-hedged, no mid-cycle SL)</label></li>
-          <li data-flag="t8"><input type="checkbox" data-key="panther.open.t8-roll"><label>If T-8 today → close &amp; rollover per fresh CMF signal</label></li>
-        </ul>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">Close at T-8; re-enter based on CMF reading at close.</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
       </div>
     </details>
 
-    <!-- NIDHI KALASH -->
     <details class="card" data-strat="nk">
       <summary>
-        <span class="stitle"><span class="caret">▸</span> Nidhi Kalash <span class="today" data-today hidden>Action today</span><span class="sig sig-unknown" data-strat-sig hidden></span></span>
-        <span class="count" data-count></span>
+        <span class="stitle"><span class="caret">▸</span> Nidhi Kalash <span class="today" data-today hidden>Action today</span> <span class="sig sig-unknown" data-strat-sig hidden></span></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">Daily 3:20 PM · EMA-53 daily-close cross · Monthly <b>credit</b> spread · Roll 2nd-last Wed of sold-leg month</div>
+        <div class="strat-meta">Daily 3:20 PM · EMA-53 daily-close cross · Monthly credit spread · sold ≥ 0.5% OTM, wing ≤ 2.5%, credit 90–110 (bull) / 90–130 (bear) · Roll 2nd-last Wed of sold-leg month · Skip Muhurat/Budget/election days</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Signal scan (3:20 PM, act on daily close only)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="nk.sig.up"><label>Daily close <b>above</b> EMA-53 → <b>Bull Put credit</b> spread (sell OTM PE + buy further-OTM PE hedge)</label></li>
-          <li><input type="checkbox" data-key="nk.sig.down"><label>Daily close <b>below</b> EMA-53 → <b>Bear Call credit</b> spread (sell OTM CE + buy further-OTM CE hedge)</label></li>
-        </ul>
-
-        <div class="subhead">Structure rules</div>
-        <div class="rules">
-          <div class="rule">Monthly options only — no weeklies</div>
-          <div class="rule">100-point strikes; both legs OTM; sold leg ≥ 0.5% from CMP</div>
-          <div class="rule">Net <b>credit</b>: 90–110 (bull put) / 90–130 (bear call)</div>
-          <div class="rule">Wing ≤ 2.5% of spot (round 500-pt wing acceptable exception)</div>
-          <div class="rule">Expiry: current month → next month (low VIX) → LEAPS (ultra-low VIX)</div>
-          <div class="rule">Signal flip: wait for daily close; act at next 3:20 PM check (benefit of the doubt)</div>
-        </div>
-
-        <div class="subhead">Worked example (NIFTY = 25,000)</div>
-        <p class="note"><b>Bullish</b> (daily close above EMA-53) → Sell 24,800 PE + Buy 24,300 PE (500-pt wing, 2% of spot; sold leg 0.8% below CMP; target net credit 90–110).<br><b>Bearish</b> (daily close below EMA-53) → Sell 25,200 CE + Buy 25,700 CE (500-pt wing; target net credit 90–130).<br><i>Reference-log trade (bullish, spot 17,557):</i> Sell 17,400 PE @ 196.3 + Buy 16,900 PE @ 86.85 → net credit ≈ 109; max loss = 500 − 109 = 391.</p>
-
-        <div class="subhead">If position open</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="nk.open.monitor"><label>Monitor (max loss = wing − credit; no intraday stop)</label></li>
-          <li data-flag="t89"><input type="checkbox" data-key="nk.open.t89-roll"><label>If 2nd-last Wed of sold-leg month → close &amp; rebuild per current daily-close signal</label></li>
-          <li><input type="checkbox" data-key="nk.open.event-skip"><label>Skip entry/rollover on Muhurat / Budget / election result days</label></li>
-        </ul>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">On the second-last Wednesday of the <b>sold-leg&rsquo;s</b> expiry month, at 3:20 PM, close both legs. Re-check EMA-53 daily close and open a fresh credit spread (bull put / bear call) aligned with the current signal.</p>
-
-        <div class="subhead">Reference performance</div>
-        <p class="note">~2 trades/month · 8 of 9 quarters positive · ~₹65k per lot · ~200-pt observed max DD · 10-lot scale ≈ ₹6.5L over the reference window.</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
+        <div class="strat-ref">Ref: ~2 trades/mo · 8 of 9 quarters positive · ~₹65k/lot · ~200-pt max DD observed</div>
       </div>
     </details>
 
-    <!-- BATMAN -->
     <details class="card" data-strat="batman">
       <summary>
         <span class="stitle"><span class="caret">▸</span> Batman <span class="today" data-today hidden>Action today</span></span>
-        <span class="count" data-count></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">Last Friday · 3:15 PM · Call-side 1-2-1 asymmetric · Next-month expiry</div>
+        <div class="strat-meta">Last Friday 3:15 PM · Call-side 1-2-1: Buy 1×(spot+300) CE / Sell 2×(spot+600) CE / Buy 1×(spot+1600) CE · next month · Book ≥ +2% MTM, else hold to rebuild</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Entry build (last Friday only)</div>
-        <ul class="checks">
-          <li data-flag="lastFriday"><input type="checkbox" data-key="batman.build.near"><label>Buy 1 × (spot + 300) CE</label></li>
-          <li data-flag="lastFriday"><input type="checkbox" data-key="batman.build.short"><label>Sell 2 × (spot + 600) CE</label></li>
-          <li data-flag="lastFriday"><input type="checkbox" data-key="batman.build.far"><label>Buy 1 × (spot + 1600) CE</label></li>
-        </ul>
-
-        <div class="subhead">Worked example (NIFTY = 25,000)</div>
-        <p class="note">Buy 1 × 25,300 CE · Sell 2 × 25,600 CE · Buy 1 × 26,600 CE &nbsp;(next-month expiry).<br>Round to the nearest 50-pt tradable strike if needed. Capital = net debit of the 1-2-1 structure.</p>
-
-        <div class="subhead">If position open</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="batman.open.2pct"><label>MTM ≥ +2% of position cost → book profit</label></li>
-          <li><input type="checkbox" data-key="batman.open.hold"><label>Otherwise hold (self-hedged, no adjustment)</label></li>
-        </ul>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">Cycle-based. Rebuild next last Friday from fresh spot — do not shift old strikes mechanically.</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
       </div>
     </details>
 
-    <!-- NO BRAINER NIFTY -->
     <details class="card" data-strat="nb">
       <summary>
         <span class="stitle"><span class="caret">▸</span> No Brainer NIFTY <span class="today" data-today hidden>Action today</span></span>
-        <span class="count" data-count></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">Last Friday · 3:16 PM · Call-side 1-2-1 · Target +2.5% / Stop −3%</div>
+        <div class="strat-meta">Last Friday 3:16 PM · Call-side 1-2-1 (same strikes as Batman) · next month · Target +2.5% / Stop −3% of deployed capital / else hold to expiry</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Entry build (last Friday only)</div>
-        <ul class="checks">
-          <li data-flag="lastFriday"><input type="checkbox" data-key="nb.build.near"><label>Buy 1 × (spot + 300) CE</label></li>
-          <li data-flag="lastFriday"><input type="checkbox" data-key="nb.build.short"><label>Sell 2 × (spot + 600) CE</label></li>
-          <li data-flag="lastFriday"><input type="checkbox" data-key="nb.build.far"><label>Buy 1 × (spot + 1600) CE</label></li>
-          <li data-flag="lastFriday"><input type="checkbox" data-key="nb.build.alerts"><label>Set MTM alerts: +2.5% / −3% of deployed capital</label></li>
-        </ul>
-
-        <div class="subhead">Worked example (NIFTY = 25,000)</div>
-        <p class="note">Buy 1 × 25,300 CE · Sell 2 × 25,600 CE · Buy 1 × 26,600 CE &nbsp;(next-month expiry).<br>Round to the nearest tradable strike (50-pt increments) if needed. Set alerts at +2.5% and −3% of deployed capital.</p>
-
-        <div class="subhead">If position open</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="nb.open.target"><label>MTM ≥ +2.5% of deployed capital → close all legs</label></li>
-          <li><input type="checkbox" data-key="nb.open.stop"><label>MTM ≤ −3% of deployed capital → close all legs</label></li>
-          <li><input type="checkbox" data-key="nb.open.expiry"><label>Neither hit &amp; at expiry → close at expiry</label></li>
-        </ul>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">No intra-cycle rollover. Rebuild next last Friday from fresh spot.</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
       </div>
     </details>
 
-    <!-- EXPIRY DOUBLE BUTTERFLY -->
     <details class="card" data-strat="edb">
       <summary>
         <span class="stitle"><span class="caret">▸</span> Expiry Double Butterfly <span class="today" data-today hidden>Action today</span></span>
-        <span class="count" data-count></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">Mon before weekly expiry · 3:15 PM · Call fly + Put fly (0.5% wings) · Exit Tue</div>
+        <div class="strat-meta">Monday before weekly expiry 3:15 PM · Call fly + Put fly, X = 0.5% of spot (S±0.5X / 2×S±1.5X / S±2.5X) · weekly expiry · Exit Tuesday ~3:25 PM</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Entry build (Monday)</div>
-        <ul class="checks">
-          <li data-flag="monBeforeExpiry"><input type="checkbox" data-key="edb.build.x"><label>Let S = spot; X = 0.5% of S (round to tradable strike)</label></li>
-          <li data-flag="monBeforeExpiry"><input type="checkbox" data-key="edb.build.callfly"><label>Call fly: Buy S+0.5X / Sell 2× S+1.5X / Buy S+2.5X</label></li>
-          <li data-flag="monBeforeExpiry"><input type="checkbox" data-key="edb.build.putfly"><label>Put fly: Buy S−0.5X / Sell 2× S−1.5X / Buy S−2.5X</label></li>
-          <li data-flag="monBeforeExpiry"><input type="checkbox" data-key="edb.build.exit"><label>Plan exit Tuesday ~3:25 PM</label></li>
-        </ul>
-
-        <div class="subhead">Worked example (NIFTY = 25,000)</div>
-        <p class="note">X ≈ 100 pts (0.5% of 25,000 ≈ 125, rounded down to stay on the 50-pt weekly grid).<br><b>Call fly:</b> Buy 1 × 25,050 CE · Sell 2 × 25,150 CE · Buy 1 × 25,250 CE<br><b>Put fly:</b> Buy 1 × 24,950 PE · Sell 2 × 24,850 PE · Buy 1 × 24,750 PE<br>All legs on the current weekly (Tuesday) expiry. Net structure = small debit, defined risk.</p>
-
-        <div class="subhead">Exit (Tuesday)</div>
-        <ul class="checks">
-          <li data-flag="tuesdayExpiry"><input type="checkbox" data-key="edb.open.close"><label>Close at ~3:25 PM on weekly expiry</label></li>
-        </ul>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">None. One-cycle expiry structure. Rebuild from fresh spot next Monday.</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
       </div>
     </details>
 
-    <!-- GOLDEN GOOSE LEAPS -->
     <details class="card" data-strat="gg_leaps">
       <summary>
-        <span class="stitle"><span class="caret">▸</span> Golden Goose LEAPS <span class="today" data-today hidden>Action today</span><span class="sig sig-unknown" data-strat-sig hidden></span></span>
-        <span class="count" data-count></span>
+        <span class="stitle"><span class="caret">▸</span> Golden Goose LEAPS <span class="today" data-today hidden>Action today</span> <span class="sig sig-unknown" data-strat-sig hidden></span></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">Daily 3:15 PM · BB-21 midline · LEAPS short + monthly hedge · Hedge roll 18th · LEAPS flip on signal</div>
+        <div class="strat-meta">Daily 3:15 PM · BB-21 midline · Sell quarter-end LEAPS (500/1000-pt strikes, OTM, ₹200–450) + monthly hedge ~2% away · Hedge roll 18th · LEAPS flips only on signal · Q1→Mar Q2→Jun Q3→Sep Q4→Dec (Feb 15–20 → June)</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Signal scan (3:15 PM, once per day)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg_leaps.sig.down"><label>1D close BELOW midline → <b>Sell CALL LEAP</b></label></li>
-          <li><input type="checkbox" data-key="gg_leaps.sig.up"><label>1D close ABOVE midline → <b>Sell PUT LEAP</b></label></li>
-        </ul>
-
-        <div class="subhead">Structure rules</div>
-        <div class="rules">
-          <div class="rule">Indicator: BB(21), only midline visible (hide upper/lower/background)</div>
-          <div class="rule">LEAPS expiry by quarter of entry: Q1→Mar, Q2→Jun, Q3→Sep, Q4→Dec</div>
-          <div class="rule">Strike: multiples of 500 or 1000 NIFTY points, OTM</div>
-          <div class="rule">Short premium ≈ ₹200–₹350 (flex ₹200–₹450)</div>
-          <div class="rule">Hedge: current-month option ~2% (~500 pts) away, same direction</div>
-          <div class="rule">Signal after 15th of month → use next-month hedge</div>
-          <div class="rule">Entry ~Feb 15–20 → use June LEAPS (not March)</div>
-        </div>
-
-        <div class="subhead">Worked example (NIFTY = 25,000, entered in April)</div>
-        <p class="note">Q2 → sold leg goes into <b>June</b> quarter-end expiry. Hedge = current (April) month, ~2% (≈ 500 pts) away.<br><b>Bullish</b> (daily close above BB-21 mid) → Sell June 24,500 PE LEAPS (target premium ₹200–350) + Buy April 24,500 PE (target ₹20–50 on the ~2% rule; step the hedge strike only if premium is miles off the band).<br><b>Bearish</b> (daily close below BB-21 mid) → Sell June 25,500 CE LEAPS + Buy April 25,500 CE hedge.<br>On 18th of each month, roll the monthly hedge forward (May, then June). LEAPS stays open until BB-21 signal flips.</p>
-
-        <div class="subhead">If position open</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="gg_leaps.open.monitor"><label>Monitor — 3:15 PM close vs BB-21 midline (hold until flip)</label></li>
-          <li><input type="checkbox" data-key="gg_leaps.open.flip"><label>If signal flipped → close LEAPS + hedge, open opposite LEAPS + new hedge</label></li>
-          <li data-flag="hedge18"><input type="checkbox" data-key="gg_leaps.open.hedge-roll"><label>If today is hedge-roll day → roll monthly hedge only; LEAPS untouched</label></li>
-        </ul>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">Short LEAPS: no calendar-based roll — flipped only on BB-21 signal change. Monthly hedge: rolled on 18th of each month (prior business day if 18th is holiday / weekend).</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
       </div>
     </details>
 
-    <!-- OCEAN TREASURE -->
     <details class="card" data-strat="ot">
       <summary>
-        <span class="stitle"><span class="caret">▸</span> Ocean Treasure <span class="today" data-today hidden>Action today</span><span class="sig sig-unknown" data-strat-sig hidden></span></span>
-        <span class="count" data-count></span>
+        <span class="stitle"><span class="caret">▸</span> Ocean Treasure <span class="today" data-today hidden>Action today</span> <span class="sig sig-unknown" data-strat-sig hidden></span></span>
       </summary>
       <div class="section-body">
-        <div class="strat-meta">2h VWMA-21 cross (bull or bear) · Sell quarter-end put/call + same-month hedge · Hedge roll T-4 · Position flips on signal change</div>
+        <div class="strat-meta">2h VWMA-21 cross · Sell quarter-end (₹200–220) + same-month hedge (₹20–50, ≤700 pts) · 500-pt strikes · Hedge roll T-4, short leg holds until signal flips · after 20th of Q-month-2 → next quarter</div>
         <div class="inline-rec" data-strat-rec></div>
-
-        <div class="subhead">Signal scan (on 2h VWMA-21 cross)</div>
-        <ul class="checks">
-          <li><input type="checkbox" data-key="ot.sig.up"><label>2h close crossed VWMA-21 <b>upward</b> → sell far-month <b>OTM PUT</b> + buy same-month PUT hedge</label></li>
-          <li><input type="checkbox" data-key="ot.sig.down"><label>2h close crossed VWMA-21 <b>downward</b> → sell far-month <b>OTM CALL</b> + buy same-month CALL hedge</label></li>
-        </ul>
-
-        <div class="subhead">Structure rules</div>
-        <div class="rules">
-          <div class="rule">Sold leg: premium ≈ ₹200–₹220 (OTM, direction matches signal)</div>
-          <div class="rule">Hedge: premium ≈ ₹20–₹50 (prefer cheaper end)</div>
-          <div class="rule">500-point strikes (fall back to 1000-pt if unavailable)</div>
-          <div class="rule">Hedge strike within 700 pts of short strike</div>
-          <div class="rule">Universe: NIFTY, Bank Nifty, Sensex</div>
-        </div>
-
-        <div class="subhead">Quarterly expiry selection (sold leg)</div>
-        <div class="rules">
-          <div class="rule">Sold leg always expires at a quarter-end month: Mar / Jun / Sep / Dec</div>
-          <div class="rule">Trade on/before 20th of month 2 of current Q → current Q's end-month</div>
-          <div class="rule">Trade after 20th of month 2 → shift forward by one quarter</div>
-          <div class="rule">e.g. Feb 15 → Mar · Feb 25 → Jun · Apr 15 → Jun · Apr 25 → Sep</div>
-        </div>
-
-        <div class="subhead">Worked example (NIFTY = 25,000, entered 15 April)</div>
-        <p class="note">15 April is before the 20th of month-2 of Q2 → sold leg goes to <b>June</b> quarter-end. Hedge = current-month (April) expiry.<br><b>Bullish</b> (2h close above VWMA-21) → Sell June 24,500 PE (target premium ₹200–220) + Buy April 24,000 PE hedge (target ₹20–50; 500-pt wing, within 700-pt rule).<br><b>Bearish</b> (2h close below VWMA-21) → Sell June 25,500 CE + Buy April 26,000 CE hedge.<br>If trade is placed on/after 25 April, the sold leg shifts one quarter → <b>September</b> expiry instead. At T-4 to April expiry, roll the hedge to May only; sold leg stays.</p>
-
-        <div class="subhead">If position open</div>
-        <ul class="checks">
-          <li data-flag="t4"><input type="checkbox" data-key="ot.open.t4-roll"><label>If T-4 current-month expiry → roll same-month hedge only (put or call, matching direction)</label></li>
-          <li><input type="checkbox" data-key="ot.open.keep3m"><label>Keep far-month short leg untouched while VWMA-21 signal holds</label></li>
-          <li><input type="checkbox" data-key="ot.open.flip"><label>If 2h close flipped across VWMA-21 → close existing short + hedge, open opposite side</label></li>
-        </ul>
-
-        <div class="subhead">Reference performance (educational)</div>
-        <div class="rules">
-          <div class="rule">~20 trades / quarter</div>
-          <div class="rule">~273 pts / qtr after hedge cost</div>
-          <div class="rule">~6.5% avg monthly return on capital</div>
-          <div class="rule">Expected accum M2M DD: up to ~200 pts — keep running</div>
-          <div class="rule">~₹10 lakh supports 10 lots (750 qty @ 75 lot)</div>
-          <div class="rule">Brokerage ~₹8,500 / quarter at this size</div>
-        </div>
-
-        <div class="subhead">Rollover</div>
-        <p class="note">Hedge rolled monthly at T-4. Far-month short leg untouched unless 2h VWMA-21 signal flips or discretionary target reached.</p>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
+        <div class="strat-ref">Ref: ~20 trades/qtr · ~273 pts/qtr after hedge cost · ~6.5%/mo on capital · M2M DD up to ~200 pts is normal</div>
       </div>
     </details>
 
@@ -802,8 +595,6 @@
 
 </div>
 
-<button class="reset" id="resetBtn" title="Clear all ticks">Reset</button>
-
 <script>
   const IST = { timeZone: "Asia/Kolkata" };
 
@@ -856,6 +647,8 @@
       isT9: daysToMonthly === 9,
       isT4: daysToMonthly === 4,
       isSecondLastWedOfExpiryMonth: sameDay(today, secondLastWed),
+      // Dates exposed for the per-strategy "next rollover" lines
+      today, nextMonthly, weekly, lastFriday, secondLastWed,
     };
   }
 
@@ -1488,7 +1281,7 @@
     const pad = Math.max((hi - lo) * 0.35, anchor * 0.02);
     lo -= pad; hi += pad;
 
-    const N = 240, W = 760, H = 180, PX = 10, PT = 14, PB = 26;
+    const N = 240, W = 760, H = 132, PX = 10, PT = 13, PB = 24;
     const xs = [], ys = [];
     for (let i = 0; i <= N; i++){ const S = lo + (hi - lo) * i / N; xs.push(S); ys.push(pl(S)); }
     let ymin = Math.min(...ys, 0), ymax = Math.max(...ys, 0);
@@ -1577,14 +1370,7 @@
         <tbody>${legsHtml}</tbody>
       </table>
       ${payoffSvg(rec, spot)}
-      <div class="rec-summary">
-        <div class="rec-stat"><span>Net credit</span><b>₹${fmtNum(rec.credit_per_unit)}/unit · ${fmtINR(rec.credit_total)}/lot</b></div>
-        <div class="rec-stat"><span>Wing</span><b>${rec.wing} pts · ${fmtNum(rec.wing_pct)}%</b></div>
-        <div class="rec-stat"><span>Max profit (1 lot)</span><b class="profit">${fmtINR(rec.max_profit)}</b></div>
-        <div class="rec-stat"><span>Max loss (1 lot)</span><b class="loss">−${fmtINR(rec.max_loss)}</b></div>
-        <div class="rec-stat"><span>Margin needed (1 lot)</span><b>${fmtINR(margin)}</b></div>
-        <div class="rec-stat"><span>Available cash</span><b>${fmtINR(cash)}</b></div>
-      </div>
+      ${recSummaryHtml(rec)}
       ${cashWarn}
       ${altsHtml}
     </div>`;
@@ -1604,6 +1390,7 @@
       return ACTIONABLE.has(v.context);
     });
     renderInlineRecommendations(d);
+    renderStrategyStatus(d);
     if (fired.length === 0){
       container.innerHTML = "";
       return;
@@ -1622,6 +1409,151 @@
     ot: "ocean_treasure", gg_leaps: "gg_leaps",
     batman: "batman", nb: "no_brainer", edb: "edb",
   };
+
+  // ---- Auto-checked strategy conditions (replaces the manual checklists) ----
+  // Each check is computed from the ACTUAL built trade (legs/credit/wing) + live
+  // spot, using the same rule bands the backend builders enforce. A ✗ therefore
+  // means "this saved rule was bent to build the trade" (it will usually match a
+  // relaxation warning above). Strategies without a live rec show no chips.
+  function _sellLeg(rec){ return (rec.legs || []).find(l => l.action === "SELL"); }
+  function _buyLeg(rec){ return (rec.legs || []).find(l => l.action === "BUY"); }
+  function _otm(leg, spot){
+    if (!leg || spot == null) return null;
+    return leg.option_type === "PE" ? leg.strike < spot : leg.strike > spot;
+  }
+  function _mult(rec, m){ return (rec.legs || []).every(l => l.strike % m === 0); }
+  const COND_CHECKS = {
+    gg(rec, spot){
+      const s = _sellLeg(rec), c = rec.credit_per_unit;
+      return [
+        { label: "sold leg OTM", ok: _otm(s, spot) },
+        { label: "100-pt strikes", ok: _mult(rec, 100) },
+        { label: "wing ≤ 2% of sold strike", ok: (rec.wing != null && s) ? rec.wing <= 0.02 * s.strike : null },
+        { label: "credit ₹90–130", ok: c != null ? (c >= 90 && c <= 130) : null },
+      ];
+    },
+    panther(rec, spot){
+      const c = rec.credit_per_unit;
+      return [
+        { label: "100-pt strikes", ok: _mult(rec, 100) },
+        { label: "wing 200–400 pts", ok: rec.wing != null ? (rec.wing >= 200 && rec.wing <= 400) : null },
+        { label: "credit ≥ ₹200", ok: c != null ? c >= 200 : null },
+      ];
+    },
+    nk(rec, spot){
+      const s = _sellLeg(rec), c = rec.credit_per_unit;
+      const distOk = (s && spot) ? (_otm(s, spot) && Math.abs(s.strike - spot) / spot >= 0.005) : null;
+      const band = rec.direction === "bear" ? [90, 130] : [90, 110];
+      return [
+        { label: "sold ≥ 0.5% OTM", ok: distOk },
+        { label: "100-pt strikes", ok: _mult(rec, 100) },
+        { label: "wing ≤ 2.5% (500 ok)", ok: (rec.wing != null && spot) ? (rec.wing <= 0.025 * spot || rec.wing === 500) : null },
+        { label: `credit ₹${band[0]}–${band[1]}`, ok: c != null ? (c >= band[0] && c <= band[1]) : null },
+      ];
+    },
+    gg_leaps(rec, spot){
+      const s = _sellLeg(rec), h = _buyLeg(rec);
+      const distPct = (s && h) ? Math.abs(h.strike - s.strike) / s.strike : null;
+      return [
+        { label: "500/1000-pt strikes", ok: _mult(rec, 500) },
+        { label: "sold leg OTM", ok: _otm(s, spot) },
+        { label: "short premium ₹200–450", ok: s?.premium != null ? (s.premium >= 200 && s.premium <= 450) : null },
+        { label: "hedge ~2% away", ok: distPct != null ? (distPct >= 0.012 && distPct <= 0.03) : null },
+      ];
+    },
+    ot(rec, spot){
+      const s = _sellLeg(rec), h = _buyLeg(rec);
+      const qEnd = /-(03|06|09|12)-/.test(String(rec.expiry || "").split(",")[0]);
+      return [
+        { label: "500-pt strikes", ok: _mult(rec, 500) },
+        { label: "sold premium ₹200–220", ok: s?.premium != null ? (s.premium >= 200 && s.premium <= 220) : null },
+        { label: "hedge ₹20–50", ok: h?.premium != null ? (h.premium >= 20 && h.premium <= 50) : null },
+        { label: "hedge ≤ 700 pts away", ok: (s && h) ? Math.abs(h.strike - s.strike) <= 700 : null },
+        { label: "quarter-end sold expiry", ok: qEnd },
+      ];
+    },
+  };
+  function condChipsFor(key, rec, spot){
+    const fn = COND_CHECKS[key];
+    if (!fn || !rec || rec.error || rec.note || !(rec.legs || []).length) return "";
+    return fn(rec, spot).map(c => {
+      const cls = c.ok == null ? "" : (c.ok ? " ok" : " bad");
+      const mark = c.ok == null ? "·" : (c.ok ? "✓" : "✗");
+      return `<span class="cond${cls}">${mark} ${c.label}</span>`;
+    }).join("");
+  }
+
+  // ---- Per-strategy next-rollover line (always visible, auto-computed) ----
+  // On the day itself the backend builds the fresh trade (context=rollover /
+  // scheduled) and it appears in the card above this line.
+  function _fmtD(d){ return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }); }
+  function _monthlyMinus(f, n){
+    let d = addDays(f.nextMonthly, -n);
+    if (d < f.today){
+      const nm = lastWeekdayOfMonth(f.nextMonthly.getFullYear(), f.nextMonthly.getMonth() + 1, 2);
+      d = addDays(nm, -n);
+    }
+    return d;
+  }
+  const ROLL_INFO = {
+    gg(f){ return { date: _monthlyMinus(f, 7), label: "Full rollover (T-7): close both legs, re-enter per that day's BB-21 signal" }; },
+    panther(f){ return { date: _monthlyMinus(f, 8), label: "Full rollover (T-8): close both legs, re-enter per that day's CMF signal" }; },
+    nk(f, rec){
+      let y = f.nextMonthly.getFullYear(), m = f.nextMonthly.getMonth();
+      const em = /(\d{4})-(\d{2})-\d{2}/.exec(String(rec?.expiry || ""));
+      if (em){ y = +em[1]; m = +em[2] - 1; }
+      let d = secondLastWeekdayOfMonth(y, m, 3);
+      if (d < f.today) d = secondLastWeekdayOfMonth(y, m + 1, 3);
+      return { date: d, label: "Full rollover (2nd-last Wed of sold-leg month, 3:20 PM) — skip Muhurat/Budget/election days" };
+    },
+    ot(f){ return { date: _monthlyMinus(f, 4), label: "Hedge roll only (T-4) — short leg holds until the 2h VWMA-21 signal flips" }; },
+    gg_leaps(f){
+      let d = new Date(f.today.getFullYear(), f.today.getMonth(), 18);
+      if (d < f.today) d = new Date(f.today.getFullYear(), f.today.getMonth() + 1, 18);
+      while (d.getDay() === 0 || d.getDay() === 6) d = addDays(d, -1);  // 18th on weekend → prior biz day
+      return { date: d, label: "Hedge roll only (18th; prior biz day if weekend/holiday) — LEAPS flips only on BB-21 signal" };
+    },
+    batman(f){
+      let d = f.lastFriday;
+      if (d < f.today) d = lastWeekdayOfMonth(f.today.getFullYear(), f.today.getMonth() + 1, 5);
+      return { date: d, label: "Rebuild (last Friday, 3:15 PM) from fresh spot — old strikes are not shifted" };
+    },
+    nb(f){
+      let d = f.lastFriday;
+      if (d < f.today) d = lastWeekdayOfMonth(f.today.getFullYear(), f.today.getMonth() + 1, 5);
+      return { date: d, label: "Rebuild (last Friday, 3:16 PM) from fresh spot" };
+    },
+    edb(f){
+      let d = addDays(f.weekly, -1);
+      if (d < f.today) d = addDays(d, 7);
+      return { date: d, label: "Build (Monday, 3:15 PM) · exit Tuesday ~3:25 PM — one-cycle structure" };
+    },
+  };
+  function rollLineFor(key, rec, f){
+    const fn = ROLL_INFO[key];
+    if (!fn) return "";
+    const r = fn(f, rec);
+    const today = sameDay(r.date, f.today);
+    const when = today
+      ? `<b class="roll-today">TODAY</b>`
+      : `<b>${_fmtD(r.date)}</b>`;
+    const note = today ? " — the fresh trade to roll into is shown above once built" : "";
+    return `Next: ${when} · ${r.label}${note}`;
+  }
+  function renderStrategyStatus(d){
+    d = d || {};
+    const f = computeFlags();
+    const recs = d.recommendations || {};
+    const spot = d.instruments?.nifty?.spot;
+    document.querySelectorAll("details[data-strat]").forEach(card => {
+      const key = card.dataset.strat;
+      const rec = recs[STRAT_REC_KEY[key]];
+      const condSlot = card.querySelector("[data-strat-cond]");
+      const rollSlot = card.querySelector("[data-strat-roll]");
+      if (condSlot) condSlot.innerHTML = condChipsFor(key, rec, spot);
+      if (rollSlot) rollSlot.innerHTML = rollLineFor(key, rec, f);
+    });
+  }
   function renderInlineLegs(rec){
     if (!rec.legs || !rec.legs.length) return "";
     return `<table class="rec-legs">
@@ -1636,10 +1568,19 @@
         </tr>`).join("")}</tbody>
     </table>`;
   }
-  function renderInlineSummary(rec, portfolio){
+  // Shared summary: leads with what the user actually sizes a trade by —
+  // margin blocked, and the return/risk expressed BOTH in ₹ and as % of that
+  // margin. (Wing/available-cash dropped: wing is now an auto-checked
+  // condition; cash lives in the portfolio panel + the insufficient-cash warn.)
+  function recSummaryHtml(rec){
     const margin = rec.margin_total;
-    const cash = portfolio?.available_cash;
+    const pct = (v, sign) => (v != null && margin) ? ` · ${sign}${(v / margin * 100).toFixed(1)}% on margin` : "";
     const rows = [];
+    if (margin != null) rows.push(`<div class="rec-stat"><span>Margin (1 lot)</span><b>${fmtINR(margin)}</b></div>`);
+    if (rec.max_profit != null)
+      rows.push(`<div class="rec-stat"><span>Return if max profit</span><b class="profit">${fmtINR(rec.max_profit)}${pct(rec.max_profit, "+")}</b></div>`);
+    if (rec.max_loss != null)
+      rows.push(`<div class="rec-stat"><span>Max loss</span><b class="loss">−${fmtINR(rec.max_loss)}${pct(rec.max_loss, "−")}</b></div>`);
     if (rec.credit_per_unit != null){
       rows.push(`<div class="rec-stat"><span>Net credit</span><b>₹${fmtNum(rec.credit_per_unit)}/unit · ${fmtINR(rec.credit_total)}/lot</b></div>`);
     } else if (rec.net_premium_per_unit != null){
@@ -1647,12 +1588,10 @@
       const debit = (rec.net_premium_per_unit || 0) < 0;
       rows.push(`<div class="rec-stat"><span>Net ${debit ? "debit" : "premium"}</span><b>${rec.net_premium_per_unit > 0 ? "+" : ""}₹${fmtNum(rec.net_premium_per_unit)}/unit · ${fmtINR(Math.abs(ntot))} ${debit ? "paid" : "received"}</b></div>`);
     }
-    if (rec.wing != null) rows.push(`<div class="rec-stat"><span>Wing</span><b>${rec.wing} pts · ${fmtNum(rec.wing_pct)}%</b></div>`);
-    if (rec.max_profit != null) rows.push(`<div class="rec-stat"><span>Max profit (1 lot)</span><b class="profit">${fmtINR(rec.max_profit)}</b></div>`);
-    if (rec.max_loss != null) rows.push(`<div class="rec-stat"><span>Max loss (1 lot)</span><b class="loss">−${fmtINR(rec.max_loss)}</b></div>`);
-    if (margin != null) rows.push(`<div class="rec-stat"><span>Margin (1 lot)</span><b>${fmtINR(margin)}</b></div>`);
-    if (cash != null)   rows.push(`<div class="rec-stat"><span>Available cash</span><b>${fmtINR(cash)}</b></div>`);
     return `<div class="rec-summary">${rows.join("")}</div>`;
+  }
+  function renderInlineSummary(rec, portfolio){
+    return recSummaryHtml(rec);
   }
   const CONTEXT_LABEL = {
     fresh:     { label: "Fresh signal today",     class: "ir-context-fresh" },
@@ -1796,12 +1735,11 @@
     renderTriggers(f);
     applyFlagHighlights(f);
     applyStrategyTodayBadges(f);
-    loadState();
-    updateCounts();
+    // Checkbox machinery retired with the manual checklists (PR #42) — the
+    // conditions are auto-checked from the built trade instead.
     initTabs();
+    renderStrategyStatus({});   // roll dates render even before data.json loads
     loadSignals();
-    document.addEventListener("change", onChange);
-    document.getElementById("resetBtn").addEventListener("click", reset);
     setInterval(renderTop, 1000);
   }
   init();
