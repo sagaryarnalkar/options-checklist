@@ -446,6 +446,21 @@ def main() -> None:
         "portfolio": portfolio,
     }
 
+    # Paper-trading ledger: assume every actionable recommendation is executed
+    # at paper.PAPER_LOTS lots; mark & manage existing paper positions.
+    print("Syncing paper-trading ledger...")
+    try:
+        import db as _db
+        import paper as _paper
+        with _db.get_conn() as conn:
+            payload["paper"] = _paper.sync(kite, payload, conn)
+        t = payload["paper"].get("totals", {})
+        print(f"  paper book: realized Rs {t.get('realized_rs', 0):,.0f} · "
+              f"open uP&L Rs {t.get('open_upnl_rs', 0):,.0f}")
+    except Exception as e:
+        payload["paper"] = {"error": f"{type(e).__name__}: {e}"}
+        print(f"  paper ledger ERROR: {e}")
+
     store_data(payload)
     print(f"\nWrote {OUT} ({OUT.stat().st_size if OUT.exists() else '?'} bytes) + Redis if configured")
     print("Signals:")

@@ -375,6 +375,13 @@
   <!-- ============================ STRATEGY TAB ============================ -->
   <div class="tab-panel active" id="tabStrategy">
 
+    <!-- Paper book: every actionable recommendation is assumed executed at
+         10 lots; outcomes tracked in SQLite by paper.py on each refresh. -->
+    <div class="card" id="paperBookCard" style="padding:12px 14px; margin-bottom:10px;">
+      <div class="strat-meta" style="margin-bottom:6px"><b style="color:var(--text)">📒 Paper book — 10 lots per strategy</b> · auto-executed from recommendations · marks update on Refresh</div>
+      <div id="paperBook"><div class="note">No paper data yet — hit Refresh.</div></div>
+    </div>
+
     <details class="card " open data-strat="gg">
       <summary>
         <span class="stitle"><span class="caret">▸</span> Golden Goose <span class="today" data-today hidden>Action today</span> <span class="sig sig-unknown" data-strat-sig hidden></span></span>
@@ -470,6 +477,19 @@
         <div class="strat-status" data-strat-cond></div>
         <div class="strat-roll" data-strat-roll></div>
         <div class="strat-ref">Ref: ~20 trades/qtr · ~273 pts/qtr after hedge cost · ~6.5%/mo on capital · M2M DD up to ~200 pts is normal</div>
+      </div>
+    </details>
+
+    <details class="card" data-strat="tc">
+      <summary>
+        <span class="stitle"><span class="caret">▸</span> Triple Calendar <span class="today" data-today hidden>Action today</span></span>
+      </summary>
+      <div class="section-body">
+        <div class="strat-meta">Non-directional, always-on · SELL 3-wk weekly / BUY 4-wk weekly, same strikes · 3 tents: ATM CE ± (straddle+75→100s) wings (PE below / CE above) · Filters: India VIX 10–22, wing 400–900 · Exit +8% of debit, HARD time stop front−7d, −40% circuit breaker · Wing breach: add 4th calendar (once), 2nd breach = exit · No payoff chart (two expiries — front-expiry value needs a vol model)</div>
+        <div class="inline-rec" data-strat-rec></div>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
+        <div class="strat-ref">Source: US QQQ triple calendar (82% win, +6.3%/trade avg claimed) — spec + audit in docs/strategies/. NOT yet live-verified on NIFTY; back-leg weekly liquidity is the known risk. Paper-tracked at 10 lots.</div>
       </div>
     </details>
 
@@ -1260,6 +1280,8 @@
   const STRAT_LABELS = {
     nidhi_kalash:"Nidhi Kalash", golden_goose:"Golden Goose", panther:"Panther",
     ocean_treasure:"Ocean Treasure", gg_leaps:"Golden Goose LEAPS",
+    batman:"Batman", no_brainer:"No Brainer NIFTY", edb:"Expiry Double Butterfly",
+    triple_calendar:"Triple Calendar",
   };
   function renderRelaxations(rec){
     if (!rec.relaxations || !rec.relaxations.length) return "";
@@ -1276,6 +1298,7 @@
   // approximate, since the hedge actually expires/rolls earlier.
   let _payoffUid = 0;
   function payoffSvg(rec, spot){
+    if (rec.payoff_unsupported) return "";   // multi-expiry structures (calendars)
     const legs = (rec.legs || []).filter(l =>
       l && l.strike != null && l.premium != null && l.quantity &&
       (l.option_type === "CE" || l.option_type === "PE") &&
@@ -1404,6 +1427,7 @@
     });
     renderInlineRecommendations(d);
     renderStrategyStatus(d);
+    renderPaperBook(d);
     if (fired.length === 0){
       container.innerHTML = "";
       return;
@@ -1421,6 +1445,7 @@
     gg: "golden_goose", panther: "panther", nk: "nidhi_kalash",
     ot: "ocean_treasure", gg_leaps: "gg_leaps",
     batman: "batman", nb: "no_brainer", edb: "edb",
+    tc: "triple_calendar",
   };
 
   // ---- Auto-checked strategy conditions (replaces the manual checklists) ----
@@ -1485,6 +1510,17 @@
         { label: "quarter-end sold expiry", ok: qEnd },
       ];
     },
+    tc(rec, spot){
+      const ff = rec.filters_failed || [];
+      return [
+        { label: "India VIX 10–22", ok: !ff.some(s => /VIX/i.test(s)) },
+        { label: "wing 400–900", ok: rec.wing_offset != null
+            ? (rec.wing_offset >= 400 && rec.wing_offset <= 900 && !ff.some(s => /wing/i.test(s))) : null },
+        { label: "front 18–23 DTE weekly", ok: !!rec.front_expiry },
+        { label: "back = front + 1 week", ok: !!rec.back_expiry },
+        { label: "net debit sane", ok: rec.debit_per_unit != null ? rec.debit_per_unit > 0 : null },
+      ];
+    },
   };
   function condChipsFor(key, rec, spot){
     const fn = COND_CHECKS[key];
@@ -1541,11 +1577,17 @@
       if (d < f.today) d = addDays(d, 7);
       return { date: d, label: "Build (Monday, 3:15 PM) · exit Tuesday ~3:25 PM — one-cycle structure" };
     },
+    tc(f, rec){
+      if (!rec || !rec.time_stop) return null;
+      return { date: new Date(rec.time_stop + "T00:00:00"),
+               label: "HARD time stop (front − 7d): exit whatever the P&L · +8% target may fire any earlier day" };
+    },
   };
   function rollLineFor(key, rec, f){
     const fn = ROLL_INFO[key];
     if (!fn) return "";
     const r = fn(f, rec);
+    if (!r) return "";
     const today = sameDay(r.date, f.today);
     const when = today
       ? `<b class="roll-today">TODAY</b>`
@@ -1566,6 +1608,46 @@
       if (condSlot) condSlot.innerHTML = condChipsFor(key, rec, spot);
       if (rollSlot) rollSlot.innerHTML = rollLineFor(key, rec, f);
     });
+  }
+
+  // ---- Paper book (10 lots per strategy, tracked server-side by paper.py) ----
+  function renderPaperBook(d){
+    const slot = document.getElementById("paperBook");
+    if (!slot) return;
+    const p = d.paper;
+    if (!p || p.error){
+      slot.innerHTML = `<div class="note">${p && p.error ? "Paper ledger error: " + p.error : "No paper data yet — hit Refresh."}</div>`;
+      return;
+    }
+    const strats = p.strategies || {};
+    const keys = Object.keys(strats).sort();
+    if (!keys.length){ slot.innerHTML = `<div class="note">No paper trades yet.</div>`; return; }
+    const rows = keys.map(k => {
+      const s = strats[k];
+      const o = s.open;
+      const pos = o
+        ? `<span class="${(o.upnl_rs||0) >= 0 ? "profit" : "loss"}">OPEN</span> ${o.direction || ""} · in ${String(o.opened_ts).slice(0,10)}${o.mark_degraded ? " ⚠" : ""}`
+        : "flat";
+      const upnl = o ? `${o.upnl_rs >= 0 ? "+" : "−"}${fmtINR(Math.abs(o.upnl_rs))} (${o.upnl_pct >= 0 ? "+" : ""}${o.upnl_pct}%)` : "—";
+      const wins = s.n_closed ? `${s.wins}/${s.n_closed}` : "0/0";
+      const real = `${s.realized_rs >= 0 ? "+" : "−"}${fmtINR(Math.abs(s.realized_rs))}`;
+      return `<tr>
+        <td>${STRAT_LABELS[k] || k}</td>
+        <td>${pos}</td>
+        <td class="${o && o.upnl_rs < 0 ? "loss" : "profit"}">${upnl}</td>
+        <td>${wins}</td>
+        <td class="${s.realized_rs < 0 ? "loss" : "profit"}">${real}</td>
+      </tr>`;
+    }).join("");
+    const t = p.totals || {};
+    slot.innerHTML = `<table class="rec-legs">
+      <thead><tr><th>Strategy</th><th>Position</th><th>Open uP&L</th><th>Wins</th><th>Realized</th></tr></thead>
+      <tbody>${rows}
+        <tr style="border-top:2px solid var(--border)"><td><b>TOTAL</b></td><td></td>
+          <td class="${(t.open_upnl_rs||0) < 0 ? "loss" : "profit"}"><b>${(t.open_upnl_rs||0) >= 0 ? "+" : "−"}${fmtINR(Math.abs(t.open_upnl_rs||0))}</b></td><td></td>
+          <td class="${(t.realized_rs||0) < 0 ? "loss" : "profit"}"><b>${(t.realized_rs||0) >= 0 ? "+" : "−"}${fmtINR(Math.abs(t.realized_rs||0))}</b></td></tr>
+      </tbody></table>
+      <div class="strat-ref" style="margin-top:4px">as of ${String(p.as_of||"").slice(0,16).replace("T"," ")} · fills at LTP, no costs · OT/GG-LEAPS hedge rolls not simulated (flip/expiry only)</div>`;
   }
   function renderInlineLegs(rec){
     if (!rec.legs || !rec.legs.length) return "";
@@ -1611,6 +1693,7 @@
     rollover:  { label: "Rollover — close existing + open new", class: "ir-context-rollover" },
     scheduled: { label: "Scheduled entry today",  class: "ir-context-scheduled" },
     late:      { label: "Late entry — you missed the cross day", class: "ir-context-late" },
+    monitor:   { label: "Filters not met — monitor only, not actionable", class: "ir-context-late" },
   };
   function renderInlineRecommendations(d){
     const recs = d.recommendations || {};

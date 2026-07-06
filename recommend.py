@@ -924,6 +924,105 @@ BUILDERS = {
 }
 
 # Schedule-driven (fire on calendar flags)
+def _build_triple_calendar(kite, instruments, spot, vix, today):
+    """Triple Calendar (docs/strategies/TRIPLE_CALENDAR_SPEC.md): three
+    horizontal calendars on NIFTY — SELL the ~3-week weekly (18–23 DTE front),
+    BUY the weekly exactly one week later (back), same strikes. Middle = ATM
+    CE calendar; wings at ± (front ATM straddle + 75, rounded to 100):
+    PE calendar below, CE calendar above.
+
+    Non-directional and always-on: built every run. Hard filters (India VIX
+    10–22, wing sanity 400–900, expiry windows) set filters_failed so the
+    caller can mark it monitor-only instead of actionable. Exits are handled
+    by the paper ledger: +8% of debit target, hard time stop at front−7d,
+    −40% catastrophe. Payoff-at-expiry chart is unsupported (two expiries,
+    value at front expiry needs a vol model, not intrinsic)."""
+    fails = []
+    if vix is None:
+        fails.append("India VIX unavailable")
+    elif vix < 10.0:
+        fails.append(f"India VIX {vix:.1f} < 10 (calendar premium too lean)")
+    elif vix > 22.0:
+        fails.append(f"India VIX {vix:.1f} > 22 (term-structure inversion risk)")
+
+    exps = _option_expiries(instruments, "NIFTY", today)
+    front = next((e for e in exps if 18 <= (e - today).days <= 23), None)
+    if front is None:
+        return {"strategy": "triple_calendar",
+                "error": "no NIFTY weekly expiry in the 18–23 DTE front window"}
+    back = next((e for e in exps if (e - front).days == 7), None)
+    if back is None:
+        return {"strategy": "triple_calendar",
+                "error": f"no weekly expiry exactly one week after front {front}"}
+
+    chains = {}
+    for exp, ot in ((front, "CE"), (front, "PE"), (back, "CE"), (back, "PE")):
+        chains[(exp, ot)] = _option_chain(instruments, "NIFTY", exp, ot)
+        if not chains[(exp, ot)]:
+            return {"strategy": "triple_calendar",
+                    "error": f"empty chain for {exp} {ot}"}
+
+    # ATM on the 100-point grid, present in all four chains
+    def _on_grid(k):
+        return k % 100 == 0 and all(k in chains[c] for c in chains)
+    grid = [k for k in chains[(front, "CE")] if _on_grid(k)]
+    if not grid:
+        return {"strategy": "triple_calendar", "error": "no common 100-pt strikes"}
+    atm = min(grid, key=lambda k: abs(k - spot))
+
+    # Expected move = front ATM straddle; wing = straddle + 75, rounded to 100
+    atm_syms = [f"NFO:{chains[(front,'CE')][atm]['tradingsymbol']}",
+                f"NFO:{chains[(front,'PE')][atm]['tradingsymbol']}"]
+    ltps = _ltp_batch(kite, atm_syms)
+    straddle = sum((ltps.get(s, {}).get("last_price") or 0) for s in atm_syms)
+    if straddle <= 0:
+        return {"strategy": "triple_calendar", "error": "no ATM straddle quote"}
+    wing = int(round((straddle + 75) / 100.0) * 100)
+    if not (400 <= wing <= 900):
+        fails.append(f"wing offset {wing} outside sanity band 400–900")
+        wing = max(400, min(900, wing))
+    upper, lower = atm + wing, atm - wing
+    for k, ot in ((lower, "PE"), (upper, "CE")):
+        if k not in chains[(front, ot)] or k not in chains[(back, ot)]:
+            return {"strategy": "triple_calendar",
+                    "error": f"wing strike {k} {ot} missing from a chain"}
+
+    spec = [("SELL", front, lower, "PE"), ("BUY", back, lower, "PE"),
+            ("SELL", front, atm,   "CE"), ("BUY", back, atm,   "CE"),
+            ("SELL", front, upper, "CE"), ("BUY", back, upper, "CE")]
+    all_syms = [f"NFO:{chains[(e,ot)][k]['tradingsymbol']}" for _, e, k, ot in spec]
+    quotes = _ltp_batch(kite, all_syms)
+    lot_size = int(chains[(front, "CE")][atm].get("lot_size") or 75)
+    legs = []
+    for (action, exp, k, ot), sym in zip(spec, all_syms):
+        prem = quotes.get(sym, {}).get("last_price")
+        if prem is None:
+            return {"strategy": "triple_calendar", "error": f"no quote for {sym}"}
+        legs.append({
+            "action": action, "transaction_type": action,
+            "tradingsymbol": sym.split(":", 1)[1],
+            "strike": int(k), "option_type": ot,
+            "leg_expiry": str(exp),
+            "premium": prem, "quantity": lot_size,
+        })
+
+    out = _format_multileg("triple_calendar",
+                           "Triple Calendar (3 tents: ATM ± straddle-based wings)",
+                           f"front {front}, back {back}", lot_size, legs, kite)
+    debit = -out["net_premium_per_unit"]  # net_premium is signed (credit +)
+    out.update({
+        "front_expiry": str(front), "back_expiry": str(back),
+        "wing_offset": wing, "atm_strike": atm,
+        "straddle_ref": round(straddle, 2),
+        "debit_per_unit": round(debit, 2),
+        "target_pct": 8.0,
+        "time_stop": str(front - timedelta(days=7)),
+        "payoff_unsupported": True,
+        "filters_failed": fails or None,
+    })
+    return out
+
+
 SCHEDULE_BUILDERS = {
     "edb":        _build_expiry_double_butterfly,
     "batman":     _build_batman,
@@ -1035,5 +1134,18 @@ def build_recommendations(kite, signals: dict, blocks: dict,
             except Exception as e:
                 out[strategy] = {"strategy": strategy, "context": "scheduled",
                                  "error": f"{type(e).__name__}: {e}"}
+
+    # Always-on structures: Triple Calendar is non-directional and has no
+    # calendar trigger — it's buildable whenever its filters pass. Context
+    # 'scheduled' = actionable (paper ledger opens it if flat); 'monitor' =
+    # shown on the card but NOT actionable (filters failed).
+    try:
+        tc = _build_triple_calendar(kite, _get_instruments(), spot, vix, today)
+        if isinstance(tc, dict) and "context" not in tc:
+            tc["context"] = "monitor" if (tc.get("filters_failed") or tc.get("error")) else "scheduled"
+        out["triple_calendar"] = tc
+    except Exception as e:
+        out["triple_calendar"] = {"strategy": "triple_calendar", "context": "monitor",
+                                  "error": f"{type(e).__name__}: {e}"}
 
     return out
