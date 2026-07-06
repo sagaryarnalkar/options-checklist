@@ -258,6 +258,35 @@ async def oi_aggregate(
     return JSONResponse(result)
 
 
+@app.get("/paper/ledger")
+async def paper_ledger():
+    """Full paper-trading book: open positions, closed trades, per-strategy
+    summary, and the latest mark per open trade. Read-only."""
+    with db.get_conn() as conn:
+        open_rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM paper_trades WHERE status='open' ORDER BY strategy")]
+        closed_rows = [dict(r) for r in conn.execute(
+            "SELECT * FROM paper_trades WHERE status='closed' "
+            "ORDER BY closed_ts DESC LIMIT 100")]
+        for r in open_rows + closed_rows:
+            try:
+                r["legs"] = json.loads(r.pop("legs_json"))
+                r["meta"] = json.loads(r.pop("meta_json") or "{}")
+            except Exception:
+                pass
+        for r in open_rows:
+            m = conn.execute(
+                "SELECT ts, mark_value, upnl, spot, note FROM paper_marks "
+                "WHERE trade_id=? ORDER BY ts DESC LIMIT 1", (r["id"],)).fetchone()
+            r["last_mark"] = dict(m) if m else None
+        summary = [dict(r) for r in conn.execute(
+            "SELECT strategy, COUNT(*) n, SUM(CASE WHEN realized_pnl>0 THEN 1 ELSE 0 END) wins,"
+            " ROUND(COALESCE(SUM(realized_pnl),0)) realized_rs"
+            " FROM paper_trades WHERE status='closed' GROUP BY strategy")]
+    return JSONResponse({"open": open_rows, "closed": closed_rows,
+                         "summary_by_strategy": summary})
+
+
 @app.get("/oi/marker_analysis")
 async def oi_marker_analysis():
     """Aggregate forward-return stats across all stored score markers.

@@ -99,6 +99,42 @@ CREATE TABLE IF NOT EXISTS score_marker_outcomes (
 );
 
 CREATE INDEX IF NOT EXISTS idx_smo_underlying_ts ON score_marker_outcomes(underlying, ts);
+
+-- Paper-trading ledger: every actionable dashboard recommendation is assumed
+-- executed at PAPER_LOTS lots. Opened/marked/closed by paper.sync() on each
+-- compute.py refresh. entry/exit/mark values are net cash PER UNIT with the
+-- convention: SELL premium positive, BUY premium negative (credit > 0,
+-- debit < 0). realized_pnl is in RUPEES for the full position.
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    strategy      TEXT    NOT NULL,
+    direction     TEXT,
+    opened_ts     TEXT    NOT NULL,
+    entry_context TEXT,
+    lots          INTEGER NOT NULL,
+    lot_size      INTEGER NOT NULL,
+    legs_json     TEXT    NOT NULL,
+    entry_value   REAL    NOT NULL,
+    expiry        TEXT,
+    meta_json     TEXT,
+    status        TEXT    NOT NULL DEFAULT 'open',
+    closed_ts     TEXT,
+    exit_reason   TEXT,
+    exit_value    REAL,
+    realized_pnl  REAL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_strategy_status ON paper_trades(strategy, status);
+
+CREATE TABLE IF NOT EXISTS paper_marks (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    trade_id   INTEGER NOT NULL,
+    ts         TEXT    NOT NULL,
+    mark_value REAL    NOT NULL,
+    upnl       REAL    NOT NULL,
+    spot       REAL,
+    note       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_paper_marks_trade ON paper_marks(trade_id, ts);
 """
 
 
