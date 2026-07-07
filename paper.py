@@ -178,6 +178,47 @@ def _exit_reason(strategy, pos, upnl_unit, rec, signal, today: date) -> Optional
     return None
 
 
+def seed_from_payload(kite, payload: dict, conn) -> dict:
+    """ONE-TIME book seeding (user instruction 2026-07-07): open paper
+    positions for every strategy whose latest rec has a buildable structure
+    but a non-actionable context (hold → 'late', or 'monitor') and no open
+    position. Leg premiums are RE-QUOTED live so entries are at current
+    prices; entry_context is 'seed-<original>' so later performance analysis
+    can separate seeded entries from rule-timed ones."""
+    now_iso = datetime.now(IST).isoformat()
+    recs = payload.get("recommendations") or {}
+    opened, skipped = [], []
+    for strategy in sorted(recs):
+        rec = recs[strategy]
+        if not rec or rec.get("error") or rec.get("note") or not rec.get("legs"):
+            skipped.append({"strategy": strategy, "why": "no buildable structure today"})
+            continue
+        pos = conn.execute(
+            "SELECT id FROM paper_trades WHERE strategy=? AND status='open'",
+            (strategy,)).fetchone()
+        if pos:
+            skipped.append({"strategy": strategy, "why": f"already open (#{pos['id']})"})
+            continue
+        legs = json.loads(json.dumps(rec["legs"]))
+        quotes = _quote_legs(kite, legs)
+        no_quote = []
+        for l in legs:
+            px = quotes.get(l["tradingsymbol"])
+            if px is not None:
+                l["premium"] = px
+            else:
+                no_quote.append(l["tradingsymbol"])
+        rec2 = dict(rec)
+        rec2["legs"] = legs
+        rec2["context"] = f"seed-{rec.get('context') or 'unknown'}"
+        tid = _open_trade(conn, strategy, rec2, now_iso)
+        opened.append({"strategy": strategy, "id": tid,
+                       "entry_value": round(_entry_value(legs), 2),
+                       "requoted_live": True,
+                       "no_quote_legs": no_quote or None})
+    return {"as_of": now_iso, "opened": opened, "skipped": skipped}
+
+
 def sync(kite, payload: dict, conn) -> dict:
     """Mark, exit, and open paper positions. Returns the data.json summary."""
     now = datetime.now(IST)
