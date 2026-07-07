@@ -1,11 +1,30 @@
 """
-SQLite store for OI chain snapshots — the "existing database" the OI Flow tab
-will read from. Lives at ./data/oi_chain.db on the droplet (or
-$OPTIONS_DATA_DIR/oi_chain.db).
+SQLite store for the whole dashboard. Lives at ./data/oi_chain.db on the
+droplet (override dir via $OPTIONS_DATA_DIR). WAL mode: the per-minute
+recorder writes while the web app reads.
 
 Schema:
-  chain_snapshot  — per (timestamp, underlying, strike, expiry, CE/PE) row
-  recorder_log    — one row per recorder invocation (success or error)
+  chain_snapshot          — one row per (minute, underlying, strike, CE/PE):
+                            ltp / cumulative volume / OI. Nearest expiry,
+                            ATM ± 10. Written live by recorder.py and by the
+                            historical backfill (login-gap repair). UNIQUE
+                            constraint makes both paths idempotent.
+  underlying_candle       — 1-min OHLC of the underlying (chart + expiry-day
+                            settle prices for the paper ledger).
+  recorder_log            — one row per recorder/backfill invocation.
+  score_marker_outcomes   — forward returns (+5/15/30 min) of OI-Flow score
+                            markers under a PINNED definition (see oi_flow.py)
+                            for signal-quality analysis.
+  paper_trades            — the paper-trading ledger (10 lots per actionable
+                            recommendation): legs JSON, entry/exit values
+                            (net-cash-per-unit convention, SELL +, BUY −),
+                            entry/exit costs, gross and NET realized P&L,
+                            hedge-roll history in meta_json.
+  paper_marks             — mark-to-market history per open paper trade
+                            (net "if closed now" incl. estimated exit costs).
+
+init_db() also runs idempotent ALTER-TABLE migrations for columns added
+after tables shipped (e.g. the #48 cost columns).
 
 Time-stored fields are ISO 8601 strings with explicit IST offset. SQLite's
 DATE() function works directly on these to bucket by trading day.

@@ -38,17 +38,44 @@ AMOUNTS, FIXED IN THIS REVISION:
         margin   = notional × MARGIN_PCT
     The display of "ΔOI in lots" in the side panel uses |ΔOI| / lot_size.
 
-SCORE (per minute):
+SCORE (per minute) — gate and score are DELIBERATELY different baselines:
     atm_strikes = ATM ± atm_band
     basis 'combined' (default): bullish = PE writing + CE buying;
                                 bearish = CE writing + PE buying
     basis 'writing':            bullish = PE writing; bearish = CE writing
     dominant = max(bullish, bearish)
-    threshold: absolute (fixed ₹cr) or adaptive (trailing-60-min mean + 2σ,
-               current minute excluded — live-equivalent, no lookahead)
-    if dominant < threshold: no marker
-    else: score = clamp(1 + 9 * (dominant/threshold − 1) / 3, 1, 10)
-          (ratio scaling: 1× threshold → 1, ≥4× threshold → 10)
+    GATE  (fires a marker): threshold_mode 'adaptive' = trailing
+          roll_window_minutes (default 20) median + 2·1.4826·MAD, current
+          minute excluded — live-equivalent, no lookahead; robust to the
+          09:15 opening spike in a way mean+2σ is not. 'absolute' = fixed ₹cr.
+    SCORE (how big): dominant / trailing score_baseline_minutes (default 90)
+          plain MEDIAN, ratio-scaled 1 at 1×, 10 at ≥10× (RATIO_FOR_10).
+          Scoring off the gate itself pins everything at ~1 (denominator
+          chases the flow) — decoupling spread scores 2–5 like the reference.
+    Post-gate: episode collapse (one marker per burst at its peak, gaps ≤3min)
+          + per-side cooldown (a Buy must never suppress a nearby Sell).
+
+SUPPORT/RESISTANCE: max Put-OI strike(s) below spot = support, max Call-OI
+    above = resistance, from the latest snapshot (matched the reference's
+    drawn lines exactly on 2026-06-16).
+
+REVERSE-ENGINEERING HISTORY (why these defaults; do not relearn):
+    The tab replicates the paid "HFT Algo Scanner" (Arkabrata Das).
+    - flow_basis='volume': proven by CE/PE balance inversion across 4 days —
+      ΔOI is structurally PE-heavy (0.62–0.94), volume CE-heavy (1.02–1.30),
+      his ≈1.14 (PR #32). Reproduced his Jun-15 fund-flow to ~7.5%.
+    - mode='premium' default: his ₹-scale matches premium (~0.5–1.3×), not
+      margin (~30×) or notional (~250×). A margin default shipped once off a
+      transcript misread and was reverted after fetching real data (#27/#30).
+    - trend_window_minutes=1: an 18–20-min trend hypothesis from a standalone
+      script was DISPROVEN through this real code path (#33); the knob stays
+      as a no-op default.
+    - FLOW_RENDER_FRACTION=1.0 / score_baseline=90: calibrated against his
+      Jun-16 pane (54%→10% bar density; scores {1,10}-bimodal→2–5) (#34).
+    The recorder's forward-return tracker is PINNED to the original series
+    definition (flow_basis='oi', absolute threshold, writing basis, no
+    collapse, trend 1, score_baseline 0) — changing those redefines every
+    tracked marker; don't.
 """
 from __future__ import annotations
 

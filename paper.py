@@ -13,11 +13,36 @@ BUY negative. entry_value > 0 = credit structure, < 0 = debit. Unrealized
 P&L per unit = entry_value + mark_value, where mark_value is the net cash of
 closing every leg now. Rupee figures multiply by lot_size × lots.
 
-V1 limitations (documented in docs/APP_OVERVIEW.md):
-- Marks only when compute.py runs (user refresh / auto-refresh) — not minutely.
-- OT / GG-LEAPS monthly hedge rolls are NOT simulated; those structures close
-  only on signal flip, expiry settle, or manual exit_reason via SQL.
-- Fills at last-traded price, no slippage/costs.
+What sync() does per strategy, in order:
+  1. MARK the open position from live quotes (expired legs at intrinsic vs
+     the expiry-day NIFTY close from the recorder's candles).
+  2. EXIT if a rule fires — expired-settle first, then per strategy:
+     GG/Panther/NK close on rollover context (rebuild reopens same run);
+     batman +2%; no_brainer +2.5%/−3%; triple_calendar +8% of debit / hard
+     time stop front−7d / −40% circuit; OT & GG-LEAPS on signal flip.
+     Targets/stops fire on the GROSS structure move; the ledger records NET.
+  3. If still open, ROLL the monthly hedge when due (PR #49): OT at T-4 from
+     the hedge expiry, GG-LEAPS on the 18th (prior business day if weekend);
+     catch-up safe; old hedge sold / next-monthly bought per each strategy's
+     own selection rule; roll cash + costs fold into entry_value/entry_costs
+     so `realized = entry_value + close_cash` holds across any number of
+     rolls. Recorded in meta_json.hedge_rolls + a paper_marks note.
+  4. OPEN a new position when flat and the rec is actionable.
+
+Costs (PR #48): every executed leg-side pays brokerage ₹20/order, STT (0.1%
+of sell premium; 0.125% of intrinsic when a LONG leg expires ITM), NSE txn
+0.03503%, SEBI, GST 18%, buy-side stamp, and 0.5%-of-premium modeled
+slippage. Expiry settlements place no order. realized_pnl is NET;
+gross_pnl / entry_costs / exit_costs keep the breakdown.
+
+Known limits (keep in mind when judging results):
+- Marks only when compute.py runs (daily 15:16 IST scheduler / manual
+  Refresh) — not minutely.
+- Entries tagged entry_context='seed-late' are the one-time 2026-07-07
+  book seeding (mid-trend entries at live quotes) — separate them from
+  rule-timed entries in performance analysis.
+- Triple Calendar's 4th-calendar wing-breach adjustment is NOT simulated;
+  a breach rides to the time stop.
 """
 from __future__ import annotations
 

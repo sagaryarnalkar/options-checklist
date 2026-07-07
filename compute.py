@@ -1,15 +1,27 @@
 """
-NIFTY Options 3:15 PM checklist — data builder.
+NIFTY Options dashboard — the data builder. One run = one full refresh.
 
-Fetches NIFTY/BANKNIFTY/INDIA VIX spot + candles from Kite Connect, computes
-BB-21 (daily), EMA-53 (daily), CMF-21 (daily), VWMA-21 (2h), reads positions/
-holdings/margins, and writes ./data.json for the static index.html to render.
+Pipeline (main()):
+  1. Fetch NIFTY / BANKNIFTY / INDIA VIX spot + candles from Kite Connect.
+  2. Compute the four strategy indicators — no external TA library:
+       BB-21 centerline (daily, index)   → Golden Goose, GG-LEAPS
+       EMA-53           (daily, index)   → Nidhi Kalash
+       CMF-21           (daily, FUTURES — the index has no volume) → Panther
+       VWMA-21          (2h resample of 60m futures) → Ocean Treasure
+  3. derive_signals(): price-vs-reference crossovers → bull/bear/hold per
+     strategy; compute_calendar_flags(): rollover/build-day booleans.
+  4. recommend.build_recommendations(): exact structures with live premiums
+     for all 9 strategies (incl. always-on triple_calendar).
+  5. paper.sync(): the paper-trading ledger — every actionable rec is assumed
+     EXECUTED at 10 lots; marks open positions, executes monthly hedge rolls
+     (OT T-4 / GG-LEAPS 18th), applies exit rules, settles expired legs;
+     P&L is NET of a full transaction-cost model.
+  6. Write ./data.json (+ Redis when REDIS_URL set) for index.html.
 
-Run:
-    python3 compute.py
-
-The script will perform the daily Kite login if no fresh token is cached.
-Output: ./data.json
+Invoked by: manual `python3 compute.py` (browser login if no cached token),
+POST /refresh (headless subprocess), the dashboard's stale auto-refresh, and
+the 15:16 IST Mon–Fri scheduler in app.py. HEADLESS via OPTIONS_HEADLESS=1
+(exits 2 when no Kite session is cached — that day's run is simply skipped).
 """
 from __future__ import annotations
 
