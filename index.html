@@ -1647,7 +1647,7 @@
           <td class="${(t.open_upnl_rs||0) < 0 ? "loss" : "profit"}"><b>${(t.open_upnl_rs||0) >= 0 ? "+" : "−"}${fmtINR(Math.abs(t.open_upnl_rs||0))}</b></td><td></td>
           <td class="${(t.realized_rs||0) < 0 ? "loss" : "profit"}"><b>${(t.realized_rs||0) >= 0 ? "+" : "−"}${fmtINR(Math.abs(t.realized_rs||0))}</b></td></tr>
       </tbody></table>
-      <div class="strat-ref" style="margin-top:4px">as of ${String(p.as_of||"").slice(0,16).replace("T"," ")} · P&L NET of modeled costs (₹20/order + STT + exch/GST/stamp + 0.5% slippage per leg-side) · OT/GG-LEAPS hedge rolls not simulated (flip/expiry only)</div>`;
+      <div class="strat-ref" style="margin-top:4px">as of ${String(p.as_of||"").slice(0,16).replace("T"," ")} · P&L NET of modeled costs (₹20/order + STT + exch/GST/stamp + 0.5% slippage per leg-side) · OT/GG-LEAPS monthly hedges auto-roll (T-4 / 18th) with costs folded into basis</div>`;
   }
   function renderInlineLegs(rec){
     if (!rec.legs || !rec.legs.length) return "";
