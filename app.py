@@ -291,6 +291,32 @@ async def paper_seed(x_auth_token: Optional[str] = Header(default=None)):
     return JSONResponse(result)
 
 
+@app.post("/paper/void/{trade_id}")
+async def paper_void(trade_id: int, reason: str = "manual",
+                     x_auth_token: Optional[str] = Header(default=None)):
+    """Void an open paper trade (ledger maintenance — e.g. a mis-built
+    structure). Closed with realized_pnl=0 and exit_reason='void:<reason>' so
+    it never pollutes performance stats. Same auth as /refresh."""
+    expected = os.environ.get("REFRESH_TOKEN", "")
+    if not (expected and x_auth_token == expected):
+        from kite_auth import get_kite_from_cache as _gk
+        if _gk() is None:
+            raise HTTPException(status_code=401, detail="not authorised")
+    now_iso = _dt.datetime.now(recorder.IST).isoformat()
+    with db.get_conn() as conn:
+        row = conn.execute(
+            "SELECT id FROM paper_trades WHERE id=? AND status='open'",
+            (trade_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"no open paper trade #{trade_id}")
+        conn.execute(
+            "UPDATE paper_trades SET status='closed', closed_ts=?,"
+            " exit_reason=?, exit_value=0, realized_pnl=0 WHERE id=?",
+            (now_iso, f"void:{reason}", trade_id))
+        conn.commit()
+    return JSONResponse({"voided": trade_id, "reason": reason})
+
+
 @app.get("/paper/ledger")
 async def paper_ledger():
     """Full paper-trading book: open positions, closed trades, per-strategy

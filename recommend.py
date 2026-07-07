@@ -505,6 +505,16 @@ def _find_naked_short_with_hedge(
             dist = abs(hstrike - sstrike)
             if dist > max_hedge_distance:
                 continue
+            if by_distance:
+                # The hedge must sit FURTHER OTM than the sold strike (PE:
+                # below, CE: above) — video rule: sold 26,500 CE → hedge
+                # 27,000 CE. abs-distance alone once picked a near-ATM PUT
+                # ABOVE the sold strike (₹264 "hedge" on a ₹278 short —
+                # caught by paper trade #3 on 2026-07-07).
+                if opt_type == "PE" and hstrike >= sstrike:
+                    continue
+                if opt_type == "CE" and hstrike <= sstrike:
+                    continue
             score = abs(dist - target_dist) if by_distance else abs(hprem - hp_target)
             if score < best_score:
                 best_score = score
