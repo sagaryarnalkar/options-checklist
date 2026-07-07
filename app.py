@@ -69,6 +69,16 @@ async def _startup():
         coalesce=True,
         misfire_grace_time=30,
     )
+    # Daily auto-refresh at 15:16 IST (09:46 UTC) — runs compute.py so the
+    # paper ledger opens/marks/exits on schedule days without a manual Refresh.
+    _scheduler.add_job(
+        _scheduled_refresh,
+        trigger=CronTrigger(hour=9, minute=46, day_of_week="mon-fri", timezone="UTC"),
+        id="daily_compute",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
     _scheduler.start()
 
 
@@ -258,6 +268,29 @@ async def oi_aggregate(
     return JSONResponse(result)
 
 
+@app.post("/paper/seed")
+async def paper_seed(x_auth_token: Optional[str] = Header(default=None)):
+    """One-time book seeding: open paper positions for hold-status ('late')
+    strategies from the latest data.json recs, re-quoted live. Idempotent —
+    strategies already open are skipped. Same auth as /refresh."""
+    expected = os.environ.get("REFRESH_TOKEN", "")
+    if not (expected and x_auth_token == expected):
+        from kite_auth import get_kite_from_cache as _gk
+        if _gk() is None:
+            raise HTTPException(status_code=401, detail="not authorised")
+    from kite_auth import get_kite_from_cache
+    kite = get_kite_from_cache()
+    if kite is None:
+        raise HTTPException(status_code=401, detail="no Kite session")
+    text = load_data_text()
+    if not text:
+        raise HTTPException(status_code=400, detail="no data.json yet — run /refresh first")
+    import paper as _paper
+    with db.get_conn() as conn:
+        result = _paper.seed_from_payload(kite, json.loads(text), conn)
+    return JSONResponse(result)
+
+
 @app.get("/paper/ledger")
 async def paper_ledger():
     """Full paper-trading book: open positions, closed trades, per-strategy
@@ -421,6 +454,18 @@ async def refresh(x_auth_token: Optional[str] = Header(default=None)):
         )
     if not COMPUTE_PY.exists():
         return JSONResponse({"error": "compute.py missing"}, status_code=500)
+    body = await _run_compute_subprocess()
+    if DATA_JSON.exists():
+        try:
+            body["signals"] = json.loads(DATA_JSON.read_text()).get("signals", {})
+        except Exception:
+            pass
+    return JSONResponse(body, status_code=200 if body.get("exit_code") == 0 else 500)
+
+
+async def _run_compute_subprocess() -> dict:
+    """Run compute.py headless via subprocess; returns exit code + log.
+    Shared by POST /refresh and the 15:16 IST scheduled auto-refresh."""
     env = os.environ.copy()
     env["OPTIONS_HEADLESS"] = "1"
     # Use the same Python interpreter that's running uvicorn — guarantees
@@ -434,13 +479,17 @@ async def refresh(x_auth_token: Optional[str] = Header(default=None)):
         stderr=asyncio.subprocess.STDOUT,
     )
     out, _ = await proc.communicate()
-    body = {
-        "exit_code": proc.returncode,
-        "log": out.decode(errors="replace"),
-    }
-    if DATA_JSON.exists():
-        try:
-            body["signals"] = json.loads(DATA_JSON.read_text()).get("signals", {})
-        except Exception:
-            pass
-    return JSONResponse(body, status_code=200 if proc.returncode == 0 else 500)
+    return {"exit_code": proc.returncode, "log": out.decode(errors="replace")}
+
+
+async def _scheduled_refresh():
+    """Daily 15:16 IST auto-refresh so the paper ledger opens/marks/exits on
+    schedule days even when nobody clicks Refresh. No-ops (compute exits 2)
+    when no Kite session is cached — the user hasn't logged in that day."""
+    print("[scheduler] 15:16 IST auto-refresh starting")
+    try:
+        res = await _run_compute_subprocess()
+        tail = (res.get("log") or "").strip().splitlines()[-3:]
+        print(f"[scheduler] auto-refresh exit={res.get('exit_code')} · " + " | ".join(tail))
+    except Exception as e:
+        print(f"[scheduler] auto-refresh failed: {type(e).__name__}: {e}")
