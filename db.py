@@ -142,6 +142,14 @@ def init_db() -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(DB_PATH)) as conn:
         conn.executescript(SCHEMA)
+        # Migrations for existing DBs (CREATE TABLE IF NOT EXISTS won't add
+        # columns). Idempotent: ALTER fails harmlessly if the column exists.
+        for col, decl in (("entry_costs", "REAL"), ("exit_costs", "REAL"),
+                          ("gross_pnl", "REAL")):
+            try:
+                conn.execute(f"ALTER TABLE paper_trades ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError:
+                pass  # column already present
         # WAL mode → safe for concurrent reads while the recorder writes.
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
