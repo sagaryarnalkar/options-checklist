@@ -1,4 +1,38 @@
 <!doctype html>
+<!--
+  NIFTY options dashboard — SINGLE-FILE app (all CSS + JS inline; served
+  static by app.py). Structure:
+
+    Top panels (always visible): Live data (auto-computed signals per
+      strategy: BULL/BEAR CROSS/HOLD chips), Trade Recommendations (only
+      TODAY-actionable contexts: fresh/rollover/scheduled), Today's Triggers.
+    Tab "By Strategy" (default): 📒 Paper book (10 lots/strategy, NET P&L,
+      fed by data.json.paper) + one card per strategy — meta line, live
+      inline rec (legs table + payoff-at-expiry SVG side by side), ✓/✗
+      condition chips auto-checked from the BUILT trade (a ✗ = a saved rule
+      was relaxed), and the next rollover/build date (client-side calendar).
+    Tab "OI Flow": TradingView Lightweight Charts over /oi/aggregate —
+      candles + score markers (Buy:N/Sell:N), sparse flow histogram,
+      OI-based S/R price lines, fund-flow table, big prints. Auto-refreshes
+      every 60s while visible (pauses when hidden).
+
+  Conventions that have bitten us before (keep these):
+  - ONE inline script block: a single JS syntax error blanks the ENTIRE page
+    (every dynamic panel shows empty). Before committing, extract the inline
+    script and run `node --check` on it. Never validate JS with Python ast.
+    (Also: never write a literal script open-tag in comments — the extraction
+    regex is naive and will mis-slice, as this very comment once proved.)
+  - Payoff SVG is exact only for same-expiry structures; multi-expiry recs
+    set payoff_unsupported (calendars) or render the "approximate" label
+    (OT/GG-LEAPS). Chart times from oi_flow are IST-shifted unix — undo the
+    shift before formatting (see the big-prints renderer).
+  - TradingView's internal table renders ~20px taller than its wrapper;
+    .tv-lightweight-charts needs overflow:visible or the time axis clips.
+  - Rec "alternatives" carry sold_strike OR short_strike depending on the
+    builder family — always fall back (a missing key once blanked the page).
+  - The manual checklist era is over: checkboxes/tick-state were removed
+    with the By Flow tab (#41/#42); conditions are computed, not ticked.
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8" />

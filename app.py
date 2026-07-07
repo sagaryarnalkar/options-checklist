@@ -1,15 +1,47 @@
 """
-FastAPI wrapper for the Options Checklist data layer.
+FastAPI server for the NIFTY options dashboard — serves the UI, the data
+layer, the OI-Flow analytics, and the paper-trading ledger, and hosts BOTH
+schedulers (per-minute chain recorder + daily 15:16 IST compute).
 
 Routes:
-    GET  /            -> index.html
-    GET  /data.json   -> the most recent data
-    GET  /login       -> redirects to Kite login
-    GET  /callback    -> Kite OAuth redirect lands here
-    POST /refresh     -> re-runs compute.py and returns the log
-    GET  /healthz     -> 200 OK
+    GET  /                    -> index.html (single-file dashboard)
+    GET  /data.json           -> latest compute.py payload (signals, recs,
+                                 portfolio, paper-book summary)
+    GET  /login, /callback    -> Kite OAuth flow (token cached via storage.py)
+    POST /refresh             -> run compute.py subprocess (auth: X-Auth-Token
+                                 REFRESH_TOKEN header OR a cached Kite session)
+    GET  /healthz             -> 200 OK
+    -- OI Flow --
+    GET  /oi/aggregate        -> oi_flow.aggregate_day/range payload (params:
+                                 mode, flow_basis, score_basis, threshold_mode,
+                                 roll/trend/score_baseline windows, days, ...)
+    GET  /oi/days, /oi/status -> data presence / recorder health
+    GET  /oi/marker_analysis  -> forward-return stats per (side, score)
+    POST /oi/snapshot-now     -> one recorder tick, ignores market hours
+    POST /oi/backfill         -> rebuild a day's missing chain minutes from
+                                 kite historical_data(oi=True) (login gaps)
+    GET  /oi/dbdump           -> whole SQLite DB (analysis aid; PENDING REMOVAL)
+    -- Paper ledger --
+    GET  /paper/ledger        -> full book: open (with latest marks), last 100
+                                 closed, per-strategy summary. Claude polls
+                                 this to review performance.
+    POST /paper/seed          -> one-time idempotent seeding of hold-status
+                                 strategies (2026-07-07; entries tagged
+                                 'seed-<context>')
+    POST /paper/void/{id}     -> close an open paper trade at ₹0 P&L
+                                 (ledger maintenance for mis-built structures)
 
-Run: uvicorn app:app --host 127.0.0.1 --port 8000
+Scheduling (APScheduler, started in _startup):
+    - oi_recorder:   every minute 03–10 UTC Mon–Fri; recorder.run_snapshot
+                     no-ops outside 09:15–15:30 IST or without a Kite session.
+                     First market-hours tick also fires the day's gap backfill.
+    - daily_compute: 09:46 UTC (= 15:16 IST) Mon–Fri; runs compute.py so the
+                     paper ledger opens/marks/rolls/exits without a manual
+                     Refresh. The user's one daily duty is the Kite login.
+
+Deploy: uvicorn app:app --host 127.0.0.1 --port 8000 behind Caddy, user-systemd
+unit `options-app`; the user deploys via `git pull && systemctl --user restart
+options-app` on the droplet.
 """
 from __future__ import annotations
 

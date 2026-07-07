@@ -1,14 +1,50 @@
 """
-Trade recommender — for each fresh *_cross signal, build the exact spread:
-strikes, current premiums (live LTP), net credit/debit, and margin required
-for 1 lot (via Kite's basket margin API).
+Trade recommender — turns signals/calendar into exact executable structures:
+strikes, live premiums (LTP), net credit/debit, margin for 1 lot (Kite basket
+margin API). Consumed by index.html cards and EXECUTED (at 10 lots) by the
+paper-trading ledger (paper.py) — a builder bug here becomes a paper trade,
+which is exactly how two were caught (see below).
 
-Implemented:
-  - nidhi_kalash   (Bull put / Bear call credit spread, 100-pt, credit 90-110/130)
-  - golden_goose   (Bull put / Bear call credit spread, 100-pt, credit 90-130, wing ≤ 2%)
-  - panther        (Bull put / Bear call credit spread, 100-pt, wing 200-400, credit ≥ 200)
-  - ocean_treasure (Quarter-end short PE/CE + near-month hedge, 500-pt strikes)
-  - gg_leaps       (Quarter-end short PE/CE LEAPS + near-month hedge, 500/1000-pt strikes)
+Builder families:
+  SIGNAL-DRIVEN (build on any bull/bear state; context fresh/rollover/late):
+  - golden_goose   BB-21 daily cross → monthly credit spread, 100-pt strikes,
+                   wing ≤ 2% of sold strike, credit 90–130. Full roll T-7.
+  - panther        CMF-21 zero-cross → monthly credit spread, wing 200–400,
+                   credit ≥ 200. Full roll T-8.
+  - nidhi_kalash   EMA-53 daily-close cross → monthly CREDIT spread (the
+                   source video corrected an earlier debit-spread misread),
+                   sold ≥0.5% OTM, credit 90–110 bull / 90–130 bear.
+                   Full roll 2nd-last Wed of the SOLD leg's month.
+  - ocean_treasure VWMA-21 2h cross → sell quarter-end (premium 200–220) +
+                   same-month hedge (20–50, ≤700 pts), 500-pt strikes.
+                   Hedge rolls T-4; short holds until the signal flips.
+  - gg_leaps       BB-21 midline → sell quarter-end LEAPS (200–450, 500/1000s,
+                   OTM) + monthly hedge ~2% FURTHER-OTM (distance-anchored,
+                   hedge_anchor_pct=0.02). Hedge rolls on the 18th; LEAPS
+                   flips only on signal change.
+  SCHEDULE-DRIVEN (build only on their day):
+  - edb            Mon before weekly expiry → call fly + put fly (X = 0.5%
+                   of spot), weekly expiry, exit Tue ~3:25.
+  - batman         last Friday → call-side 1-2-1 (spot+300/+600/+1600).
+  - no_brainer     last Friday → same 1-2-1, targets +2.5%/−3%.
+  ALWAYS-ON:
+  - triple_calendar SELL the 18–23 DTE weekly / BUY the weekly one week later,
+                   same strikes; 3 tents = ATM CE + PE/CE wings at
+                   ATM ± round(front ATM straddle + 75 → 100s). Filters
+                   (India VIX 10–22, wing 400–900) failing → context
+                   'monitor' (non-actionable). Exits live in paper.py
+                   (+8% of debit / hard time stop front−7d / −40%).
+
+Hard-won invariants (paper-ledger-caught bugs — keep these true):
+  - The hedge in distance-anchored selection must sit FURTHER OTM than the
+    sold strike (PE below / CE above). abs-distance alone once bought a
+    near-ATM ₹264 "hedge" against a ₹278 short (PR #46).
+  - Sold legs must be OTM even when their premium fits the band — a wide
+    band admits slightly-ITM strikes and the highest-credit ranking then
+    prefers them (PR #47).
+  - When no strike quotes inside a premium band, the nearest-fit fallback
+    relaxes the band but FLAGS it (rec.relaxations) so the UI warns; the
+    hedge's max-distance stays hard (PR #20).
 """
 from __future__ import annotations
 

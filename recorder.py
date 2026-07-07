@@ -1,17 +1,29 @@
 """
-OI chain recorder. Snapshots NIFTY and BANKNIFTY option chains (nearest
-expiry, ATM ± N strikes) once per minute during NSE market hours.
+OI chain recorder + gap backfill — the data source behind the OI Flow tab.
 
-How it's invoked: APScheduler inside the FastAPI process (see app.py).
-Manual one-shot: `python3 -m recorder` from the venv.
+LIVE PATH: snapshots NIFTY and BANKNIFTY option chains (nearest expiry,
+ATM ± N strikes) once per minute during NSE market hours via APScheduler in
+app.py. Stores ts/underlying/spot/expiry/strike/CE|PE/ltp/volume/oi plus the
+underlying 1-min candle. Manual one-shot: `python3 -m recorder`.
 
-What's stored: timestamp, underlying, spot, expiry, strike, CE/PE, ltp, volume, oi.
-NOT stored: tradingsymbol or instrument_token (recoverable from the strike+expiry
-since the contract identity is fully determined by them).
+BACKFILL PATH (#37): the live path only captures while the app is running,
+so a 2 PM login used to leave a 09:15→14:00 hole. Kite's
+historical_data(oi=True) returns per-minute close/volume/OI per instrument,
+letting backfill_day() rebuild missing minutes in the exact chain_snapshot
+shape (same ATM±N footprint per minute). Auto-runs for today's gap on the
+first market-hours tick after login (background thread, self-dedupes);
+manual: POST /oi/backfill. Idempotent via the UNIQUE constraint. Limit: a
+past day whose weekly contracts already expired cannot be rebuilt (tokens
+leave the instruments dump). Data is gap-free since 2026-06-30.
 
-Failures: logged to recorder_log; the loop never raises out into APScheduler.
-Reasons recording might silently no-op: no valid Kite session (user hasn't
-logged in today), outside market hours, weekend.
+FORWARD-RETURN TRACKING: after each snapshot, _refresh_marker_outcomes()
+recomputes today's OI-Flow score markers under a PINNED definition (absolute
+threshold, writing basis, no episode collapse, flow_basis='oi', trend 1,
+score_baseline 0 — see oi_flow.py header for why pinning matters) and
+upserts +5/15/30-min forward returns into score_marker_outcomes.
+
+Failures: logged to recorder_log; the loop never raises into APScheduler.
+Silent no-op reasons: no valid Kite session, outside market hours, weekend.
 """
 from __future__ import annotations
 
