@@ -458,13 +458,19 @@ def _find_naked_short_with_hedge(
     sp_target = (sp_min + sp_max) / 2
     hp_target = (hp_min + hp_max) / 2
 
-    # Candidate short strikes (in band)
+    # Candidate short strikes (in band, and OTM — the band does NOT imply OTM:
+    # with the gg_leaps stretch band (200–450) a slightly-ITM put quoted ~437
+    # fit inside it, and the highest-net-credit ranking then preferred that
+    # ITM strike. Caught by paper trade #7 on 2026-07-07: sold Sep 24500 PE
+    # with spot 24430.)
     short_options = []
     for strike, ins in short_chain.items():
         prem = _ltp(ins["tradingsymbol"])
         if prem is None:
             continue
         if not (sp_min <= prem <= sp_max):
+            continue
+        if not _is_otm(strike):
             continue
         short_options.append((strike, ins, prem))
     short_options.sort(key=lambda x: abs(x[2] - sp_target))
