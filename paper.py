@@ -79,7 +79,9 @@ def _exit_costs(leg_fills, units: int) -> float:
 
 # Strategies whose rollover context means "close old structure, open fresh"
 FULL_ROLL = {"golden_goose", "panther", "nidhi_kalash"}
-# Direction-flip strategies (positional; close only when the signal flips)
+# Direction-flip strategies: the SHORT leg holds until the signal flips, but
+# the monthly HEDGE leg rolls on its calendar day (simulated in _roll_hedge —
+# OT at T-4 from the hedge expiry, GG-LEAPS on the 18th weekend-adjusted).
 FLIP_ONLY = {"ocean_treasure", "gg_leaps"}
 
 
@@ -160,6 +162,141 @@ def _close_cash(legs, leg_exps, quotes, conn, today_iso, spot) -> tuple:
 
 def _entry_value(legs) -> float:
     return sum((l["premium"] or 0) * (1 if l["action"] == "SELL" else -1) for l in legs)
+
+
+# ---- Monthly hedge rolls (OT / GG-LEAPS) ----
+
+def _hedge_roll_due(strategy, legs, leg_exps, today: date) -> Optional[int]:
+    """Index of the hedge (BUY) leg if its calendar roll is due, else None.
+    OT: roll at T-4 from the hedge's expiry. GG-LEAPS: roll on the 18th of
+    the hedge-expiry month (prior business day if the 18th is a weekend).
+    Both are catch-up safe: a missed roll day stays due on the next sync."""
+    if strategy not in FLIP_ONLY:
+        return None
+    for i, (l, le) in enumerate(zip(legs, leg_exps)):
+        if l["action"] != "BUY" or not le:
+            continue
+        hexp = date.fromisoformat(le)
+        if hexp < today:
+            return None  # already expired — the settle path owns this
+        if strategy == "ocean_treasure":
+            if (hexp - today).days <= 4:
+                return i
+        else:  # gg_leaps
+            rd = date(hexp.year, hexp.month, 18)
+            while rd.weekday() >= 5:
+                rd -= timedelta(days=1)
+            if today >= rd:
+                return i
+        return None
+    return None
+
+
+def _monthly_expiry_after(expiries, after: date) -> Optional[date]:
+    """Monthly expiry = the LAST listed expiry of its month. First one
+    strictly after `after`."""
+    bym = {}
+    for e in expiries:
+        k = (e.year, e.month)
+        if k not in bym or e > bym[k]:
+            bym[k] = e
+    for m in sorted(bym.values()):
+        if m > after:
+            return m
+    return None
+
+
+def _roll_hedge(kite, conn, pos, legs, hedge_idx, leg_exps, now_iso) -> tuple:
+    """Close the monthly hedge at quote, open next month's hedge per the
+    strategy rule (GG-LEAPS: strike ~2% further-OTM from the short, 500s;
+    OT: premium ₹20–50 within 700 pts, 500s, further-OTM). Roll cash and
+    costs fold into the position basis (entry_value / entry_costs) so the
+    final realized P&L includes every roll. Returns (ok, note)."""
+    old = legs[hedge_idx]
+    short = next((l for l in legs if l["action"] == "SELL"), None)
+    if short is None:
+        return False, "no short leg found"
+    units = pos["lot_size"] * pos["lots"]
+    opt_type = old["option_type"]
+    old_exp = date.fromisoformat(leg_exps[hedge_idx])
+    try:
+        instruments = kite.instruments("NFO")
+    except Exception as e:
+        return False, f"instruments fetch failed: {e}"
+    exps = sorted({i["expiry"] for i in instruments
+                   if i.get("name") == "NIFTY" and i.get("expiry")
+                   and i.get("instrument_type") in ("CE", "PE")})
+    new_exp = _monthly_expiry_after(exps, old_exp)
+    if new_exp is None:
+        return False, "no next monthly expiry in instruments"
+    chain = {int(i["strike"]): i for i in instruments
+             if i.get("name") == "NIFTY" and i.get("expiry") == new_exp
+             and i.get("instrument_type") == opt_type
+             and int(i["strike"]) % 500 == 0}
+    further_otm = (lambda k: k < short["strike"]) if opt_type == "PE" \
+        else (lambda k: k > short["strike"])
+    if pos["strategy"] == "gg_leaps":
+        target = short["strike"] * (0.98 if opt_type == "PE" else 1.02)
+        cands = sorted((k for k in chain if further_otm(k)),
+                       key=lambda k: abs(k - target))[:2]
+    else:  # ocean_treasure
+        cands = [k for k in chain
+                 if further_otm(k) and abs(k - short["strike"]) <= 700]
+    if not cands:
+        return False, "no candidate hedge strike on the further-OTM side"
+    q = _quote_legs(kite, [old] + [{"tradingsymbol": chain[k]["tradingsymbol"]}
+                                   for k in cands])
+    old_px = q.get(old["tradingsymbol"])
+    if old_px is None:
+        return False, "no quote for outgoing hedge"
+    best = None
+    for k in cands:
+        px = q.get(chain[k]["tradingsymbol"])
+        if px is None or px <= 0:
+            continue
+        if pos["strategy"] == "gg_leaps":
+            score = (abs(k - short["strike"] * (0.98 if opt_type == "PE" else 1.02)),)
+        else:
+            score = (0 if 20 <= px <= 50 else 1, abs(px - 35))
+        if best is None or score < best[0]:
+            best = (score, k, px)
+    if best is None:
+        return False, "no quoted hedge candidate"
+    _, new_k, new_px = best
+
+    roll_cash = old_px - new_px      # sell old hedge (+), buy new (−), per unit
+    roll_costs = _exec_cost(False, old_px, units) + _exec_cost(True, new_px, units)
+    new_leg = {"action": "BUY", "transaction_type": "BUY",
+               "tradingsymbol": chain[new_k]["tradingsymbol"],
+               "strike": int(new_k), "option_type": opt_type,
+               "leg_expiry": str(new_exp), "premium": new_px,
+               "quantity": pos["lot_size"]}
+    note = (f"hedge rolled: {old['tradingsymbol']} sold @{old_px} → "
+            f"{new_leg['tradingsymbol']} bought @{new_px} "
+            f"(cash {roll_cash:+.2f}/unit, costs ₹{roll_costs:,.0f})")
+
+    # pin explicit expiries on all legs so future parsing never guesses
+    for l, le in zip(legs, leg_exps):
+        if le and not l.get("leg_expiry"):
+            l["leg_expiry"] = le
+    legs[hedge_idx] = new_leg
+    pos["entry_value"] += roll_cash
+    pos["entry_costs"] = (pos.get("entry_costs") or 0.0) + roll_costs
+    short_exp = next((l.get("leg_expiry") for l in legs if l["action"] == "SELL"), None)
+    pos["expiry"] = f"short {short_exp}, hedge {new_exp}" if short_exp else pos["expiry"]
+    meta = json.loads(pos["meta_json"] or "{}")
+    meta.setdefault("hedge_rolls", []).append({
+        "ts": now_iso, "old": old["tradingsymbol"], "old_px": old_px,
+        "new": new_leg["tradingsymbol"], "new_px": new_px,
+        "cash_per_unit": round(roll_cash, 2), "costs_rs": round(roll_costs, 0)})
+    pos["meta_json"] = json.dumps(meta)
+    conn.execute(
+        "UPDATE paper_trades SET legs_json=?, entry_value=?, entry_costs=?,"
+        " meta_json=?, expiry=? WHERE id=?",
+        (json.dumps(legs), pos["entry_value"], pos["entry_costs"],
+         pos["meta_json"], pos["expiry"], pos["id"]))
+    conn.commit()
+    return True, note
 
 
 def _open_trade(conn, strategy, rec, now_iso) -> int:
@@ -343,6 +480,29 @@ def sync(kite, payload: dict, conn) -> dict:
                                       "closed_ts": now_iso}
                 pos = None
             else:
+                # Monthly hedge roll (OT: T-4, GG-LEAPS: 18th) — a real trader
+                # rolls only if staying in the trade, so this runs AFTER the
+                # exit checks. On success, re-mark against the new legs.
+                roll_note = None
+                hidx = _hedge_roll_due(strategy, legs, leg_exps, today)
+                if hidx is not None:
+                    ok, roll_note = _roll_hedge(kite, conn, pos, legs, hidx,
+                                                leg_exps, now_iso)
+                    if ok:
+                        leg_exps = _leg_expiries({"legs": legs, "expiry": pos["expiry"]})
+                        quotes = _quote_legs(kite, legs)
+                        mark, notes, fills = _close_cash(legs, leg_exps, quotes,
+                                                         conn, today_iso, spot)
+                        est_xcosts = _exit_costs(fills, units)
+                        gross_upnl_unit = pos["entry_value"] + mark
+                        net_upnl = gross_upnl_unit * units - pos["entry_costs"] - est_xcosts
+                        conn.execute(
+                            "INSERT INTO paper_marks (trade_id, ts, mark_value,"
+                            " upnl, spot, note) VALUES (?,?,?,?,?,?)",
+                            (pos["id"], now_iso, mark, net_upnl, spot, roll_note))
+                        conn.commit()
+                    else:
+                        roll_note = f"HEDGE ROLL FAILED (will retry next sync): {roll_note}"
                 entry["open"] = {
                     "id": pos["id"], "opened_ts": pos["opened_ts"],
                     "direction": pos["direction"], "expiry": pos["expiry"],
@@ -352,6 +512,7 @@ def sync(kite, payload: dict, conn) -> dict:
                     "upnl_pct": round(100 * net_upnl / (abs(pos["entry_value"]) * units or 1e-9), 2),
                     "costs_rs": round(pos["entry_costs"] + est_xcosts, 0),
                     "mark_degraded": any("NO QUOTE" in n for n in notes),
+                    "hedge_roll": roll_note,
                 }
                 open_upnl += net_upnl
 
