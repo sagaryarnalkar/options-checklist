@@ -367,6 +367,21 @@
   .payoff-note{ font-size:11px; color:var(--warn); }
   .payoff-wrap svg{ display:block; width:100%; height:auto; }
 
+  /* Paper Trades tab — headline tiles + per-trade expandable rows */
+  .pt-tiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:10px; margin-top:10px; }
+  .pt-tile{ background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:10px 12px; }
+  .pt-tile .lbl{ font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .pt-tile .val{ font-family:var(--mono); font-size:19px; font-weight:600; margin-top:3px; }
+  .pt-equity{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:10px 12px; margin-bottom:10px; }
+  .pt-trade{ border:1px solid var(--border); border-radius:8px; margin:8px 0; background:var(--panel-2); }
+  .pt-trade > summary{ display:flex; flex-wrap:wrap; gap:4px 14px; align-items:baseline; padding:8px 12px; cursor:pointer; list-style:none; font-family:var(--mono); font-size:12.5px; }
+  .pt-trade > summary::-webkit-details-marker{ display:none; }
+  .pt-trade .body{ padding:0 12px 10px; }
+  .pt-chip{ font-size:10.5px; padding:2px 7px; border-radius:999px; border:1px solid var(--border); background:var(--chip); color:var(--muted); font-family:var(--mono); }
+  .pt-chip.seed{ color:var(--warn); border-color:rgba(255,180,84,.4); }
+  .pt-chip.open{ color:#2e9e4f; border-color:rgba(123,216,143,.5); }
+  .pt-void{ opacity:.55; }
+
   /* Auto-refresh pulse dot for the OI Flow status */
   .oi-live-dot{ display:inline-block; width:7px; height:7px; border-radius:50%;
     background:var(--accent-2); margin-right:6px; vertical-align:middle;
@@ -404,6 +419,7 @@
   <div class="tabs" role="tablist">
     <button class="tab active" data-tab="strategy" role="tab">By Strategy</button>
     <button class="tab" data-tab="oiflow" role="tab">OI Flow</button>
+    <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
   </div>
 
   <!-- ============================ STRATEGY TAB ============================ -->
@@ -412,7 +428,7 @@
     <!-- Paper book: every actionable recommendation is assumed executed at
          10 lots; outcomes tracked in SQLite by paper.py on each refresh. -->
     <div class="card" id="paperBookCard" style="padding:12px 14px; margin-bottom:10px;">
-      <div class="strat-meta" style="margin-bottom:6px"><b style="color:var(--text)">📒 Paper book — 10 lots per strategy</b> · auto-executed from recommendations · marks update on Refresh</div>
+      <div class="strat-meta" style="margin-bottom:6px"><b style="color:var(--text)">📒 Paper book — 10 lots per strategy</b> · auto-executed from recommendations · marks update on Refresh · <a href="#" onclick="document.querySelector('.tab[data-tab=paper]').click(); return false;" style="color:var(--accent)">full trade log →</a></div>
       <div id="paperBook"><div class="note">No paper data yet — hit Refresh.</div></div>
     </div>
 
@@ -653,6 +669,21 @@
     </p>
   </div>
 
+  <!-- ============================ PAPER TRADES TAB ============================ -->
+  <!-- Full trade-by-trade log of the paper ledger (10 lots/strategy), fed by
+       GET /paper/ledger. Rendered lazily on first tab activation. -->
+  <div class="tab-panel" id="tabPaper">
+    <div class="card" style="padding:12px 14px; margin-bottom:10px;">
+      <div style="display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap;">
+        <div class="strat-meta"><b style="color:var(--text)">📒 Paper trade log — 10 lots per strategy</b> · every actionable recommendation auto-executed · P&L NET of costs</div>
+        <button type="button" id="paperReload" class="live-refresh">Reload</button>
+      </div>
+      <div id="paperTiles" class="pt-tiles"></div>
+    </div>
+    <div id="paperEquity"></div>
+    <div id="paperLog"><div class="note">Loading…</div></div>
+  </div>
+
   <div class="footer">
     Conditions are auto-checked from the live built trade — a ✗ means a saved rule was relaxed to build it.<br/>
     All strategies are self-hedged (defined risk) — no discretionary stop-loss.
@@ -855,7 +886,7 @@
     // data panel now, and the calendar reminders live in Today's Triggers. A
     // stale localStorage tab="flow" falls through the guard below to the
     // default (By Strategy).
-    const panels = { strategy: document.getElementById("tabStrategy"), oiflow: document.getElementById("tabOiflow") };
+    const panels = { strategy: document.getElementById("tabStrategy"), oiflow: document.getElementById("tabOiflow"), paper: document.getElementById("tabPaper") };
     tabs.forEach(t => t.addEventListener("click", ()=>{
       tabs.forEach(x=>x.classList.remove("active"));
       t.classList.add("active");
@@ -865,6 +896,7 @@
       localStorage.setItem("tab", t.dataset.tab);
       window.scrollTo({top:0, behavior:"smooth"});
       if (t.dataset.tab === "oiflow") initOiFlowTab();
+      if (t.dataset.tab === "paper") initPaperTab();
     }));
     const savedTab = localStorage.getItem("tab");
     if (savedTab && panels[savedTab]) {
@@ -873,7 +905,155 @@
       document.querySelector(`.tab[data-tab="${savedTab}"]`).classList.add("active");
       panels[savedTab].classList.add("active");
       if (savedTab === "oiflow") setTimeout(initOiFlowTab, 0);
+      if (savedTab === "paper") setTimeout(initPaperTab, 0);
     }
+  }
+
+  // ---------- Paper Trades tab ----------
+  // Full trade-by-trade log of the paper ledger, straight from /paper/ledger.
+  // Voided trades (exit_reason 'void:*', e.g. mis-built structures) render
+  // greyed and are EXCLUDED from every stat — they carry ₹0 by design.
+  let _paperInited = false;
+  function initPaperTab(){
+    if (_paperInited) { loadPaperLedger(); return; }
+    _paperInited = true;
+    document.getElementById("paperReload").addEventListener("click", loadPaperLedger);
+    loadPaperLedger();
+  }
+  async function loadPaperLedger(){
+    const log = document.getElementById("paperLog");
+    try {
+      const r = await fetch("/paper/ledger", { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      renderPaperLedger(await r.json());
+    } catch(e){
+      log.innerHTML = `<div class="note">Failed to load ledger: ${e.message}</div>`;
+    }
+  }
+  function _rs(v, signed=true){
+    if (v == null) return "—";
+    const s = v < 0 ? "−" : (signed && v > 0 ? "+" : "");
+    return `${s}${fmtINR(Math.abs(v))}`;
+  }
+  function _plCls(v){ return v == null ? "" : (v < 0 ? "loss" : "profit"); }
+  function _ctxChip(t){
+    const ctx = t.entry_context || "?";
+    const cls = ctx.startsWith("seed") ? " seed" : "";
+    return `<span class="pt-chip${cls}">${ctx}</span>`;
+  }
+  function renderPaperLedger(d){
+    const open = d.open || [];
+    const closedAll = d.closed || [];
+    const voided = closedAll.filter(t => String(t.exit_reason||"").startsWith("void:"));
+    const closed = closedAll.filter(t => !String(t.exit_reason||"").startsWith("void:"));
+
+    // ---- headline tiles ----
+    const realized = closed.reduce((s,t)=>s+(t.realized_pnl||0), 0);
+    const openU = open.reduce((s,t)=>s+((t.last_mark&&t.last_mark.upnl)||0), 0);
+    const wins = closed.filter(t=>(t.realized_pnl||0)>0).length;
+    const costs = closed.reduce((s,t)=>s+(t.entry_costs||0)+(t.exit_costs||0), 0)
+                + open.reduce((s,t)=>s+(t.entry_costs||0), 0);
+    document.getElementById("paperTiles").innerHTML = `
+      <div class="pt-tile"><div class="lbl">Realized (net)</div><div class="val ${_plCls(realized)}">${_rs(realized)}</div></div>
+      <div class="pt-tile"><div class="lbl">Open uP&L (net)</div><div class="val ${_plCls(openU)}">${_rs(openU)}</div></div>
+      <div class="pt-tile"><div class="lbl">Closed trades</div><div class="val">${closed.length}${closed.length?` · ${wins} win${wins===1?"":"s"} (${Math.round(100*wins/closed.length)}%)`:""}</div></div>
+      <div class="pt-tile"><div class="lbl">Open positions</div><div class="val">${open.length}</div></div>
+      <div class="pt-tile"><div class="lbl">Costs charged</div><div class="val">${fmtINR(Math.round(costs))}</div></div>`;
+
+    // ---- equity curve (cumulative net realized, by close order) ----
+    const eq = document.getElementById("paperEquity");
+    const seq = [...closed].sort((a,b)=>String(a.closed_ts).localeCompare(String(b.closed_ts)));
+    if (seq.length >= 2){
+      let cum = 0;
+      const pts = seq.map(t => { cum += (t.realized_pnl||0); return { cum, t }; });
+      const W=760, H=150, PX=10, PT=14, PB=22;
+      let ymin = Math.min(0, ...pts.map(p=>p.cum)), ymax = Math.max(0, ...pts.map(p=>p.cum));
+      const yr = (ymax-ymin)||1; ymin -= yr*0.08; ymax += yr*0.08;
+      const X = i => PX + i*(W-2*PX)/Math.max(pts.length-1,1);
+      const Y = v => PT + (ymax-v)*(H-PT-PB)/(ymax-ymin);
+      const line = pts.map((p,i)=>`${i?"L":"M"}${X(i).toFixed(1)},${Y(p.cum).toFixed(1)}`).join("");
+      const dots = pts.map((p,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(p.cum).toFixed(1)}" r="3.5" fill="var(--accent)"><title>#${p.t.id} ${STRAT_LABELS[p.t.strategy]||p.t.strategy} · ${String(p.t.closed_ts).slice(0,10)} · ${p.t.exit_reason}\ntrade ${_rs(p.t.realized_pnl)} · cumulative ${_rs(p.cum)}</title></circle>`).join("");
+      const last = pts[pts.length-1];
+      eq.innerHTML = `<div class="pt-equity">
+        <div class="payoff-title" style="margin-bottom:2px">Cumulative NET realized P&L — per closed trade</div>
+        <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;max-width:760px;height:auto" role="img" aria-label="Cumulative realized P&L">
+          <line x1="${PX}" y1="${Y(0).toFixed(1)}" x2="${W-PX}" y2="${Y(0).toFixed(1)}" stroke="var(--muted)" stroke-width="1" opacity=".55"/>
+          <path d="${line}" fill="none" stroke="var(--accent)" stroke-width="2"/>
+          ${dots}
+          <text x="${W-PX}" y="${(Y(last.cum)-8).toFixed(1)}" text-anchor="end" font-size="11" font-family="var(--mono)" fill="var(--text)">${_rs(last.cum)}</text>
+        </svg></div>`;
+    } else {
+      eq.innerHTML = "";
+    }
+
+    // ---- per-strategy trade log ----
+    const byStrat = {};
+    const add = (t, bucket) => {
+      const k = t.strategy;
+      (byStrat[k] = byStrat[k] || { open:[], closed:[], voided:[] })[bucket].push(t);
+    };
+    open.forEach(t=>add(t,"open"));
+    closed.forEach(t=>add(t,"closed"));
+    voided.forEach(t=>add(t,"voided"));
+
+    const tradeRow = (t, kind) => {
+      const units = (t.lot_size||0) * (t.lots||0);
+      const isVoid = kind === "voided";
+      const net = kind === "open" ? (t.last_mark ? t.last_mark.upnl : null) : t.realized_pnl;
+      const statusChip = kind === "open"
+        ? `<span class="pt-chip open">OPEN</span>`
+        : `<span class="pt-chip">${(t.exit_reason||"closed")}</span>`;
+      const when = `${String(t.opened_ts).slice(0,10)}${t.closed_ts?` → ${String(t.closed_ts).slice(0,10)}`:""}`;
+      const gross = kind === "open" ? null : t.gross_pnl;
+      const cost = (t.entry_costs||0) + (t.exit_costs||0);
+      const legs = (t.legs||[]).map(l=>`
+        <tr><td class="act-${String(l.action).toLowerCase()}">${l.action}</td>
+        <td>${(l.strike??0).toLocaleString("en-IN")} ${l.option_type}</td>
+        <td>${l.tradingsymbol}</td><td>₹${fmtNum(l.premium)}</td><td>${l.quantity}</td></tr>`).join("");
+      const rolls = ((t.meta||{}).hedge_rolls||[]).map(r=>
+        `<div class="strat-ref">↻ ${String(r.ts).slice(0,10)}: ${r.old} @${r.old_px} → ${r.new} @${r.new_px} (cash ${r.cash_per_unit>0?"+":""}${r.cash_per_unit}/u, costs ₹${r.costs_rs})</div>`).join("");
+      const markLine = kind === "open" && t.last_mark
+        ? `<div class="strat-ref">last mark ${String(t.last_mark.ts).slice(0,16).replace("T"," ")} · mark ${fmtNum(t.last_mark.mark_value)}/u · spot ${t.last_mark.spot ?? "—"}${t.last_mark.note?` · ${t.last_mark.note}`:""}</div>` : "";
+      return `<details class="pt-trade${isVoid?" pt-void":""}">
+        <summary>
+          <b>#${t.id}</b> ${statusChip} ${_ctxChip(t)}
+          <span>${when}</span>
+          <span>entry ${fmtNum(t.entry_value)}/u</span>
+          ${kind!=="open" && t.exit_value!=null ? `<span>exit ${fmtNum(t.exit_value)}/u</span>` : ""}
+          ${gross!=null ? `<span>gross <b class="${_plCls(gross)}">${_rs(gross)}</b></span>` : ""}
+          <span>costs ₹${fmtNum(cost,0)}</span>
+          <span style="margin-left:auto">NET <b class="${_plCls(isVoid?null:net)}">${isVoid?"₹0 (void)":_rs(net)}</b></span>
+        </summary>
+        <div class="body">
+          <table class="rec-legs">
+            <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Entry premium</th><th>Qty</th></tr></thead>
+            <tbody>${legs}</tbody>
+          </table>
+          ${rolls}${markLine}
+          <div class="strat-ref">expiry: ${t.expiry || "—"} · units/leg: ${units} (${t.lots} lots × ${t.lot_size})</div>
+        </div>
+      </details>`;
+    };
+
+    const sections = Object.keys(byStrat).sort().map(k => {
+      const g = byStrat[k];
+      const net = g.closed.reduce((s,t)=>s+(t.realized_pnl||0),0);
+      const w = g.closed.filter(t=>(t.realized_pnl||0)>0).length;
+      const openNote = g.open.length ? `1 open (${_rs((g.open[0].last_mark||{}).upnl ?? null)})` : "flat";
+      const stats = `${g.closed.length} closed${g.closed.length?` · ${w}/${g.closed.length} wins · net <b class="${_plCls(net)}">${_rs(net)}</b>`:""} · ${openNote}${g.voided.length?` · ${g.voided.length} voided`:""}`;
+      const rows = [
+        ...g.open.map(t=>tradeRow(t,"open")),
+        ...[...g.closed].sort((a,b)=>b.id-a.id).map(t=>tradeRow(t,"closed")),
+        ...g.voided.map(t=>tradeRow(t,"voided")),
+      ].join("");
+      return `<details class="card" open>
+        <summary><span class="stitle"><span class="caret">▸</span> ${STRAT_LABELS[k]||k} <span class="sub" style="font-weight:400; font-size:12px; color:var(--muted)">${stats}</span></span></summary>
+        <div class="section-body">${rows || `<div class="note">no trades yet</div>`}</div>
+      </details>`;
+    }).join("");
+
+    document.getElementById("paperLog").innerHTML = sections ||
+      `<div class="note">No paper trades yet — the book opens positions when recommendations become actionable.</div>`;
   }
 
   // ---------- OI Flow tab ----------
