@@ -482,7 +482,7 @@
   .sig-card .ref{ font-size:11px; color:var(--muted); margin-top:1px; }
 
   /* Tab bar: full-width 3-cell grid, accent fill on active */
-  .tabs{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:0; padding:0;
+  .tabs{ display:grid; grid-template-columns:1fr 1fr; gap:0; padding:0;
     background:var(--color-bg); border:1px solid var(--color-divider); border-radius:0;
     position:sticky; top:64px; z-index:5; backdrop-filter:none; }
   .tab{ padding:15px; font-weight:800; font-size:15px; border-radius:0; color:var(--color-text);
@@ -544,44 +544,54 @@
   }
 
   /* ============================================================
-     OI FLOW — full-bleed desktop layout (#55).
-     The chart owns the left column at (near-)viewport height; the
-     controls, fund-flow table, LLT feed and big prints stack in a
-     400px right rail. margin-inline breaks the panel out of the
-     1280px .wrap so wide monitors are actually used; the 24px inset
-     mirrors .wrap's padding (and absorbs the scrollbar, so no
-     horizontal overflow). <1200px keeps the stacked mobile layout.
+     COMMAND LAYOUT (#57): OI Flow is not a tab — it lives
+     permanently at the top-left of the page. Right column: Live
+     data, Today's triggers, Trade recommendations. Below: the two
+     remaining tabs (By Strategy, Paper Trades). Full page width.
      ============================================================ */
-  @media (min-width:1200px){
-    #tabOiflow.active{
-      display:grid;
-      grid-template-columns:minmax(0,1fr) 400px;
-      grid-template-areas:"chart controls" "chart side" "status side" "note side";
-      gap:10px 14px;
-      align-items:start;
-      margin-inline:calc(50% - 50vw + 24px);
-    }
-    #tabOiflow > .oi-layout{ display:contents; }
-    #tabOiflow > .oi-controls{ grid-area:controls; margin-bottom:0; }
-    #tabOiflow > .oi-status{ grid-area:status; margin-bottom:0; }
-    #tabOiflow .oi-charts{ grid-area:chart; }
-    #tabOiflow .oi-side{ grid-area:side; }
-    #tabOiflow > .note{ grid-area:note; margin-top:0; }
-    /* Fit the viewport so the flow strip + time axis are on-screen with the
-       candles — no more bars lost below the page fold. */
-    .oi-chart-merged{ height:clamp(560px, calc(100vh - 240px), 940px); }
+  @media (min-width:1100px){
+    /* 1100-1199 band still runs the legacy two-column .wrap grid */
+    .wrap > #oiflowSection{ grid-column:1/-1; }
   }
-  /* OI Flow is a dedicated view: hide the strategy-dashboard chrome above
-     the tab bar (title row, live card, triggers, recommendations) so the
-     tab bar + chart ARE the top of the page. The sticky header still shows
-     the live NIFTY quote; everything reappears on the other tabs. */
-  body[data-tab="oiflow"] .top,
-  body[data-tab="oiflow"] #liveCard,
-  body[data-tab="oiflow"] .triggers,
-  body[data-tab="oiflow"] #recBlock{ display:none; }
+  @media (min-width:1200px){
+    .wrap{
+      max-width:none;
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 430px;
+      grid-template-areas:
+        "top      top"
+        "oiflow   live"
+        "oiflow   triggers"
+        "oiflow   rec"
+        "tabs     tabs"
+        "panel    panel"
+        "footer   footer";
+      gap:0 16px;
+      align-items:start;
+    }
+    .wrap > .top{ grid-area:top; }
+    .wrap > #oiflowSection{ grid-area:oiflow; }
+    .wrap > #liveCard{ grid-area:live; }
+    .wrap > .triggers{ grid-area:triggers; }
+    .wrap > #recBlock{ grid-area:rec; }
+    .wrap > .tabs{ grid-area:tabs; margin-top:16px; }
+    /* Only one panel is display:block at a time, so sharing the area is safe */
+    .wrap > .tab-panel{ grid-area:panel; }
+    .wrap > .footer{ grid-area:footer; }
+    /* Inside the section: chart takes the full column width; the fund-flow /
+       LLT / big-prints panels go 3-across beneath it; controls (rarely
+       touched) under those. Chart height fits the viewport so the flow
+       strip + time axis are always on-screen. */
+    #oiflowSection .oi-layout{ grid-template-columns:minmax(0,1fr); }
+    #oiflowSection .oi-side{
+      display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+      gap:0 18px; align-items:start;
+    }
+    .oi-chart-merged{ height:clamp(520px, calc(100vh - 250px), 900px); }
+  }
 </style>
 </head>
-<body data-tab="strategy">
+<body>
 
 <header class="hz-header">
   <div class="in">
@@ -633,9 +643,144 @@
     <div class="trigger-list" id="triggerList"></div>
   </div>
 
+  <!-- ============================ OI FLOW (permanent, top-left) ============================ -->
+  <div id="oiflowSection">
+    <div class="oi-layout">
+      <div class="oi-charts">
+        <div class="oi-chart-card">
+          <div class="oi-chart-title">Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
+            green = bullish (<span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:#1b8a3a">▮ CE buy</span>) ·
+            red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span>)</div>
+          <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
+        </div>
+      </div>
+      <aside class="oi-side">
+        <div class="oi-side-panel">
+        <div class="oi-side-title">ATM fund flow (₹cr)</div>
+        <table class="oi-ff" id="oiFundFlow">
+          <thead><tr><th></th><th>Last 60m</th><th>Day total</th></tr></thead>
+          <tbody>
+            <tr class="ff-pw"><td>Put Wr</td><td data-ff="last_60min.put_writing_cr">—</td><td data-ff="day.put_writing_cr">—</td></tr>
+            <tr class="ff-cw"><td>Call Wr</td><td data-ff="last_60min.call_writing_cr">—</td><td data-ff="day.call_writing_cr">—</td></tr>
+            <tr class="ff-cb"><td>Call Buy</td><td data-ff="last_60min.call_buying_cr">—</td><td data-ff="day.call_buying_cr">—</td></tr>
+            <tr class="ff-pb"><td>Put Buy</td><td data-ff="last_60min.put_buying_cr">—</td><td data-ff="day.put_buying_cr">—</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="oi-side-panel">
+        <div class="oi-side-title">LLT prints — futures <span class="oi-live-dot" style="width:6px;height:6px;display:inline-block;border-radius:50%;margin-left:4px"></span></div>
+        <div class="oi-side-body" id="oiLltList"><div class="note">no futures data yet</div></div>
+
+        </div>
+        <div class="oi-side-panel">
+        <div class="oi-side-title" style="margin-top:12px">Top 10 BIG prints (today)</div>
+        <div class="oi-side-body" id="oiBigList"><div class="note">No data yet.</div></div>
+        </div>
+      </aside>
+    </div>
+    <div class="oi-status" id="oiStatus"></div>
+    <div class="oi-controls">
+      <label>Underlying
+        <select id="oiUnderlying">
+          <option value="NIFTY">NIFTY</option>
+          <option value="BANKNIFTY">BANKNIFTY</option>
+        </select>
+      </label>
+      <label>View
+        <select id="oiDays">
+          <option value="1">Latest day</option>
+          <option value="3">3 days</option>
+          <option value="5" selected>5 days</option>
+          <option value="10">10 days</option>
+          <option value="30">30 days</option>
+        </select>
+      </label>
+      <label>Flow basis
+        <select id="oiFlowBasis">
+          <option value="volume" selected>Volume (HFT)</option>
+          <option value="oi">OI change</option>
+        </select>
+      </label>
+      <label>Mode
+        <select id="oiMode">
+          <option value="premium" selected>Premium</option>
+          <option value="margin">Margin (est)</option>
+          <option value="notional">Notional</option>
+        </select>
+      </label>
+      <label>Score basis
+        <select id="oiBasis">
+          <option value="combined" selected>Write + Buy</option>
+          <option value="writing">Writing only</option>
+        </select>
+      </label>
+      <label>Threshold
+        <select id="oiThrMode">
+          <option value="adaptive" selected>Rolling median+MAD</option>
+          <option value="absolute">Absolute ₹cr</option>
+        </select>
+      </label>
+      <label>Roll window (min)
+        <input type="number" id="oiRollWindow" value="20" min="5" max="120" step="1" style="width:70px">
+      </label>
+      <label title="Price-trend window for the write/buy split. 1 = raw 1-min tick (default; closest fit to the reference's published fund-flow). Longer windows are experimental — verification showed they pull AWAY from his buckets, not toward them.">Trend window (min)
+        <input type="number" id="oiTrendWindow" value="1" min="1" max="120" step="1" style="width:70px">
+      </label>
+      <label title="Stable baseline (trailing median, in minutes) used as the score denominator — decoupled from the firing gate. Spreads scores 2-5 like the reference instead of pinning at 1. 0 = score off the gate threshold (the old behaviour).">Score base (min)
+        <input type="number" id="oiScoreBase" value="90" min="0" max="375" step="1" style="width:70px">
+      </label>
+      <label>Floor ₹cr
+        <input type="number" id="oiThresholdCr" value="10" min="1" step="1" style="width:70px">
+      </label>
+      <label>ATM ± (score)
+        <input type="number" id="oiAtmBand" value="2" min="0" max="10" step="1" style="width:70px">
+      </label>
+      <label>ATM ± N (scan)
+        <input type="number" id="oiN" value="10" min="1" max="50" step="1" style="width:70px">
+      </label>
+      <label>Cooldown (min)
+        <input type="number" id="oiCooldown" value="10" min="0" max="120" step="1" style="width:70px">
+      </label>
+      <label>Regime BG
+        <select id="oiRegime">
+          <option value="off" selected>Off</option>
+          <option value="on">On</option>
+        </select>
+      </label>
+      <label title="Large-Lot-Trader prints on current-month NIFTY futures (minute volume ≥ max(750 lots, median+4·MAD), classified by ΔOI: fresh longs/shorts vs covering/unwinding).">LLT markers
+        <select id="oiLlt">
+          <option value="on" selected>On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
+      <button type="button" id="oiReload" class="live-refresh">Reload</button>
+    </div>
+    <p class="note" style="margin-top:16px">
+      <b>How to read.</b> One window, two sections sharing the same time axis. <em>Top ~70%</em>: 1-min candles +
+      score 1–10 markers. Default score basis is <em>Write&nbsp;+&nbsp;Buy</em>: bullish flow = PE writing + CE buying,
+      bearish = CE writing + PE buying (switch to "Writing only" for the original writers-only score). A marker
+      appears only when the dominant flow exceeds the threshold — default is a <em>rolling</em> mean + 2σ over the
+      trailing 60 minutes (current minute excluded), so what you see on replay equals what you'd have seen live; no
+      hindsight. Score 1 = at threshold, 10 = ≥4× threshold. <span style="color:var(--accent-2)">Green ▲ below</span>
+      = bullish dominant; <span style="color:var(--danger)">Red ▼ above</span> = bearish dominant. The faint
+      green/red <em>background shading</em> is the regime: sign of the rolling 30-min net flow (all four flows).
+      <em>Bottom strip</em>: per-minute ATM flow, one bar per significant minute, all rising UPWARD by magnitude.
+      Each minute shows only its dominant side — green when bullish
+      (<span style="color:var(--accent-2)">light green = PE writing</span> +
+      <span style="color:#1b8a3a">deep green cap = CE buying</span>), red when bearish
+      (<span style="color:var(--danger)">light red = CE writing</span> +
+      <span style="color:#b3261e">deep red cap = PE buying</span>). <b>Flow basis</b> (default <em>Volume</em>,
+      matching the reference HFT indicator): each minute's flow = that strike's <em>traded turnover</em>,
+      labelled by price direction — price↓ = writing (sellers aggressing), price↑ = buying (buyers aggressing).
+      Switch to <em>OI change</em> to measure net new positioning (ΔOI) instead — that's the more
+      "committed-money" lens, but it reads put-heavy where volume reads call-heavy (calls trade more, puts write
+      more). Either way it's an aggregate aggressor heuristic, not a fact — every contract has a buyer and a seller.
+      The side panel's fund-flow table mirrors the reference: last-60-minute and day totals per flow.
+    </p>
+  </div>
+
   <div class="tabs" role="tablist">
     <button class="tab active" data-tab="strategy" role="tab">By Strategy</button>
-    <button class="tab" data-tab="oiflow" role="tab">OI Flow</button>
     <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
   </div>
 
@@ -763,139 +908,7 @@
   </div>
 
   <!-- ============================ OI FLOW TAB ============================ -->
-  <div class="tab-panel" id="tabOiflow">
-    <div class="oi-controls">
-      <label>Underlying
-        <select id="oiUnderlying">
-          <option value="NIFTY">NIFTY</option>
-          <option value="BANKNIFTY">BANKNIFTY</option>
-        </select>
-      </label>
-      <label>View
-        <select id="oiDays">
-          <option value="1">Latest day</option>
-          <option value="3">3 days</option>
-          <option value="5" selected>5 days</option>
-          <option value="10">10 days</option>
-          <option value="30">30 days</option>
-        </select>
-      </label>
-      <label>Flow basis
-        <select id="oiFlowBasis">
-          <option value="volume" selected>Volume (HFT)</option>
-          <option value="oi">OI change</option>
-        </select>
-      </label>
-      <label>Mode
-        <select id="oiMode">
-          <option value="premium" selected>Premium</option>
-          <option value="margin">Margin (est)</option>
-          <option value="notional">Notional</option>
-        </select>
-      </label>
-      <label>Score basis
-        <select id="oiBasis">
-          <option value="combined" selected>Write + Buy</option>
-          <option value="writing">Writing only</option>
-        </select>
-      </label>
-      <label>Threshold
-        <select id="oiThrMode">
-          <option value="adaptive" selected>Rolling median+MAD</option>
-          <option value="absolute">Absolute ₹cr</option>
-        </select>
-      </label>
-      <label>Roll window (min)
-        <input type="number" id="oiRollWindow" value="20" min="5" max="120" step="1" style="width:70px">
-      </label>
-      <label title="Price-trend window for the write/buy split. 1 = raw 1-min tick (default; closest fit to the reference's published fund-flow). Longer windows are experimental — verification showed they pull AWAY from his buckets, not toward them.">Trend window (min)
-        <input type="number" id="oiTrendWindow" value="1" min="1" max="120" step="1" style="width:70px">
-      </label>
-      <label title="Stable baseline (trailing median, in minutes) used as the score denominator — decoupled from the firing gate. Spreads scores 2-5 like the reference instead of pinning at 1. 0 = score off the gate threshold (the old behaviour).">Score base (min)
-        <input type="number" id="oiScoreBase" value="90" min="0" max="375" step="1" style="width:70px">
-      </label>
-      <label>Floor ₹cr
-        <input type="number" id="oiThresholdCr" value="10" min="1" step="1" style="width:70px">
-      </label>
-      <label>ATM ± (score)
-        <input type="number" id="oiAtmBand" value="2" min="0" max="10" step="1" style="width:70px">
-      </label>
-      <label>ATM ± N (scan)
-        <input type="number" id="oiN" value="10" min="1" max="50" step="1" style="width:70px">
-      </label>
-      <label>Cooldown (min)
-        <input type="number" id="oiCooldown" value="10" min="0" max="120" step="1" style="width:70px">
-      </label>
-      <label>Regime BG
-        <select id="oiRegime">
-          <option value="off" selected>Off</option>
-          <option value="on">On</option>
-        </select>
-      </label>
-      <label title="Large-Lot-Trader prints on current-month NIFTY futures (minute volume ≥ max(750 lots, median+4·MAD), classified by ΔOI: fresh longs/shorts vs covering/unwinding).">LLT markers
-        <select id="oiLlt">
-          <option value="on" selected>On</option>
-          <option value="off">Off</option>
-        </select>
-      </label>
-      <button type="button" id="oiReload" class="live-refresh">Reload</button>
-    </div>
-
-    <div class="oi-status" id="oiStatus"></div>
-
-    <div class="oi-layout">
-      <div class="oi-charts">
-        <div class="oi-chart-card">
-          <div class="oi-chart-title">Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
-            green = bullish (<span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:#1b8a3a">▮ CE buy</span>) ·
-            red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span>)</div>
-          <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
-        </div>
-      </div>
-      <aside class="oi-side">
-        <div class="oi-side-title">ATM fund flow (₹cr)</div>
-        <table class="oi-ff" id="oiFundFlow">
-          <thead><tr><th></th><th>Last 60m</th><th>Day total</th></tr></thead>
-          <tbody>
-            <tr class="ff-pw"><td>Put Wr</td><td data-ff="last_60min.put_writing_cr">—</td><td data-ff="day.put_writing_cr">—</td></tr>
-            <tr class="ff-cw"><td>Call Wr</td><td data-ff="last_60min.call_writing_cr">—</td><td data-ff="day.call_writing_cr">—</td></tr>
-            <tr class="ff-cb"><td>Call Buy</td><td data-ff="last_60min.call_buying_cr">—</td><td data-ff="day.call_buying_cr">—</td></tr>
-            <tr class="ff-pb"><td>Put Buy</td><td data-ff="last_60min.put_buying_cr">—</td><td data-ff="day.put_buying_cr">—</td></tr>
-          </tbody>
-        </table>
-        <div class="oi-side-title">LLT prints — futures <span class="oi-live-dot" style="width:6px;height:6px;display:inline-block;border-radius:50%;margin-left:4px"></span></div>
-        <div class="oi-side-body" id="oiLltList"><div class="note">no futures data yet</div></div>
-
-        <div class="oi-side-title" style="margin-top:12px">Top 10 BIG prints (today)</div>
-        <div class="oi-side-body" id="oiBigList"><div class="note">No data yet.</div></div>
-      </aside>
-    </div>
-
-    <p class="note" style="margin-top:16px">
-      <b>How to read.</b> One window, two sections sharing the same time axis. <em>Top ~70%</em>: 1-min candles +
-      score 1–10 markers. Default score basis is <em>Write&nbsp;+&nbsp;Buy</em>: bullish flow = PE writing + CE buying,
-      bearish = CE writing + PE buying (switch to "Writing only" for the original writers-only score). A marker
-      appears only when the dominant flow exceeds the threshold — default is a <em>rolling</em> mean + 2σ over the
-      trailing 60 minutes (current minute excluded), so what you see on replay equals what you'd have seen live; no
-      hindsight. Score 1 = at threshold, 10 = ≥4× threshold. <span style="color:var(--accent-2)">Green ▲ below</span>
-      = bullish dominant; <span style="color:var(--danger)">Red ▼ above</span> = bearish dominant. The faint
-      green/red <em>background shading</em> is the regime: sign of the rolling 30-min net flow (all four flows).
-      <em>Bottom strip</em>: per-minute ATM flow, one bar per significant minute, all rising UPWARD by magnitude.
-      Each minute shows only its dominant side — green when bullish
-      (<span style="color:var(--accent-2)">light green = PE writing</span> +
-      <span style="color:#1b8a3a">deep green cap = CE buying</span>), red when bearish
-      (<span style="color:var(--danger)">light red = CE writing</span> +
-      <span style="color:#b3261e">deep red cap = PE buying</span>). <b>Flow basis</b> (default <em>Volume</em>,
-      matching the reference HFT indicator): each minute's flow = that strike's <em>traded turnover</em>,
-      labelled by price direction — price↓ = writing (sellers aggressing), price↑ = buying (buyers aggressing).
-      Switch to <em>OI change</em> to measure net new positioning (ΔOI) instead — that's the more
-      "committed-money" lens, but it reads put-heavy where volume reads call-heavy (calls trade more, puts write
-      more). Either way it's an aggregate aggressor heuristic, not a fact — every contract has a buyer and a seller.
-      The side panel's fund-flow table mirrors the reference: last-60-minute and day totals per flow.
-    </p>
-  </div>
-
-  <!-- ============================ PAPER TRADES TAB ============================ -->
+  <!-- ============================ PAPER TRADES TAB ============================ -->  <!-- ============================ PAPER TRADES TAB ============================ -->
   <!-- Full trade-by-trade log of the paper ledger (10 lots/strategy), fed by
        GET /paper/ledger. Rendered lazily on first tab activation. -->
   <div class="tab-panel" id="tabPaper">
@@ -1108,11 +1121,11 @@
   // --- tabs ---
   function initTabs(){
     const tabs = document.querySelectorAll(".tab");
-    // By Flow removed — its manual chart checks are auto-computed in the Live
-    // data panel now, and the calendar reminders live in Today's Triggers. A
-    // stale localStorage tab="flow" falls through the guard below to the
-    // default (By Strategy).
-    const panels = { strategy: document.getElementById("tabStrategy"), oiflow: document.getElementById("tabOiflow"), paper: document.getElementById("tabPaper") };
+    // By Flow removed (manual checks auto-computed in Live data; reminders in
+    // Today's Triggers). OI Flow removed as a TAB in #57 — it is a permanent
+    // top-left section now. Stale localStorage tab values ("flow", "oiflow")
+    // fall through the guard below to the default (By Strategy).
+    const panels = { strategy: document.getElementById("tabStrategy"), paper: document.getElementById("tabPaper") };
     tabs.forEach(t => t.addEventListener("click", ()=>{
       tabs.forEach(x=>x.classList.remove("active"));
       t.classList.add("active");
@@ -1120,11 +1133,7 @@
       panels[t.dataset.tab].classList.add("active");
       // persist tab selection
       localStorage.setItem("tab", t.dataset.tab);
-      // body[data-tab] drives per-tab chrome: on OI Flow the dashboard
-      // blocks above the tab bar hide, so the chart IS the top of the page.
-      document.body.dataset.tab = t.dataset.tab;
       window.scrollTo({top:0, behavior:"smooth"});
-      if (t.dataset.tab === "oiflow") initOiFlowTab();
       if (t.dataset.tab === "paper") initPaperTab();
     }));
     const savedTab = localStorage.getItem("tab");
@@ -1133,10 +1142,10 @@
       Object.values(panels).forEach(p=>p.classList.remove("active"));
       document.querySelector(`.tab[data-tab="${savedTab}"]`).classList.add("active");
       panels[savedTab].classList.add("active");
-      document.body.dataset.tab = savedTab;
-      if (savedTab === "oiflow") setTimeout(initOiFlowTab, 0);
       if (savedTab === "paper") setTimeout(initPaperTab, 0);
     }
+    // OI Flow is a permanent section (#57): boot it with the page, always.
+    initOiFlowTab();
   }
 
   // ---------- Paper Trades tab ----------
@@ -1319,14 +1328,13 @@
   let _oiRegimeBullArea = null, _oiRegimeBearArea = null;  // background shading
   let _oiRefLines = [];   // [{series, line}] — cleared and re-drawn on each render
 
-  // Auto-refresh: while the OI Flow tab is visible, re-pull the aggregate every
-  // OI_AUTO_MS so the chart tracks the live recorder without a manual Reload.
-  // Pauses when the tab is hidden or the browser tab is backgrounded.
+  // Auto-refresh: re-pull the aggregate every OI_AUTO_MS so the chart tracks
+  // the live recorder without a manual Reload. The section is permanently on
+  // the page (#57), so the only pause is a backgrounded browser tab.
   const OI_AUTO_MS = 60000;
   let _oiAutoTimer = null;
   function _oiTabActive(){
-    const t = document.querySelector('.tab[data-tab="oiflow"]');
-    return !!(t && t.classList.contains("active"));
+    return true;   // kept for call-site compatibility; section is always visible
   }
   function startOiAuto(){
     if (_oiAutoTimer) return;
