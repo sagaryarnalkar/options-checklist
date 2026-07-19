@@ -115,6 +115,45 @@ def _bar_minute_iso(bar_date) -> str:
     return bd.replace(second=0, microsecond=0).isoformat()
 
 
+def _current_nifty_future(instruments, today) -> Optional[dict]:
+    """Current-month NIFTY futures contract, auto-rolled to next month within
+    2 days of expiry (LLT spec rule 1). Returns token/symbol/lot/expiry."""
+    futs = sorted(
+        (ins for ins in instruments
+         if ins.get("name") == "NIFTY" and ins.get("instrument_type") == "FUT"
+         and ins.get("expiry") and ins["expiry"] >= today),
+        key=lambda i: i["expiry"])
+    if not futs:
+        return None
+    pick = futs[0]
+    if (pick["expiry"] - today).days <= 2 and len(futs) > 1:
+        pick = futs[1]
+    return {"token": pick["instrument_token"], "symbol": pick["tradingsymbol"],
+            "lot_size": int(pick.get("lot_size") or 75), "expiry": pick["expiry"]}
+
+
+def _snapshot_futures(kite, instruments, now) -> Optional[str]:
+    """One futures_minute row for the current minute + incremental LLT
+    detection for today. Cheap (one quote); never raises."""
+    import llt
+    try:
+        fut = _current_nifty_future(instruments, now.date())
+        if not fut:
+            return "no futures contract"
+        q = kite.quote([f"NFO:{fut['symbol']}"]).get(f"NFO:{fut['symbol']}") or {}
+        ts = now.replace(second=0, microsecond=0).isoformat()
+        with db.get_conn() as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO futures_minute (ts, symbol, ltp, volume, oi)"
+                " VALUES (?,?,?,?,?)",
+                (ts, fut["symbol"], q.get("last_price"), q.get("volume"), q.get("oi")))
+            conn.commit()
+            llt.detect_day(conn, now.date().isoformat(), fut["lot_size"])
+        return None
+    except Exception as e:
+        return f"{type(e).__name__}: {e}"
+
+
 def is_market_hours(now: Optional[datetime] = None) -> bool:
     """True if the given moment (default: now) is inside NSE F&O hours
     on a weekday. NSE F&O: 09:15–15:30 IST, Monday–Friday."""
@@ -427,6 +466,29 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
                 "ltp": close, "volume": vol, "oi": oi,
             })
 
+    # NIFTY futures minute bars for the same window (LLT detection input) —
+    # historical_data(oi=True) carries volume+oi per minute. Best-effort.
+    fut_rows = 0
+    llt_found = 0
+    if name == "NIFTY":
+        try:
+            import llt
+            fut = _current_nifty_future(instruments, day)
+            if fut:
+                bars = _hist(fut["token"], oi=True)
+                with db.get_conn() as conn:
+                    for b in bars:
+                        conn.execute(
+                            "INSERT OR IGNORE INTO futures_minute (ts, symbol, ltp, volume, oi)"
+                            " VALUES (?,?,?,?,?)",
+                            (_bar_minute_iso(b["date"]), fut["symbol"], b.get("close"),
+                             b.get("volume"), b.get("oi")))
+                        fut_rows += 1
+                    conn.commit()
+                    llt_found = llt.detect_day(conn, day_iso, fut["lot_size"])
+        except Exception as e:
+            print(f"[recorder] futures backfill {day_iso}: {type(e).__name__}: {e}")
+
     with db.get_conn() as conn:
         ins_chain = db.insert_snapshots(conn, rows)
         ins_candle = db.insert_candles(conn, candle_rows)
@@ -437,6 +499,7 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
         "window": f"09:15–{end.strftime('%H:%M')}", "instruments": len(targets),
         "instruments_fetched": fetched, "chain_rows_inserted": ins_chain,
         "candle_rows_inserted": ins_candle,
+        "futures_minutes": fut_rows, "llt_prints_found": llt_found,
     }
 
 
@@ -498,6 +561,11 @@ def run_snapshot(force: bool = False) -> dict:
         _maybe_backfill_today(kite)
 
     results: dict = {"ts": now.isoformat(), "underlyings": {}}
+    # NIFTY futures minute-bar + LLT large-print detection (piggybacks the
+    # same tick; failures logged into the result, never fatal)
+    fut_err = _snapshot_futures(kite, _get_instruments(kite), now)
+    if fut_err:
+        results["futures_llt_error"] = fut_err
     for name, conf in UNDERLYINGS.items():
         try:
             results["underlyings"][name] = snapshot_one(kite, name, conf)

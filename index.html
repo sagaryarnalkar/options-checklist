@@ -792,6 +792,12 @@
           <option value="on">On</option>
         </select>
       </label>
+      <label title="Large-Lot-Trader prints on current-month NIFTY futures (minute volume ≥ max(750 lots, median+4·MAD), classified by ΔOI: fresh longs/shorts vs covering/unwinding).">LLT markers
+        <select id="oiLlt">
+          <option value="on" selected>On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
       <button type="button" id="oiReload" class="live-refresh">Reload</button>
     </div>
 
@@ -817,7 +823,10 @@
             <tr class="ff-pb"><td>Put Buy</td><td data-ff="last_60min.put_buying_cr">—</td><td data-ff="day.put_buying_cr">—</td></tr>
           </tbody>
         </table>
-        <div class="oi-side-title">Top 10 BIG prints (today)</div>
+        <div class="oi-side-title">LLT prints — futures <span class="oi-live-dot" style="width:6px;height:6px;display:inline-block;border-radius:50%;margin-left:4px"></span></div>
+        <div class="oi-side-body" id="oiLltList"><div class="note">no futures data yet</div></div>
+
+        <div class="oi-side-title" style="margin-top:12px">Top 10 BIG prints (today)</div>
         <div class="oi-side-body" id="oiBigList"><div class="note">No data yet.</div></div>
       </aside>
     </div>
@@ -1328,9 +1337,63 @@
     document.getElementById("oiTrendWindow").addEventListener("change", oiReload);
     document.getElementById("oiScoreBase").addEventListener("change", oiReload);
     document.getElementById("oiRegime").addEventListener("change", oiReload);
+    document.getElementById("oiLlt").addEventListener("change", oiReload);
     startOiAuto();   // arm before the first render so the live dot shows immediately
     buildOiChart();
     await loadOiDays();
+  }
+
+  // ---- LLT (Large-Lot-Trader) prints on NIFTY futures ----
+  // Minute-resolution Vtrender-style read (see llt.py): green/red circles on
+  // the candles + a right-rail feed with the OI-quadrant classification.
+  let _lastScoreMarkerObjs = [];
+  let _lastLltMarkerObjs = [];
+  function _applyOiMarkers(){
+    if (!_oiCandleSeries) return;
+    const all = [..._lastScoreMarkerObjs, ..._lastLltMarkerObjs]
+      .sort((a, b) => a.time - b.time);
+    _oiCandleSeries.setMarkers(all);
+  }
+  async function loadLLT(days){
+    const listEl = document.getElementById("oiLltList");
+    const enabled = document.getElementById("oiLlt").value === "on";
+    _lastLltMarkerObjs = [];
+    if (!enabled){ _applyOiMarkers(); if (listEl) listEl.innerHTML = `<div class="note">LLT markers off</div>`; return; }
+    try {
+      const r = await fetch(`/oi/llt?days=${encodeURIComponent(days)}`, { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      const d = await r.json();
+      const prints = d.prints || [];
+      _lastLltMarkerObjs = prints.map(p => ({
+        time: Math.floor(Date.parse(p.ts) / 1000) + 19800,   // IST-shift like oi_flow
+        position: p.side === "BUY" ? "belowBar" : "aboveBar",
+        color: p.side === "BUY" ? "#1f7a4d" : "#c22a10",
+        shape: "circle",
+        text: `LLT ${p.lots}`,
+      }));
+      _applyOiMarkers();
+      if (listEl){
+        if (!prints.length){ listEl.innerHTML = `<div class="note">no LLT prints in view</div>`; }
+        else {
+          listEl.innerHTML = [...prints].reverse().slice(0, 12).map(p => {
+            const cls = p.side === "BUY" ? "profit" : "loss";
+            const t = `${p.ts.slice(5,10)} ${p.ts.slice(11,16)}`;
+            const tags = [
+              `<span class="pt-chip" style="color:var(${p.side==="BUY"?"--pos":"--neg"});border-color:var(${p.side==="BUY"?"--pos":"--neg"})">${p.side} ${p.lots} lots</span>`,
+              `<span class="pt-chip">${p.classification}${p.confidence==="HIGH" ? " · HIGH" : ""}</span>`,
+              p.closing_flag ? `<span class="pt-chip seed">closing 15:00–15:30</span>` : "",
+              p.matched_id ? `<span class="pt-chip seed">↔ possible same-player exit (#${p.matched_id})</span>` : "",
+            ].filter(Boolean).join(" ");
+            return `<div style="padding:6px 0;border-bottom:1px solid color-mix(in srgb,var(--color-text) 12%,transparent)">
+              <b class="${cls}">${t}</b> @ ${p.price != null ? fmtNum(p.price) : "—"} · ΔOI ${p.oi_delta ?? "—"}${p.oi_delta_next != null ? ` (+60s ${p.oi_delta_next})` : ""}<br>${tags}
+            </div>`;
+          }).join("");
+        }
+      }
+    } catch(e){
+      if (listEl) listEl.innerHTML = `<div class="note">LLT load failed: ${e.message}</div>`;
+      _applyOiMarkers();
+    }
   }
 
   function chartTheme(){
@@ -1463,6 +1526,7 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
       renderOiData(d);
+      loadLLT(days);
     } catch(e) {
       setOiStatus("Failed to load aggregate: " + e.message, "error");
     }
@@ -1560,7 +1624,7 @@
     // Score markers: one per minute, only when above threshold. Side is
     // 'bullish'/'bearish' in combined basis, 'put_writing'/'call_writing' in
     // writing basis — both map to Buy (green, below) / Sell (red, above).
-    _oiCandleSeries.setMarkers(scoreMarkers.map(m => {
+    _lastScoreMarkerObjs = scoreMarkers.map(m => {
       const isBull = (m.side === "bullish" || m.side === "put_writing");
       return {
         time: m.time,
@@ -1569,7 +1633,8 @@
         shape:    isBull ? "arrowUp" : "arrowDown",
         text: (isBull ? "Buy:" : "Sell:") + m.score,
       };
-    }));
+    });
+    _applyOiMarkers();
 
     // Fund-flow summary table (last 60 min + day totals, four flows)
     renderFundFlow(d.fund_flow);

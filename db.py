@@ -144,6 +144,40 @@ CREATE TABLE IF NOT EXISTS paper_trades (
 );
 CREATE INDEX IF NOT EXISTS idx_paper_strategy_status ON paper_trades(strategy, status);
 
+-- NIFTY current-month futures, one row per minute (recorder + backfill).
+-- volume is CUMULATIVE for the day (Kite convention); LLT detection diffs it.
+CREATE TABLE IF NOT EXISTS futures_minute (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts          TEXT    NOT NULL,
+    symbol      TEXT    NOT NULL,
+    ltp         REAL,
+    volume      INTEGER,
+    oi          INTEGER,
+    UNIQUE(ts, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_fut_ts ON futures_minute(ts);
+
+-- Large-lot trader (LLT) prints detected from futures_minute (llt.py).
+-- Minute-resolution adaptation of the Vtrender-style order-flow read:
+-- side from the minute's price direction (aggressor heuristic), OI quadrant
+-- classification, confidence, closing-session flag, cross-session match.
+CREATE TABLE IF NOT EXISTS llt_prints (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             TEXT    NOT NULL,
+    symbol         TEXT    NOT NULL,
+    side           TEXT    NOT NULL,      -- BUY | SELL
+    lots           INTEGER NOT NULL,
+    price          REAL,
+    oi_delta       INTEGER,               -- print-minute ΔOI (contracts qty)
+    oi_delta_next  INTEGER,               -- ΔOI one minute later (~+60s check)
+    classification TEXT,                  -- FRESH LONGS | SHORT COVERING | FRESH SHORTS | LONG UNWINDING | UNCLEAR
+    confidence     TEXT,                  -- HIGH | MEDIUM
+    closing_flag   INTEGER DEFAULT 0,     -- 1 if 15:00–15:30 IST
+    matched_id     INTEGER,               -- possible same-player exit reference
+    UNIQUE(ts, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_llt_ts ON llt_prints(ts);
+
 CREATE TABLE IF NOT EXISTS paper_marks (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     trade_id   INTEGER NOT NULL,
