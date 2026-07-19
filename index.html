@@ -571,13 +571,17 @@
        candles — no more bars lost below the page fold. */
     .oi-chart-merged{ height:clamp(560px, calc(100vh - 240px), 940px); }
   }
-  /* Tab-switch scroll target: the PANEL, not .tabs — the tab bar is sticky,
-     so scrollIntoView on it lands unpredictably. Margin clears the sticky
-     header (64px) + stuck tab bar (48px + 6px offset) with a little air. */
-  .tab-panel{ scroll-margin-top:126px; }
+  /* OI Flow is a dedicated view: hide the strategy-dashboard chrome above
+     the tab bar (title row, live card, triggers, recommendations) so the
+     tab bar + chart ARE the top of the page. The sticky header still shows
+     the live NIFTY quote; everything reappears on the other tabs. */
+  body[data-tab="oiflow"] .top,
+  body[data-tab="oiflow"] #liveCard,
+  body[data-tab="oiflow"] .triggers,
+  body[data-tab="oiflow"] #recBlock{ display:none; }
 </style>
 </head>
-<body>
+<body data-tab="strategy">
 
 <header class="hz-header">
   <div class="in">
@@ -1116,10 +1120,10 @@
       panels[t.dataset.tab].classList.add("active");
       // persist tab selection
       localStorage.setItem("tab", t.dataset.tab);
-      // OI Flow: land on the chart, not the page top — the live card and
-      // recommendations above the tab bar otherwise push it below the fold.
-      if (t.dataset.tab === "oiflow") panels.oiflow.scrollIntoView({behavior:"smooth"});
-      else window.scrollTo({top:0, behavior:"smooth"});
+      // body[data-tab] drives per-tab chrome: on OI Flow the dashboard
+      // blocks above the tab bar hide, so the chart IS the top of the page.
+      document.body.dataset.tab = t.dataset.tab;
+      window.scrollTo({top:0, behavior:"smooth"});
       if (t.dataset.tab === "oiflow") initOiFlowTab();
       if (t.dataset.tab === "paper") initPaperTab();
     }));
@@ -1129,6 +1133,7 @@
       Object.values(panels).forEach(p=>p.classList.remove("active"));
       document.querySelector(`.tab[data-tab="${savedTab}"]`).classList.add("active");
       panels[savedTab].classList.add("active");
+      document.body.dataset.tab = savedTab;
       if (savedTab === "oiflow") setTimeout(initOiFlowTab, 0);
       if (savedTab === "paper") setTimeout(initPaperTab, 0);
     }
