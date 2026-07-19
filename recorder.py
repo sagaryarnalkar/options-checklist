@@ -346,6 +346,36 @@ def _existing_expiry_for_day(conn, underlying: str, day_iso: str) -> Optional[st
     return row["expiry"] if row else None
 
 
+def _backfill_futures(kite, instruments, day, start, end) -> dict:
+    """Futures minute bars + LLT detection for one day — INDEPENDENT of the
+    options-chain backfill: a past day's weekly option contracts may have
+    lapsed from the instruments dump, but the monthly future lives on (this
+    is exactly the Jul-14 LLT verification case)."""
+    out = {"futures_minutes": 0, "llt_prints_found": 0}
+    try:
+        import llt
+        fut = _current_nifty_future(instruments, day)
+        if not fut:
+            out["futures_error"] = "no live futures contract for that day"
+            return out
+        bars = kite.historical_data(
+            fut["token"], start.strftime("%Y-%m-%d %H:%M:%S"),
+            end.strftime("%Y-%m-%d %H:%M:%S"), "minute", oi=True)
+        with db.get_conn() as conn:
+            for b in bars:
+                conn.execute(
+                    "INSERT OR IGNORE INTO futures_minute (ts, symbol, ltp, volume, oi)"
+                    " VALUES (?,?,?,?,?)",
+                    (_bar_minute_iso(b["date"]), fut["symbol"], b.get("close"),
+                     b.get("volume"), b.get("oi")))
+            conn.commit()
+            out["futures_minutes"] = len(bars)
+            out["llt_prints_found"] = llt.detect_day(conn, day.isoformat(), fut["lot_size"])
+    except Exception as e:
+        out["futures_error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
 def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = None) -> dict:
     """Reconstruct chain_snapshot + underlying_candle rows for `day` (a date)
     from Kite history. Fills only the gap — existing minutes are dedup-ignored.
@@ -364,12 +394,14 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
 
     instruments = _get_instruments(kite)
     day_iso = day.isoformat()
+    # Futures + LLT first — never blocked by lapsed option chains (#54 fix)
+    fut = _backfill_futures(kite, instruments, day, start, end) if name == "NIFTY" else {}
     with db.get_conn() as conn:
         expiry = _existing_expiry_for_day(conn, name, day_iso)
     if expiry is None:
         exp_obj = _nearest_expiry_for(instruments, conf["nfo_name"], day)
         if exp_obj is None:
-            return {"ok": False, "underlying": name, "date": str(day),
+            return {"ok": False, **fut, "underlying": name, "date": str(day),
                     "error": "no expiry in instruments dump (contracts may have lapsed)"}
         expiry = str(exp_obj)
 
@@ -386,10 +418,10 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
     try:
         idx_bars = _hist(conf["instrument_token"])
     except Exception as e:
-        return {"ok": False, "underlying": name, "date": str(day),
+        return {"ok": False, **fut, "underlying": name, "date": str(day),
                 "error": f"index history: {type(e).__name__}: {e}"}
     if not idx_bars:
-        return {"ok": False, "underlying": name, "date": str(day), "error": "no index history"}
+        return {"ok": False, **fut, "underlying": name, "date": str(day), "error": "no index history"}
 
     spot_by_min: dict = {}
     candle_rows = []
@@ -405,7 +437,7 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
             "volume": b.get("volume") or 0,
         })
     if not spot_by_min:
-        return {"ok": False, "underlying": name, "date": str(day), "error": "index history had no closes"}
+        return {"ok": False, **fut, "underlying": name, "date": str(day), "error": "index history had no closes"}
 
     # 2) Candidate strikes = union band across the day's spot range, so every
     #    minute's ATM ± atm_n is covered.
@@ -417,7 +449,7 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
     ]
     all_strikes = sorted({int(ins["strike"]) for ins in chain})
     if len(all_strikes) < 2:
-        return {"ok": False, "underlying": name, "date": str(day),
+        return {"ok": False, **fut, "underlying": name, "date": str(day),
                 "error": f"no/too-few strikes for expiry {expiry}"}
     steps = [all_strikes[i + 1] - all_strikes[i] for i in range(len(all_strikes) - 1)]
     step = min(s for s in steps if s > 0)
@@ -466,29 +498,6 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
                 "ltp": close, "volume": vol, "oi": oi,
             })
 
-    # NIFTY futures minute bars for the same window (LLT detection input) —
-    # historical_data(oi=True) carries volume+oi per minute. Best-effort.
-    fut_rows = 0
-    llt_found = 0
-    if name == "NIFTY":
-        try:
-            import llt
-            fut = _current_nifty_future(instruments, day)
-            if fut:
-                bars = _hist(fut["token"], oi=True)
-                with db.get_conn() as conn:
-                    for b in bars:
-                        conn.execute(
-                            "INSERT OR IGNORE INTO futures_minute (ts, symbol, ltp, volume, oi)"
-                            " VALUES (?,?,?,?,?)",
-                            (_bar_minute_iso(b["date"]), fut["symbol"], b.get("close"),
-                             b.get("volume"), b.get("oi")))
-                        fut_rows += 1
-                    conn.commit()
-                    llt_found = llt.detect_day(conn, day_iso, fut["lot_size"])
-        except Exception as e:
-            print(f"[recorder] futures backfill {day_iso}: {type(e).__name__}: {e}")
-
     with db.get_conn() as conn:
         ins_chain = db.insert_snapshots(conn, rows)
         ins_candle = db.insert_candles(conn, candle_rows)
@@ -499,7 +508,7 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
         "window": f"09:15–{end.strftime('%H:%M')}", "instruments": len(targets),
         "instruments_fetched": fetched, "chain_rows_inserted": ins_chain,
         "candle_rows_inserted": ins_candle,
-        "futures_minutes": fut_rows, "llt_prints_found": llt_found,
+        **fut,
     }
 
 
