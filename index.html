@@ -249,8 +249,11 @@
   .oi-status { font-size:12px; color:var(--muted); margin-bottom:10px; min-height:18px; }
   .oi-status.error { color:var(--danger); }
   .oi-status.warn { color:var(--warn); }
-  .oi-layout { display:grid; grid-template-columns:1fr 280px; gap:12px; }
-  @media (max-width:900px){ .oi-layout { grid-template-columns:1fr; } }
+  /* minmax(0,…) lets the chart column shrink below the canvas's min-content
+     width on window downsizes — otherwise LWC's ResizeObserver never fires
+     and the old (wider) canvas forces horizontal overflow. */
+  .oi-layout { display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:12px; }
+  @media (max-width:900px){ .oi-layout { grid-template-columns:minmax(0,1fr); } }
   .oi-charts { display:flex; flex-direction:column; gap:10px; }
   .oi-chart-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; }
   .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
@@ -539,6 +542,39 @@
   @media (prefers-reduced-motion: reduce){
     *{ animation-duration:.001s !important; animation-iteration-count:1 !important; transition:none !important; }
   }
+
+  /* ============================================================
+     OI FLOW — full-bleed desktop layout (#55).
+     The chart owns the left column at (near-)viewport height; the
+     controls, fund-flow table, LLT feed and big prints stack in a
+     400px right rail. margin-inline breaks the panel out of the
+     1280px .wrap so wide monitors are actually used; the 24px inset
+     mirrors .wrap's padding (and absorbs the scrollbar, so no
+     horizontal overflow). <1200px keeps the stacked mobile layout.
+     ============================================================ */
+  @media (min-width:1200px){
+    #tabOiflow.active{
+      display:grid;
+      grid-template-columns:minmax(0,1fr) 400px;
+      grid-template-areas:"chart controls" "chart side" "status side" "note side";
+      gap:10px 14px;
+      align-items:start;
+      margin-inline:calc(50% - 50vw + 24px);
+    }
+    #tabOiflow > .oi-layout{ display:contents; }
+    #tabOiflow > .oi-controls{ grid-area:controls; margin-bottom:0; }
+    #tabOiflow > .oi-status{ grid-area:status; margin-bottom:0; }
+    #tabOiflow .oi-charts{ grid-area:chart; }
+    #tabOiflow .oi-side{ grid-area:side; }
+    #tabOiflow > .note{ grid-area:note; margin-top:0; }
+    /* Fit the viewport so the flow strip + time axis are on-screen with the
+       candles — no more bars lost below the page fold. */
+    .oi-chart-merged{ height:clamp(560px, calc(100vh - 240px), 940px); }
+  }
+  /* Tab-switch scroll target: the PANEL, not .tabs — the tab bar is sticky,
+     so scrollIntoView on it lands unpredictably. Margin clears the sticky
+     header (64px) + stuck tab bar (48px + 6px offset) with a little air. */
+  .tab-panel{ scroll-margin-top:126px; }
 </style>
 </head>
 <body>
@@ -1080,7 +1116,10 @@
       panels[t.dataset.tab].classList.add("active");
       // persist tab selection
       localStorage.setItem("tab", t.dataset.tab);
-      window.scrollTo({top:0, behavior:"smooth"});
+      // OI Flow: land on the chart, not the page top — the live card and
+      // recommendations above the tab bar otherwise push it below the fold.
+      if (t.dataset.tab === "oiflow") panels.oiflow.scrollIntoView({behavior:"smooth"});
+      else window.scrollTo({top:0, behavior:"smooth"});
       if (t.dataset.tab === "oiflow") initOiFlowTab();
       if (t.dataset.tab === "paper") initPaperTab();
     }));
@@ -1266,7 +1305,7 @@
   const OI_LIB_URL = "https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js";
   let _oiLibLoading = null;
   let _oiInited = false;
-  let _oiChart = null, _oiCandleSeries = null;
+  let _oiChart = null, _oiCandleSeries = null, _oiLltSeries = null;
   // Flow strip series (overlay scale at the bottom of the same chart).
   // Stacking trick: the TOTAL series is drawn first (taller bar), then the
   // writing series over it — the visible top segment is the buying flow.
@@ -1347,29 +1386,37 @@
   // Minute-resolution Vtrender-style read (see llt.py): green/red circles on
   // the candles + a right-rail feed with the OI-quadrant classification.
   let _lastScoreMarkerObjs = [];
-  let _lastLltMarkerObjs = [];
+  let _lastLltPoints = [];   // {time, price, side, lots} per print
   function _applyOiMarkers(){
     if (!_oiCandleSeries) return;
-    const all = [..._lastScoreMarkerObjs, ..._lastLltMarkerObjs]
-      .sort((a, b) => a.time - b.time);
-    _oiCandleSeries.setMarkers(all);
+    _oiCandleSeries.setMarkers([..._lastScoreMarkerObjs].sort((a, b) => a.time - b.time));
+    if (!_oiLltSeries) return;
+    const pts = [..._lastLltPoints].sort((a, b) => a.time - b.time);
+    _oiLltSeries.setData(pts.map(p => ({ time: p.time, value: p.price })));
+    _oiLltSeries.setMarkers(pts.map(p => ({
+      time: p.time,
+      position: "inBar",                     // ON the data point = at print price
+      color: p.side === "BUY" ? "#1f7a4d" : "#c22a10",
+      shape: p.side === "BUY" ? "arrowUp" : "arrowDown",
+      text: `LLT ${p.lots}`,
+      size: 2,
+    })));
   }
   async function loadLLT(days){
     const listEl = document.getElementById("oiLltList");
     const enabled = document.getElementById("oiLlt").value === "on";
-    _lastLltMarkerObjs = [];
+    _lastLltPoints = [];
     if (!enabled){ _applyOiMarkers(); if (listEl) listEl.innerHTML = `<div class="note">LLT markers off</div>`; return; }
     try {
       const r = await fetch(`/oi/llt?days=${encodeURIComponent(days)}`, { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
       const prints = d.prints || [];
-      _lastLltMarkerObjs = prints.map(p => ({
+      _lastLltPoints = prints.filter(p => p.price != null).map(p => ({
         time: Math.floor(Date.parse(p.ts) / 1000) + 19800,   // IST-shift like oi_flow
-        position: p.side === "BUY" ? "belowBar" : "aboveBar",
-        color: p.side === "BUY" ? "#1f7a4d" : "#c22a10",
-        shape: "circle",
-        text: `LLT ${p.lots}`,
+        price: p.price,
+        side: p.side,
+        lots: p.lots,
       }));
       _applyOiMarkers();
       if (listEl){
@@ -1445,6 +1492,18 @@
       wickUpColor: "#7bd88f", wickDownColor: "#ff6b6b",
     });
     _oiCandleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.03, bottom: 0.32 } });
+    // LLT price-pinned tags: an invisible line series whose data points sit at
+    // each print's actual futures price, carrying inBar markers — so the tag
+    // lands at the print's time AND price level (not just above/below the
+    // candle). autoscaleInfoProvider:null keeps it out of autoscaling, so the
+    // small futures-vs-spot premium never stretches the candle scale.
+    _oiLltSeries = _oiChart.addLineSeries({
+      color: "rgba(0,0,0,0)",
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
+    });
 
     // Flow strip: 4 histogram series on a shared overlay scale, all bars rise
     // UPWARD from a bottom baseline (single-direction, like the reference).
@@ -1466,7 +1525,7 @@
     _oiPeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: "rgba(31,122,77,0.45)" });
     _oiBearTotalSeries = _oiChart.addHistogramSeries({ ...flowOpts, color: "#c22a10" });
     _oiCeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: "rgba(194,42,16,0.45)" });
-    _oiChart.priceScale("oiflow").applyOptions({ scaleMargins: { top: 0.74, bottom: 0.02 } });
+    _oiChart.priceScale("oiflow").applyOptions({ scaleMargins: { top: 0.72, bottom: 0.04 } });
 
     window.addEventListener("resize", () => {
       if (_oiChart) _oiChart.applyOptions({ width: priceEl.clientWidth });
