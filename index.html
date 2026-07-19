@@ -256,7 +256,9 @@
   @media (max-width:900px){ .oi-layout { grid-template-columns:minmax(0,1fr); } }
   .oi-charts { display:flex; flex-direction:column; gap:10px; }
   .oi-chart-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:8px 10px; }
-  .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+  .oi-chart-title { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;
+    display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .oi-chart-title .live-refresh { flex:none; }
   .oi-chart { height:260px; width:100%; }
   .oi-chart-merged { height:560px; }
   /* TradingView's internal <table> (pane + time axis) renders ~20px taller than
@@ -648,9 +650,12 @@
     <div class="oi-layout">
       <div class="oi-charts">
         <div class="oi-chart-card">
-          <div class="oi-chart-title">Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
+          <div class="oi-chart-title">
+            <span>Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
             green = bullish (<span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:#1b8a3a">▮ CE buy</span>) ·
-            red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span>)</div>
+            red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span>)</span>
+            <button type="button" id="oiReload" class="live-refresh">Reload</button>
+          </div>
           <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
         </div>
       </div>
@@ -753,7 +758,6 @@
           <option value="off">Off</option>
         </select>
       </label>
-      <button type="button" id="oiReload" class="live-refresh">Reload</button>
     </div>
     <p class="note" style="margin-top:16px">
       <b>How to read.</b> One window, two sections sharing the same time axis. <em>Top ~70%</em>: 1-min candles +
