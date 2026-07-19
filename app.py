@@ -378,6 +378,28 @@ async def paper_ledger():
                          "summary_by_strategy": summary})
 
 
+@app.get("/oi/llt")
+async def oi_llt(days: int = 5, date: Optional[str] = None):
+    """Large-Lot-Trader prints on NIFTY current-month futures (minute
+    resolution; see llt.py). `days` = most recent N sessions with futures
+    data (aligned with the OI Flow chart view), or a single `date`."""
+    import llt as _llt
+    days = max(1, min(int(days), 30))
+    with db.get_conn() as conn:
+        if date:
+            dates = [date]
+        else:
+            dates = [r[0] for r in conn.execute(
+                "SELECT DISTINCT DATE(ts) FROM futures_minute ORDER BY 1 DESC LIMIT ?",
+                (days,)).fetchall()]
+            dates.reverse()
+        prints = _llt.prints_for_dates(conn, dates)
+    return JSONResponse({"dates": dates, "prints": prints,
+                         "config": {"min_lots": _llt.LLT_MIN_LOTS,
+                                    "mad_k": _llt.LLT_MAD_K,
+                                    "conf_window_min": _llt.LLT_CONF_WINDOW}})
+
+
 @app.get("/oi/marker_analysis")
 async def oi_marker_analysis():
     """Aggregate forward-return stats across all stored score markers.
