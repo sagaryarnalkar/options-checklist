@@ -1456,6 +1456,7 @@
   let _oiBearTotalSeries = null, _oiCeWriteSeries = null;
   let _oiRegimeBullArea = null, _oiRegimeBearArea = null;  // background shading
   let _oiRefLines = [];   // [{series, line}] — cleared and re-drawn on each render
+  let _oiLastBarTime = null;  // last candle time of the previous render (view-pinning)
 
   // Auto-refresh: re-pull the aggregate every OI_AUTO_MS so the chart tracks
   // the live recorder without a manual Reload. The section is permanently on
@@ -1749,7 +1750,7 @@
       const r = await fetch("/oi/aggregate?" + qs.toString(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
-      renderOiData(d);
+      renderOiData(d, { keepView: silent });
       loadLLT(days);
     } catch(e) {
       setOiStatus("Failed to load aggregate: " + e.message, "error");
@@ -1776,8 +1777,17 @@
     });
   }
 
-  function renderOiData(d){
+  function renderOiData(d, opts){
+    const keepView = !!(opts && opts.keepView);
     const candles = d.candles || [];
+    // Silent refresh: LWC preserves the LOGICAL range across setData, so a
+    // window anchored in history drifts right as new bars append. Snapshot
+    // the time range now; if the user was panned into history (live edge
+    // off-screen), we re-pin it by TIME after the render. When the live
+    // edge IS on-screen, logical preservation is what we want — the view
+    // keeps following the newest bars.
+    const prevRange = (keepView && _oiChart) ? _oiChart.timeScale().getVisibleRange() : null;
+    const wasInHistory = !!(prevRange && _oiLastBarTime && prevRange.to < _oiLastBarTime - 30);
     const scoreMarkers = d.score_markers || [];
     const top10 = d.big_prints_top10 || [];
 
@@ -1899,7 +1909,19 @@
       ? `S/R ${(srInfo.support||[]).map(x=>x.strike).join("/")||"—"} | ${(srInfo.resistance||[]).map(x=>x.strike).join("/")||"—"} · `
       : "";
     setOiStatus(`${scope}${s.total_minutes || 0} minutes · ${s.n_unique_strikes || 0} strikes · ${s.n_score_markers || 0} score markers (${peakLabel}) · ${s.n_big_prints || 0} prints · thr ${thrLabel} · ${trendLabel}${srLabel}${ohlcLabel} · lot ${d.lot_size}, step ${d.strike_step}`);
-    _oiChart.timeScale().fitContent();
+    // Land zoomed into the LATEST session instead of fitting the whole
+    // multi-day range (the user otherwise re-zooms on every load). Candle
+    // times are IST-shifted epochs, so `time % 86400` is seconds since IST
+    // midnight: 09:15 = 33300, 15:30 = 55800 (±5 min margin so the first
+    // and last candles aren't glued to the pane edges). Silent auto-refresh
+    // passes keepView so a live pan/zoom is never yanked back.
+    _oiLastBarTime = candles[candles.length - 1].time;
+    if (!keepView){
+      const dayStart = _oiLastBarTime - (_oiLastBarTime % 86400);
+      _oiChart.timeScale().setVisibleRange({ from: dayStart + 33000, to: dayStart + 56100 });
+    } else if (wasInHistory) {
+      _oiChart.timeScale().setVisibleRange(prevRange);
+    }
   }
 
   // ---------- live data (data.json from compute.py) ----------
