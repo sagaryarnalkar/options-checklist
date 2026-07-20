@@ -43,6 +43,18 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet" />
+<script>
+/* Theme boot — runs before first paint so there is no flash of the wrong
+   palette. Axis values live in localStorage; defaults per the v2 handoff. */
+(function(){
+  var d = document.documentElement;
+  d.dataset.theme = localStorage.getItem("hz_theme") || "indigo";
+  d.dataset.skin = localStorage.getItem("hz_skin") || "fintech";
+  d.dataset.density = "comfortable"; d.dataset.corners = "square";
+  d.dataset.numerals = "mono"; d.dataset.tint = "off";
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) d.dataset.rm = "true";
+})();
+</script>
 <style>
   /* ============================================================
      HEROZERO TRADER — Modernist design system (from the Claude
@@ -56,7 +68,7 @@
     /* Modernist tokens */
     --color-bg:#f3f2f2; --color-surface:#eae9e9; --color-text:#201e1d;
     --color-accent:#ec3013; --color-accent-600:#dd2b0f; --color-accent-700:#ae1800;
-    --color-accent-100:#fff2ef;
+    --color-accent-100:color-mix(in srgb, var(--color-accent) 9%, var(--color-bg));
     --color-divider:rgba(32,30,29,0.40);
     --neutral-100:#f8f4f4; --neutral-200:#eae7e7; --neutral-500:#9b9797;
     --pos:#1f7a4d; --pos-bg:#e7f2ec; --neg:#c22a10; --neg-bg:#fff0ec; --amber:#c07a1e;
@@ -66,7 +78,7 @@
     /* Legacy aliases (existing component CSS/JS reads these) */
     --bg:var(--color-bg); --panel:var(--color-surface); --panel-2:var(--neutral-100);
     --border:var(--color-divider);
-    --text:var(--color-text); --muted:rgba(32,30,29,0.55);
+    --text:var(--color-text); --muted:color-mix(in srgb, var(--color-text) 55%, transparent);
     --accent:var(--color-accent); --accent-2:var(--pos);
     --warn:var(--amber); --danger:var(--neg); --chip:var(--neutral-200);
     --radius:0px;
@@ -276,8 +288,8 @@
   table.oi-ff tr:last-child td { border-bottom:none; }
   table.oi-ff .ff-pw td:first-child { color:var(--accent-2); }
   table.oi-ff .ff-cw td:first-child { color:var(--danger); }
-  table.oi-ff .ff-cb td:first-child { color:#1b8a3a; }
-  table.oi-ff .ff-pb td:first-child { color:#b3261e; }
+  table.oi-ff .ff-cb td:first-child { color:var(--pos); }
+  table.oi-ff .ff-pb td:first-child { color:var(--neg); }
   .oi-side-body { font-family:var(--mono); font-size:12px; }
   .oi-big-row { padding:6px 8px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:2px; }
   .oi-big-row:last-child { border-bottom:none; }
@@ -290,11 +302,11 @@
   .oi-big-row.short_covering b, .oi-big-row.long_unwinding b { color:var(--muted); }
   /* Signal pills */
   .sig { display:inline-block; padding:2px 8px; border-radius:0; font-size:11px; font-weight:600; letter-spacing:0.3px; text-transform:uppercase; }
-  .sig-bull-cross { background:#1b8a3a; color:white; animation: sigpulse 1.4s infinite; }
-  .sig-bear-cross { background:#c0392b; color:white; animation: sigpulse 1.4s infinite; }
-  .sig-bull-hold  { background:#d4ecd9; color:#1b8a3a; }
-  .sig-bear-hold  { background:#f5d6d2; color:#9b2d20; }
-  .sig-unknown    { background:#e8e8e8; color:#666; }
+  .sig-bull-cross { background:var(--pos); color:var(--color-bg); animation: sigpulse 1.4s infinite; }
+  .sig-bear-cross { background:var(--neg); color:white; animation: sigpulse 1.4s infinite; }
+  .sig-bull-hold  { background:var(--pos-bg); color:var(--pos); }
+  .sig-bear-hold  { background:var(--neg-bg); color:var(--neg); }
+  .sig-unknown    { background:var(--neutral-200); color:var(--muted); }
   @keyframes sigpulse { 0%,100% { opacity:1; box-shadow:0 0 0 0 rgba(0,0,0,0.2); } 50% { opacity:0.85; box-shadow:0 0 0 4px rgba(255,255,255,0); } }
   .stitle .sig { margin-left:8px; }
 
@@ -546,51 +558,130 @@
   }
 
   /* ============================================================
-     COMMAND LAYOUT (#57): OI Flow is not a tab — it lives
-     permanently at the top-left of the page. Right column: Live
-     data, Today's triggers, Trade recommendations. Below: the two
-     remaining tabs (By Strategy, Paper Trades). Full page width.
+     HEROZERO v2 (design handoff, docs/design_handoff_herozero_v2):
+     4-tab shell (Dashboard · By Strategy · OI Flow · Paper Trades,
+     OI Flow default) inside the sticky header; content 1720px.
+     Theming = data-theme (8 palettes) x data-skin (3 forms) +
+     modifiers, all CSS vars on <html>. Defaults indigo / fintech.
      ============================================================ */
+  .wrap{ max-width:1720px; padding:24px 24px 56px; }
+  .hz-header .in{ max-width:1720px; }
+  .hz-header{ border-bottom:0; }
+  .hz-tabbar{ border-top:2px solid var(--color-divider); border-bottom:2px solid var(--color-divider); }
+  .hz-tabbar .in{ display:grid; grid-template-columns:repeat(4,1fr); max-width:1720px; margin:0 auto; padding:0; }
+  .hz-tabbar .tab{
+    appearance:none; background:transparent; border:0; border-right:1px solid var(--color-divider);
+    padding:13px; text-align:center; cursor:pointer; color:var(--color-text);
+    font-family:var(--sans); font-weight:800; font-size:14px; border-radius:0;
+  }
+  .hz-tabbar .tab:last-child{ border-right:0; }
+  .hz-tabbar .tab:not(.active):hover{ background:color-mix(in srgb,var(--color-text) 5%,transparent); color:var(--color-text); }
+  .hz-tabbar .tab.active{ background:var(--color-accent); color:var(--on-accent); }
+  .hz-set{ display:flex; align-items:center; gap:5px; font-size:10px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--muted); }
+  .hz-set select{ background:var(--panel-2); color:var(--text); border:1px solid var(--border);
+    font-family:var(--sans); font-size:12px; padding:3px 6px; border-radius:0; }
+
+  /* Dashboard tab: header row, then Live data | Triggers, then recos */
   @media (min-width:1100px){
-    /* 1100-1199 band still runs the legacy two-column .wrap grid */
-    .wrap > #oiflowSection{ grid-column:1/-1; }
+    #tabDashboard.active{ display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);
+      gap:0 16px; align-items:start; grid-auto-flow:row dense; }
+    #tabDashboard > .top{ grid-column:1/-1; }
+    #tabDashboard > #liveCard{ grid-column:1; }
+    #tabDashboard > .triggers{ grid-column:2; margin-top:14px; }
+    #tabDashboard > #recBlock{ grid-column:1/-1; }
   }
-  @media (min-width:1200px){
-    .wrap{
-      max-width:none;
-      display:grid;
-      grid-template-columns:minmax(0,1fr) 430px;
-      grid-template-areas:
-        "top      top"
-        "oiflow   live"
-        "oiflow   triggers"
-        "oiflow   rec"
-        "tabs     tabs"
-        "panel    panel"
-        "footer   footer";
-      gap:0 16px;
-      align-items:start;
-    }
-    .wrap > .top{ grid-area:top; }
-    .wrap > #oiflowSection{ grid-area:oiflow; }
-    .wrap > #liveCard{ grid-area:live; }
-    .wrap > .triggers{ grid-area:triggers; }
-    .wrap > #recBlock{ grid-area:rec; }
-    .wrap > .tabs{ grid-area:tabs; margin-top:16px; }
-    /* Only one panel is display:block at a time, so sharing the area is safe */
-    .wrap > .tab-panel{ grid-area:panel; }
-    .wrap > .footer{ grid-area:footer; }
-    /* Inside the section: chart takes the full column width; the fund-flow /
-       LLT / big-prints panels go 3-across beneath it; controls (rarely
-       touched) under those. Chart height fits the viewport so the flow
-       strip + time axis are always on-screen. */
-    #oiflowSection .oi-layout{ grid-template-columns:minmax(0,1fr); }
-    #oiflowSection .oi-side{
-      display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
-      gap:0 18px; align-items:start;
-    }
-    .oi-chart-merged{ height:clamp(520px, calc(100vh - 250px), 900px); }
+
+  /* OI Flow tab: controls bar above the chart; 2.6fr/1fr chart | right rail */
+  @media (min-width:1100px){
+    #tabOiflow .oi-layout{ grid-template-columns:minmax(0,2.6fr) minmax(0,1fr); gap:14px; }
+    .oi-chart-merged{ height:clamp(520px, calc(100vh - 320px), 900px); }
   }
+  .oi-side{ background:transparent; border:0; padding:0; display:flex; flex-direction:column; gap:12px; }
+  .oi-side-panel{ background:var(--panel); border:1px solid var(--border); padding:10px 12px; }
+
+  /* ---------- Axis 1: data-theme (COLOR only) ---------- */
+  :root{ --on-accent:var(--color-bg); }
+  :root[data-theme="indigo"]{ --color-accent:#4f46c9; --color-accent-600:#453cb0; --color-accent-700:#372f8f;
+    --pos:#1f7a4d; --pos-bg:#e7f2ec; --neg:#c22a10; --neg-bg:#fff0ec; --amber:#b5791a; --on-accent:#ffffff; }
+  :root[data-theme="red"]{ --color-accent:#ec3013; --color-accent-600:#dd2b0f; --color-accent-700:#ae1800; }
+  :root[data-theme="cobalt"]{ --color-accent:#1f5fd6; --color-accent-600:#1a52bb; --color-accent-700:#164399;
+    --amber:#b5791a; --on-accent:#ffffff; }
+  :root[data-theme="paper"]{ --color-bg:#f4efe6; --color-surface:#eae3d6; --color-text:#2b2620;
+    --color-divider:rgba(43,38,32,0.34); --color-accent:#c0562a; --color-accent-600:#a8481f; --color-accent-700:#8a3a18;
+    --neutral-100:#efe9dc; --neutral-200:#e2dac9; --neutral-500:#8f8676;
+    --pos:#4f7a3a; --pos-bg:rgba(79,122,58,0.14); --neg:#b23a1a; --neg-bg:rgba(178,58,26,0.12);
+    --amber:#b5791a; --on-accent:#f4efe6; }
+  :root[data-theme="mono"]{ --color-bg:#ffffff; --color-surface:#f2f2f2; --color-text:#111111;
+    --color-divider:rgba(17,17,17,0.5); --color-accent:#111111; --color-accent-600:#000000; --color-accent-700:#000000;
+    --neutral-100:#f7f7f7; --neutral-200:#e6e6e6; --neutral-500:#8a8a8a;
+    --amber:#8a6a12; --on-accent:#ffffff; }
+  :root[data-theme="midnight"]{ --color-bg:#15171c; --color-surface:#1d2027; --color-text:#e7e5e2;
+    --color-divider:rgba(231,229,226,0.22); --color-accent:#ff4326; --color-accent-600:#ff5b42; --color-accent-700:#ff7963;
+    --neutral-100:#23262e; --neutral-200:#2a2e37; --neutral-500:#8b9099;
+    --pos:#35c98b; --pos-bg:rgba(53,201,139,0.15); --neg:#ff5d45; --neg-bg:rgba(255,93,69,0.15);
+    --amber:#e0a83a; --on-accent:#ffffff; }
+  :root[data-theme="slate"]{ --color-bg:#1a1917; --color-surface:#232120; --color-text:#eae6df;
+    --color-divider:rgba(234,230,223,0.22); --color-accent:#e8a020; --color-accent-600:#f0ad33; --color-accent-700:#f5bb52;
+    --neutral-100:#2a2724; --neutral-200:#302d2a; --neutral-500:#938c82;
+    --pos:#5fb98a; --pos-bg:rgba(95,185,138,0.16); --neg:#e5654a; --neg-bg:rgba(229,101,74,0.16);
+    --amber:#e8a020; --on-accent:#1a1917; }
+  :root[data-theme="emerald"]{ --color-bg:#0f1613; --color-surface:#16201b; --color-text:#e3ebe5;
+    --color-divider:rgba(227,235,229,0.22); --color-accent:#22c07a; --color-accent-600:#33cf8a; --color-accent-700:#54db9e;
+    --neutral-100:#1b2822; --neutral-200:#22302a; --neutral-500:#7f9188;
+    --pos:#35c98b; --pos-bg:rgba(53,201,139,0.16); --neg:#ff6a4d; --neg-bg:rgba(255,106,77,0.15);
+    --amber:#e0a83a; --on-accent:#0f1613; }
+  /* Dark themes: accent tint derives from the accent so it never goes pastel-on-dark */
+  :root[data-theme="midnight"], :root[data-theme="slate"], :root[data-theme="emerald"]{
+    --color-accent-100:color-mix(in srgb, var(--color-accent) 16%, var(--color-bg));
+    --shadow-sm:0 1px 2px rgba(0,0,0,.5); --shadow-md:0 3px 10px rgba(0,0,0,.5); --shadow-lg:0 12px 32px rgba(0,0,0,.6);
+  }
+
+  /* ---------- Axis 2: data-skin (FORM only; modernist = base) ---------- */
+  :root[data-skin="fintech"] .wrap{ padding:34px; }
+  :root[data-skin="fintech"] .live-card,:root[data-skin="fintech"] .triggers,
+  :root[data-skin="fintech"] .rec-strategy,:root[data-skin="fintech"] .oi-chart-card,
+  :root[data-skin="fintech"] .oi-controls,:root[data-skin="fintech"] .oi-side-panel,
+  :root[data-skin="fintech"] .pt-tile,:root[data-skin="fintech"] .pt-equity,
+  :root[data-skin="fintech"] .pt-trade,:root[data-skin="fintech"] .payoff-wrap,
+  :root[data-skin="fintech"] details.card{
+    border-radius:18px; border:1px solid color-mix(in srgb,var(--color-divider) 40%,transparent);
+    box-shadow:0 1px 2px rgba(30,30,60,.06), 0 12px 34px rgba(30,30,60,.07); overflow:hidden;
+  }
+  :root[data-skin="fintech"] .badge,:root[data-skin="fintech"] .pill,:root[data-skin="fintech"] .tag,
+  :root[data-skin="fintech"] .pt-chip,:root[data-skin="fintech"] .cond,:root[data-skin="fintech"] .ir-context,
+  :root[data-skin="fintech"] .sig,:root[data-skin="fintech"] .spot-pill{
+    border-radius:999px; padding-left:12px; padding-right:12px; }
+  :root[data-skin="fintech"] .live-refresh,:root[data-skin="fintech"] .oi-controls select,
+  :root[data-skin="fintech"] .oi-controls input,:root[data-skin="fintech"] .hz-set select{ border-radius:12px; }
+  :root[data-skin="fintech"] .inline-rec,:root[data-skin="fintech"] .live-row,
+  :root[data-skin="fintech"] .trigger{ border-radius:12px; }
+  :root[data-skin="fintech"] h1{ font-size:28px; }
+
+  :root[data-skin="terminal"]{ --color-surface:color-mix(in srgb,var(--color-text) 5%,var(--color-bg)); }
+  :root[data-skin="terminal"] body *,:root[data-skin="terminal"] .hz-word .wm{
+    font-family:var(--mono) !important; letter-spacing:-0.01em !important; }
+  :root[data-skin="terminal"] h1,:root[data-skin="terminal"] h2,:root[data-skin="terminal"] h3,
+  :root[data-skin="terminal"] h4{ text-transform:uppercase; letter-spacing:.04em !important; font-weight:700 !important; }
+  :root[data-skin="terminal"] .hz-tabbar .tab{ font-size:12px; text-transform:uppercase; letter-spacing:.1em; }
+  :root[data-skin="terminal"] .hz-header{ box-shadow:inset 0 -1px 0 var(--color-accent); }
+  :root[data-skin="terminal"] table.oi-ff td,:root[data-skin="terminal"] table.oi-ff th{ padding-top:3px; padding-bottom:3px; font-size:11.5px; }
+  :root[data-skin="terminal"] .card > summary{ padding-top:8px; padding-bottom:8px; }
+  :root[data-skin="terminal"] details.card[open]{ box-shadow:none; }
+
+  /* ---------- Modifiers ---------- */
+  :root[data-corners="soft"] .live-card,:root[data-corners="soft"] .triggers,
+  :root[data-corners="soft"] .oi-chart-card,:root[data-corners="soft"] .oi-side-panel,
+  :root[data-corners="soft"] details.card{ border-radius:10px; overflow:hidden; }
+  :root[data-density="compact"]{ font-size:13px; }
+  :root[data-density="compact"] .wrap{ padding:14px; }
+  :root[data-numerals="proportional"] .qstats,:root[data-numerals="proportional"] td{
+    font-variant-numeric:proportional-nums !important; }
+  :root[data-tint="on"] .live-card,:root[data-tint="on"] .triggers,:root[data-tint="on"] .oi-chart-card,
+  :root[data-tint="on"] .oi-side-panel,:root[data-tint="on"] details.card{
+    background:color-mix(in srgb,var(--color-accent) 5%,var(--color-surface)); }
+  :root[data-tint="on"] .hz-header{ background:color-mix(in srgb,var(--color-accent) 6%,var(--color-bg)); }
+  :root[data-rm="true"] *{ animation-duration:.001s !important; animation-iteration-count:1 !important; transition:none !important; }
 </style>
 </head>
 <body>
@@ -615,11 +706,42 @@
     <div class="hz-quote">
       <span id="hzTicker">NIFTY —</span>
       <span class="hz-live"><span class="dot"></span>LIVE</span>
+      <label class="hz-set">Theme
+        <select id="hzTheme">
+          <option value="indigo">Indigo</option>
+          <option value="red">Red</option>
+          <option value="cobalt">Cobalt</option>
+          <option value="paper">Paper</option>
+          <option value="mono">Mono</option>
+          <option value="midnight">Midnight</option>
+          <option value="slate">Slate</option>
+          <option value="emerald">Emerald</option>
+        </select>
+      </label>
+      <label class="hz-set">Skin
+        <select id="hzSkin">
+          <option value="fintech">Fintech</option>
+          <option value="modernist">Modernist</option>
+          <option value="terminal">Terminal</option>
+        </select>
+      </label>
+    </div>
+  </div>
+  <!-- 4-cell tab bar lives IN the sticky header (design handoff v2) -->
+  <div class="hz-tabbar">
+    <div class="in" role="tablist">
+      <button class="tab" data-tab="dashboard" role="tab">Dashboard</button>
+      <button class="tab" data-tab="strategy" role="tab">By Strategy</button>
+      <button class="tab active" data-tab="oiflow" role="tab">OI Flow</button>
+      <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
     </div>
   </div>
 </header>
 
 <div class="wrap">
+
+  <!-- ============================ DASHBOARD TAB (3:15 PM checklist) ============================ -->
+  <div class="tab-panel" id="tabDashboard">
 
   <div class="top">
     <div>
@@ -645,45 +767,10 @@
     <div class="trigger-list" id="triggerList"></div>
   </div>
 
-  <!-- ============================ OI FLOW (permanent, top-left) ============================ -->
-  <div id="oiflowSection">
-    <div class="oi-layout">
-      <div class="oi-charts">
-        <div class="oi-chart-card">
-          <div class="oi-chart-title">
-            <span>Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
-            green = bullish (<span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:#1b8a3a">▮ CE buy</span>) ·
-            red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:#b3261e">▮ PE buy</span>)</span>
-            <button type="button" id="oiReload" class="live-refresh">Reload</button>
-          </div>
-          <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
-        </div>
-      </div>
-      <aside class="oi-side">
-        <div class="oi-side-panel">
-        <div class="oi-side-title">ATM fund flow (₹cr)</div>
-        <table class="oi-ff" id="oiFundFlow">
-          <thead><tr><th></th><th>Last 60m</th><th>Day total</th></tr></thead>
-          <tbody>
-            <tr class="ff-pw"><td>Put Wr</td><td data-ff="last_60min.put_writing_cr">—</td><td data-ff="day.put_writing_cr">—</td></tr>
-            <tr class="ff-cw"><td>Call Wr</td><td data-ff="last_60min.call_writing_cr">—</td><td data-ff="day.call_writing_cr">—</td></tr>
-            <tr class="ff-cb"><td>Call Buy</td><td data-ff="last_60min.call_buying_cr">—</td><td data-ff="day.call_buying_cr">—</td></tr>
-            <tr class="ff-pb"><td>Put Buy</td><td data-ff="last_60min.put_buying_cr">—</td><td data-ff="day.put_buying_cr">—</td></tr>
-          </tbody>
-        </table>
-        </div>
-        <div class="oi-side-panel">
-        <div class="oi-side-title">LLT prints — futures <span class="oi-live-dot" style="width:6px;height:6px;display:inline-block;border-radius:50%;margin-left:4px"></span></div>
-        <div class="oi-side-body" id="oiLltList"><div class="note">no futures data yet</div></div>
+  </div><!-- /tabDashboard -->
 
-        </div>
-        <div class="oi-side-panel">
-        <div class="oi-side-title" style="margin-top:12px">Top 10 BIG prints (today)</div>
-        <div class="oi-side-body" id="oiBigList"><div class="note">No data yet.</div></div>
-        </div>
-      </aside>
-    </div>
-    <div class="oi-status" id="oiStatus"></div>
+  <!-- ============================ OI FLOW TAB (default landing) ============================ -->
+  <div class="tab-panel active" id="tabOiflow">
     <div class="oi-controls">
       <label>Underlying
         <select id="oiUnderlying">
@@ -759,6 +846,43 @@
         </select>
       </label>
     </div>
+    <div class="oi-status" id="oiStatus"></div>
+    <div class="oi-layout">
+      <div class="oi-charts">
+        <div class="oi-chart-card">
+          <div class="oi-chart-title">
+            <span>Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
+            green = bullish (<span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:var(--pos)">▮ CE buy</span>) ·
+            red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:var(--neg)">▮ PE buy</span>)</span>
+            <button type="button" id="oiReload" class="live-refresh">Reload</button>
+          </div>
+          <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
+        </div>
+      </div>
+      <aside class="oi-side">
+        <div class="oi-side-panel">
+        <div class="oi-side-title">ATM fund flow (₹cr)</div>
+        <table class="oi-ff" id="oiFundFlow">
+          <thead><tr><th></th><th>Last 60m</th><th>Day total</th></tr></thead>
+          <tbody>
+            <tr class="ff-pw"><td>Put Wr</td><td data-ff="last_60min.put_writing_cr">—</td><td data-ff="day.put_writing_cr">—</td></tr>
+            <tr class="ff-cw"><td>Call Wr</td><td data-ff="last_60min.call_writing_cr">—</td><td data-ff="day.call_writing_cr">—</td></tr>
+            <tr class="ff-cb"><td>Call Buy</td><td data-ff="last_60min.call_buying_cr">—</td><td data-ff="day.call_buying_cr">—</td></tr>
+            <tr class="ff-pb"><td>Put Buy</td><td data-ff="last_60min.put_buying_cr">—</td><td data-ff="day.put_buying_cr">—</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div class="oi-side-panel">
+        <div class="oi-side-title">LLT prints — futures <span class="oi-live-dot" style="width:6px;height:6px;display:inline-block;border-radius:50%;margin-left:4px"></span></div>
+        <div class="oi-side-body" id="oiLltList"><div class="note">no futures data yet</div></div>
+
+        </div>
+        <div class="oi-side-panel">
+        <div class="oi-side-title" style="margin-top:12px">Top 10 BIG prints (today)</div>
+        <div class="oi-side-body" id="oiBigList"><div class="note">No data yet.</div></div>
+        </div>
+      </aside>
+    </div>
     <p class="note" style="margin-top:16px">
       <b>How to read.</b> One window, two sections sharing the same time axis. <em>Top ~70%</em>: 1-min candles +
       score 1–10 markers. Default score basis is <em>Write&nbsp;+&nbsp;Buy</em>: bullish flow = PE writing + CE buying,
@@ -771,9 +895,9 @@
       <em>Bottom strip</em>: per-minute ATM flow, one bar per significant minute, all rising UPWARD by magnitude.
       Each minute shows only its dominant side — green when bullish
       (<span style="color:var(--accent-2)">light green = PE writing</span> +
-      <span style="color:#1b8a3a">deep green cap = CE buying</span>), red when bearish
+      <span style="color:var(--pos)">deep green cap = CE buying</span>), red when bearish
       (<span style="color:var(--danger)">light red = CE writing</span> +
-      <span style="color:#b3261e">deep red cap = PE buying</span>). <b>Flow basis</b> (default <em>Volume</em>,
+      <span style="color:var(--neg)">deep red cap = PE buying</span>). <b>Flow basis</b> (default <em>Volume</em>,
       matching the reference HFT indicator): each minute's flow = that strike's <em>traded turnover</em>,
       labelled by price direction — price↓ = writing (sellers aggressing), price↑ = buying (buyers aggressing).
       Switch to <em>OI change</em> to measure net new positioning (ΔOI) instead — that's the more
@@ -783,13 +907,8 @@
     </p>
   </div>
 
-  <div class="tabs" role="tablist">
-    <button class="tab active" data-tab="strategy" role="tab">By Strategy</button>
-    <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
-  </div>
-
   <!-- ============================ STRATEGY TAB ============================ -->
-  <div class="tab-panel active" id="tabStrategy">
+  <div class="tab-panel" id="tabStrategy">
 
     <!-- Paper book: every actionable recommendation is assumed executed at
          10 lots; outcomes tracked in SQLite by paper.py on each refresh. -->
@@ -1125,31 +1244,35 @@
   // --- tabs ---
   function initTabs(){
     const tabs = document.querySelectorAll(".tab");
-    // By Flow removed (manual checks auto-computed in Live data; reminders in
-    // Today's Triggers). OI Flow removed as a TAB in #57 — it is a permanent
-    // top-left section now. Stale localStorage tab values ("flow", "oiflow")
-    // fall through the guard below to the default (By Strategy).
-    const panels = { strategy: document.getElementById("tabStrategy"), paper: document.getElementById("tabPaper") };
+    // v2 shell: 4 tabs, OI Flow is the default landing tab (handoff). Stale
+    // localStorage values from retired layouts ("flow") fall through the
+    // guard below to the default.
+    const panels = {
+      dashboard: document.getElementById("tabDashboard"),
+      strategy: document.getElementById("tabStrategy"),
+      oiflow: document.getElementById("tabOiflow"),
+      paper: document.getElementById("tabPaper"),
+    };
+    const activate = (key) => {
+      tabs.forEach(x=>x.classList.toggle("active", x.dataset.tab === key));
+      Object.entries(panels).forEach(([k,p])=>p.classList.toggle("active", k === key));
+      if (key === "oiflow") initOiFlowTab();
+      if (key === "paper") initPaperTab();
+    };
     tabs.forEach(t => t.addEventListener("click", ()=>{
-      tabs.forEach(x=>x.classList.remove("active"));
-      t.classList.add("active");
-      Object.values(panels).forEach(p=>p.classList.remove("active"));
-      panels[t.dataset.tab].classList.add("active");
-      // persist tab selection
+      activate(t.dataset.tab);
       localStorage.setItem("tab", t.dataset.tab);
       window.scrollTo({top:0, behavior:"smooth"});
-      if (t.dataset.tab === "paper") initPaperTab();
     }));
     const savedTab = localStorage.getItem("tab");
-    if (savedTab && panels[savedTab]) {
-      tabs.forEach(x=>x.classList.remove("active"));
-      Object.values(panels).forEach(p=>p.classList.remove("active"));
-      document.querySelector(`.tab[data-tab="${savedTab}"]`).classList.add("active");
-      panels[savedTab].classList.add("active");
-      if (savedTab === "paper") setTimeout(initPaperTab, 0);
-    }
-    // OI Flow is a permanent section (#57): boot it with the page, always.
-    initOiFlowTab();
+    activate(panels[savedTab] ? savedTab : "oiflow");
+    // Theme / skin settings (header selects): persist + reload so the charts
+    // (canvas colors are resolved at build time) pick up the new palette.
+    const themeSel = document.getElementById("hzTheme"), skinSel = document.getElementById("hzSkin");
+    themeSel.value = document.documentElement.dataset.theme;
+    skinSel.value = document.documentElement.dataset.skin;
+    themeSel.addEventListener("change", ()=>{ localStorage.setItem("hz_theme", themeSel.value); location.reload(); });
+    skinSel.addEventListener("change", ()=>{ localStorage.setItem("hz_skin", skinSel.value); location.reload(); });
   }
 
   // ---------- Paper Trades tab ----------
@@ -1338,7 +1461,8 @@
   const OI_AUTO_MS = 60000;
   let _oiAutoTimer = null;
   function _oiTabActive(){
-    return true;   // kept for call-site compatibility; section is always visible
+    const t = document.querySelector('.tab[data-tab="oiflow"]');
+    return !!(t && t.classList.contains("active"));
   }
   function startOiAuto(){
     if (_oiAutoTimer) return;
@@ -1413,7 +1537,7 @@
     _oiLltSeries.setMarkers(pts.map(p => ({
       time: p.time,
       position: "inBar",                     // ON the data point = at print price
-      color: p.side === "BUY" ? "#1f7a4d" : "#c22a10",
+      color: p.side === "BUY" ? cssv("--pos") : cssv("--neg"),
       shape: p.side === "BUY" ? "arrowUp" : "arrowDown",
       text: `LLT ${p.lots}`,
       size: 2,
@@ -1460,12 +1584,34 @@
     }
   }
 
+  // Canvas charts can't read CSS custom properties, so resolve the active
+  // theme's values at build time (a theme/skin change reloads the page).
+  function cssv(name){
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+  function withAlpha(color, a){
+    // #rgb / #rrggbb / rgb()/rgba() → rgba() with the given alpha
+    let m = color.match(/^#([0-9a-f]{3})$/i);
+    if (m) color = "#" + [...m[1]].map(c => c + c).join("");
+    m = color.match(/^#([0-9a-f]{6})$/i);
+    if (m){
+      const n = parseInt(m[1], 16);
+      return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+    }
+    m = color.match(/^rgba?\(([^)]+)\)$/);
+    if (m){
+      const p = m[1].split(",").map(x => x.trim());
+      return `rgba(${p[0]},${p[1]},${p[2]},${a})`;
+    }
+    return color;
+  }
   function chartTheme(){
+    const text = cssv("--color-text");
     return {
-      layout: { background: { color: "#eae9e9" }, textColor: "rgba(32,30,29,0.62)", fontFamily: "ui-monospace, monospace" },
-      grid:   { vertLines: { color: "rgba(32,30,29,0.07)" }, horzLines: { color: "rgba(32,30,29,0.07)" } },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: "rgba(32,30,29,0.40)" },
-      rightPriceScale: { borderColor: "rgba(32,30,29,0.40)" },
+      layout: { background: { color: cssv("--color-surface") }, textColor: withAlpha(text, 0.62), fontFamily: "ui-monospace, monospace" },
+      grid:   { vertLines: { color: withAlpha(text, 0.07) }, horzLines: { color: withAlpha(text, 0.07) } },
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: withAlpha(text, 0.40) },
+      rightPriceScale: { borderColor: withAlpha(text, 0.40) },
       crosshair: { mode: 1 },
     };
   }
@@ -1496,17 +1642,17 @@
     };
     _oiRegimeBullArea = _oiChart.addAreaSeries({
       ...regimeOpts,
-      topColor: "rgba(123,216,143,0.09)", bottomColor: "rgba(123,216,143,0.09)",
+      topColor: withAlpha(cssv("--pos"), 0.10), bottomColor: withAlpha(cssv("--pos"), 0.10),
     });
     _oiRegimeBearArea = _oiChart.addAreaSeries({
       ...regimeOpts,
-      topColor: "rgba(255,107,107,0.09)", bottomColor: "rgba(255,107,107,0.09)",
+      topColor: withAlpha(cssv("--neg"), 0.10), bottomColor: withAlpha(cssv("--neg"), 0.10),
     });
     _oiChart.priceScale("regime").applyOptions({ scaleMargins: { top: 0, bottom: 0 } });
     _oiCandleSeries = _oiChart.addCandlestickSeries({
-      upColor: "#1f7a4d", downColor: "#c22a10",
-      borderUpColor: "#7bd88f", borderDownColor: "#ff6b6b",
-      wickUpColor: "#7bd88f", wickDownColor: "#ff6b6b",
+      upColor: cssv("--pos"), downColor: cssv("--neg"),
+      borderUpColor: withAlpha(cssv("--pos"), 0.7), borderDownColor: withAlpha(cssv("--neg"), 0.7),
+      wickUpColor: withAlpha(cssv("--pos"), 0.7), wickDownColor: withAlpha(cssv("--neg"), 0.7),
     });
     _oiCandleSeries.priceScale().applyOptions({ scaleMargins: { top: 0.03, bottom: 0.32 } });
     // LLT price-pinned tags: an invisible line series whose data points sit at
@@ -1538,10 +1684,10 @@
       lastValueVisible: false,
       priceLineVisible: false,
     };
-    _oiBullTotalSeries = _oiChart.addHistogramSeries({ ...flowOpts, color: "#1f7a4d" });
-    _oiPeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: "rgba(31,122,77,0.45)" });
-    _oiBearTotalSeries = _oiChart.addHistogramSeries({ ...flowOpts, color: "#c22a10" });
-    _oiCeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: "rgba(194,42,16,0.45)" });
+    _oiBullTotalSeries = _oiChart.addHistogramSeries({ ...flowOpts, color: cssv("--pos") });
+    _oiPeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: withAlpha(cssv("--pos"), 0.45) });
+    _oiBearTotalSeries = _oiChart.addHistogramSeries({ ...flowOpts, color: cssv("--neg") });
+    _oiCeWriteSeries   = _oiChart.addHistogramSeries({ ...flowOpts, color: withAlpha(cssv("--neg"), 0.45) });
     _oiChart.priceScale("oiflow").applyOptions({ scaleMargins: { top: 0.72, bottom: 0.04 } });
 
     window.addEventListener("resize", () => {
@@ -1672,7 +1818,7 @@
     if (sr) {
       (sr.resistance || []).forEach((lvl, i) => {
         const line = _oiCandleSeries.createPriceLine({
-          price: lvl.strike, color: "#c22a10", lineWidth: i === 0 ? 2 : 1,
+          price: lvl.strike, color: cssv("--neg"), lineWidth: i === 0 ? 2 : 1,
           lineStyle: i === 0 ? 0 : 2, axisLabelVisible: true,
           title: "R " + lvl.strike,
         });
@@ -1680,7 +1826,7 @@
       });
       (sr.support || []).forEach((lvl, i) => {
         const line = _oiCandleSeries.createPriceLine({
-          price: lvl.strike, color: "#1f7a4d", lineWidth: i === 0 ? 2 : 1,
+          price: lvl.strike, color: cssv("--pos"), lineWidth: i === 0 ? 2 : 1,
           lineStyle: i === 0 ? 0 : 2, axisLabelVisible: true,
           title: "S " + lvl.strike,
         });
@@ -1705,7 +1851,7 @@
       return {
         time: m.time,
         position: isBull ? "belowBar" : "aboveBar",
-        color:    isBull ? "#1f7a4d" : "#c22a10",
+        color:    isBull ? cssv("--pos") : cssv("--neg"),
         shape:    isBull ? "arrowUp" : "arrowDown",
         text: (isBull ? "Buy:" : "Sell:") + m.score,
       };
@@ -1922,8 +2068,8 @@
           <clipPath id="${uid}b"><rect x="0" y="${y0.toFixed(1)}" width="${W}" height="${(H - y0).toFixed(1)}"/></clipPath>
         </defs>
         ${strikeMarks}
-        <path d="${area}" fill="rgba(31,122,77,.16)" clip-path="url(#${uid}a)"/>
-        <path d="${area}" fill="rgba(194,42,16,.12)" clip-path="url(#${uid}b)"/>
+        <path d="${area}" fill="${withAlpha(cssv("--pos"), 0.16)}" clip-path="url(#${uid}a)"/>
+        <path d="${area}" fill="${withAlpha(cssv("--neg"), 0.12)}" clip-path="url(#${uid}b)"/>
         <line x1="${PX}" y1="${y0.toFixed(1)}" x2="${W - PX}" y2="${y0.toFixed(1)}" stroke="var(--muted)" stroke-width="1" opacity=".6"/>
         <path d="${line}" fill="none" stroke="var(--color-text)" stroke-width="2.2"/>
         ${spotMark}
@@ -2302,7 +2448,7 @@
       // For late entries, lead with a clear warning so the user knows what
       // they're looking at — same trade as fresh, but the cross was earlier.
       const lateBanner = (ctx === "late")
-        ? `<div class="rec-error" style="background:rgba(255,180,84,.1);border-color:rgba(255,180,84,.3);color:var(--warn)">
+        ? `<div class="rec-error" style="background:color-mix(in srgb,var(--amber) 10%,transparent);border-color:color-mix(in srgb,var(--amber) 30%,transparent);color:var(--warn)">
             Signal direction is still <b>${rec.direction || ""}</b> (current state: <code>${rec.signal || ""}</code>) — the structure below is still buildable, but this isn't a fresh-cross entry day.
           </div>`
         : "";
