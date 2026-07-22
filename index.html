@@ -2536,6 +2536,7 @@
   async function checkKiteSession(){
     // /account validates the token against Kite itself (not just the cache),
     // and re-runs every 5 min + on tab focus — a stale chip fixes itself.
+    const prev = _kiteLoggedIn;
     try {
       const r = await fetch("/account", { cache: "no-store" });
       if (r.ok){
@@ -2546,6 +2547,11 @@
     } catch(e){ /* leave state as-is */ }
     const chip = document.getElementById("kiteLoginChip");
     if (chip) chip.hidden = _kiteLoggedIn !== false;
+    // Login detected AFTER a logged-out boot (chip clicked in another tab,
+    // or the periodic probe saw the new session): resume the normal data
+    // path — including the stale auto-refresh that boot skipped. The
+    // _autoRefreshAttempted once-per-load guard still applies.
+    if (prev === false && _kiteLoggedIn === true) loadSignals();
     return _kiteLoggedIn;
   }
   let _kiteProbe = null;   // promise; awaited before the boot auto-refresh
