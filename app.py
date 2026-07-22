@@ -466,6 +466,43 @@ async def oi_backfill(
     return JSONResponse(recorder.backfill_underlyings(kite, day=day))
 
 
+@app.get("/account")
+async def account():
+    """Header account strip: validates the cached token against Kite (a real
+    profile() call inside get_kite_from_cache), then pulls available margin
+    and net-position day P&L. NOTE: public like the whole dashboard — this
+    exposes balance/P&L to anyone with the URL (accepted trade-off for a
+    personal tool on an obscure host; flagged in the PR)."""
+    from kite_auth import get_kite_from_cache
+    kite = get_kite_from_cache()
+    if kite is None:
+        return JSONResponse({"logged_in": False})
+    out = {"logged_in": True}
+    try:
+        eq = (kite.margins() or {}).get("equity") or {}
+        avail = eq.get("available") or {}
+        out["margin_available"] = avail.get("live_balance", avail.get("cash"))
+        out["margin_used"] = (eq.get("utilised") or {}).get("debits")
+    except Exception as e:
+        out["margin_error"] = type(e).__name__
+    try:
+        net = (kite.positions() or {}).get("net") or []
+        out["day_pnl"] = sum((p.get("pnl") or 0) for p in net)
+        out["n_open_positions"] = sum(1 for p in net if (p.get("quantity") or 0) != 0)
+    except Exception as e:
+        out["pnl_error"] = type(e).__name__
+    return JSONResponse(out)
+
+
+@app.post("/logout")
+async def logout():
+    """Invalidate the Kite token and clear the cached session. The recorder
+    and refresh simply see 'no session' afterwards (their normal no-op path)."""
+    from kite_auth import logout_cached_session
+    logout_cached_session()
+    return JSONResponse({"ok": True, "logged_in": False})
+
+
 @app.get("/login")
 async def login():
     return RedirectResponse(login_url())

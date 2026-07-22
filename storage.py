@@ -119,6 +119,20 @@ def load_session() -> Optional[dict]:
     return None
 
 
+def clear_session() -> None:
+    """Remove the cached Kite session (file + Redis). Used by /logout."""
+    try:
+        if SESSION_FILE.exists():
+            SESSION_FILE.unlink()
+    except Exception:
+        pass
+    if _redis is not None:
+        try:
+            _redis.delete("options:session:kite")
+        except Exception as e:
+            print(f"WARN: Redis delete session failed: {e}")
+
+
 def storage_info() -> dict:
     return {
         "redis_configured": bool(REDIS_URL),
