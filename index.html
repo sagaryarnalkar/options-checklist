@@ -584,6 +584,14 @@
     background:color-mix(in srgb, var(--amber) 10%, transparent); white-space:nowrap; }
   .hz-login:hover{ background:color-mix(in srgb, var(--amber) 18%, transparent); }
   :root[data-skin="fintech"] .hz-login{ border-radius:999px; }
+  .hz-acct{ display:inline-flex; align-items:center; gap:10px; font-family:var(--mono);
+    font-size:12px; color:var(--text); border:1px solid var(--border); padding:4px 10px;
+    background:var(--panel); white-space:nowrap; }
+  .hz-acct .pnl-pos{ color:var(--pos); } .hz-acct .pnl-neg{ color:var(--neg); }
+  .hz-acct button{ background:transparent; border:0; color:var(--muted); font-family:var(--sans);
+    font-size:11px; text-transform:uppercase; letter-spacing:.05em; cursor:pointer; padding:0 0 0 4px; }
+  .hz-acct button:hover{ color:var(--color-accent); }
+  :root[data-skin="fintech"] .hz-acct{ border-radius:999px; }
   .hz-set{ display:flex; align-items:center; gap:5px; font-size:10px; letter-spacing:.08em;
     text-transform:uppercase; color:var(--muted); }
   .hz-set select{ background:var(--panel-2); color:var(--text); border:1px solid var(--border);
@@ -715,6 +723,11 @@
       <span class="hz-live"><span class="dot"></span>LIVE</span>
       <a class="hz-login" id="kiteLoginChip" href="/login" hidden
          title="Viewing works without login — data shown may be stale. Login to fetch updates.">⚡ Login to Kite</a>
+      <span class="hz-acct" id="hzAcct" hidden>
+        <span id="acctMargin" title="Available margin (equity live balance)">—</span>
+        <span id="acctPnl" title="Net P&L across today's positions (realized + MTM)">—</span>
+        <button type="button" id="kiteLogout" title="Invalidate the Kite session on the server">Logout</button>
+      </span>
       <label class="hz-set">Theme
         <select id="hzTheme">
           <option value="indigo">Indigo</option>
@@ -2503,11 +2516,34 @@
   // (it would just 401). After the OAuth callback lands back on "/", the
   // fresh boot re-probes and resumes normal auto-refresh behaviour.
   let _kiteLoggedIn = null;   // null = unknown (probe failed) → old behaviour
+  function _renderAcct(d){
+    const wrap = document.getElementById("hzAcct");
+    if (!wrap) return;
+    if (!d || !d.logged_in){ wrap.hidden = true; return; }
+    wrap.hidden = false;
+    const inr = v => (v == null || isNaN(v)) ? "—"
+      : "₹" + Number(v).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+    document.getElementById("acctMargin").textContent = "avail " + inr(d.margin_available);
+    const pnlEl = document.getElementById("acctPnl");
+    const pnl = d.day_pnl;
+    if (pnl == null || isNaN(pnl)){ pnlEl.textContent = "P&L —"; pnlEl.className = ""; }
+    else {
+      pnlEl.textContent = `P&L ${pnl >= 0 ? "+" : "−"}₹${Math.abs(Math.round(pnl)).toLocaleString("en-IN")}`
+        + (d.n_open_positions ? ` (${d.n_open_positions} open)` : "");
+      pnlEl.className = pnl >= 0 ? "pnl-pos" : "pnl-neg";
+    }
+  }
   async function checkKiteSession(){
+    // /account validates the token against Kite itself (not just the cache),
+    // and re-runs every 5 min + on tab focus — a stale chip fixes itself.
     try {
-      const r = await fetch("/oi/status", { cache: "no-store" });
-      if (r.ok){ const d = await r.json(); _kiteLoggedIn = !!d.kite_session_ok; }
-    } catch(e){ /* leave null */ }
+      const r = await fetch("/account", { cache: "no-store" });
+      if (r.ok){
+        const d = await r.json();
+        _kiteLoggedIn = !!d.logged_in;
+        _renderAcct(d);
+      }
+    } catch(e){ /* leave state as-is */ }
     const chip = document.getElementById("kiteLoginChip");
     if (chip) chip.hidden = _kiteLoggedIn !== false;
     return _kiteLoggedIn;
@@ -2531,6 +2567,7 @@
         // Not logged in. Viewing stays free — surface the header login chip
         // instead of bouncing the page into the OAuth flow.
         _kiteLoggedIn = false;
+        _renderAcct(null);
         const chip = document.getElementById("kiteLoginChip");
         if (chip) chip.hidden = false;
         if (!silent) alert("Not logged in to Kite — the data shown may be stale.\nUse the \u26a1 Login to Kite button (top right) to fetch fresh data.");
@@ -2611,6 +2648,17 @@
 
   function init(){
     _kiteProbe = checkKiteSession();   // async; loadSignals awaits it pre-auto-refresh
+    setInterval(checkKiteSession, 5 * 60 * 1000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) checkKiteSession(); });
+    const lo = document.getElementById("kiteLogout");
+    if (lo) lo.addEventListener("click", async () => {
+      lo.disabled = true;
+      try { await fetch("/logout", { method: "POST" }); } catch(e){}
+      lo.disabled = false;
+      _kiteLoggedIn = false;
+      _renderAcct(null);
+      document.getElementById("kiteLoginChip").hidden = false;
+    });
     purgeOld();
     const f = renderTop();
     renderTriggers(f);

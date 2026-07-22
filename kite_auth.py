@@ -118,6 +118,22 @@ def exchange_request_token(request_token: str) -> dict:
     return kite.generate_session(request_token, api_secret=api_secret)
 
 
+def logout_cached_session() -> None:
+    """Invalidate the cached access token with Kite and clear the cache.
+    Invalidation failure is fine (token may already be expired) — clearing
+    the local cache is what actually logs the server out."""
+    from storage import clear_session
+    cached = load_session()
+    if cached and cached.get("access_token"):
+        try:
+            api_key, _ = load_env()
+            kite = KiteConnect(api_key=api_key)
+            kite.invalidate_access_token(access_token=cached["access_token"])
+        except Exception:
+            pass
+    clear_session()
+
+
 def login_url() -> str:
     """Return the Kite Connect login URL (uses redirect URL configured in app)."""
     api_key, _ = load_env()
