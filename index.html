@@ -579,6 +579,11 @@
   .hz-tabbar .tab:last-child{ border-right:0; }
   .hz-tabbar .tab:not(.active):hover{ background:color-mix(in srgb,var(--color-text) 5%,transparent); color:var(--color-text); }
   .hz-tabbar .tab.active{ background:var(--color-accent); color:var(--on-accent); }
+  .hz-login{ display:inline-flex; align-items:center; gap:5px; font-size:12px; font-weight:600;
+    color:var(--amber); border:1px solid var(--amber); padding:4px 10px; text-decoration:none;
+    background:color-mix(in srgb, var(--amber) 10%, transparent); white-space:nowrap; }
+  .hz-login:hover{ background:color-mix(in srgb, var(--amber) 18%, transparent); }
+  :root[data-skin="fintech"] .hz-login{ border-radius:999px; }
   .hz-set{ display:flex; align-items:center; gap:5px; font-size:10px; letter-spacing:.08em;
     text-transform:uppercase; color:var(--muted); }
   .hz-set select{ background:var(--panel-2); color:var(--text); border:1px solid var(--border);
@@ -708,6 +713,8 @@
     <div class="hz-quote">
       <span id="hzTicker">NIFTY —</span>
       <span class="hz-live"><span class="dot"></span>LIVE</span>
+      <a class="hz-login" id="kiteLoginChip" href="/login" hidden
+         title="Viewing works without login — data shown may be stale. Login to fetch updates.">⚡ Login to Kite</a>
       <label class="hz-set">Theme
         <select id="hzTheme">
           <option value="indigo">Indigo</option>
@@ -2488,6 +2495,25 @@
     });
   }
 
+  // ---------- Kite session state ----------
+  // Login is OPTIONAL for viewing: the dashboard always renders whatever
+  // data.json / SQLite already hold. A session is only needed to FETCH new
+  // data (/refresh, recorder). On boot we probe /oi/status; when logged out
+  // the header shows a login chip and the stale auto-refresh is skipped
+  // (it would just 401). After the OAuth callback lands back on "/", the
+  // fresh boot re-probes and resumes normal auto-refresh behaviour.
+  let _kiteLoggedIn = null;   // null = unknown (probe failed) → old behaviour
+  async function checkKiteSession(){
+    try {
+      const r = await fetch("/oi/status", { cache: "no-store" });
+      if (r.ok){ const d = await r.json(); _kiteLoggedIn = !!d.kite_session_ok; }
+    } catch(e){ /* leave null */ }
+    const chip = document.getElementById("kiteLoginChip");
+    if (chip) chip.hidden = _kiteLoggedIn !== false;
+    return _kiteLoggedIn;
+  }
+  let _kiteProbe = null;   // promise; awaited before the boot auto-refresh
+
   let refreshing = false;
   async function triggerRefresh(opts){
     const silent = !!(opts && opts.silent);
@@ -2502,8 +2528,12 @@
     try {
       const r = await fetch("/refresh", { method: "POST", cache: "no-store" });
       if (r.status === 401){
-        // Not logged in — bounce to /login (auto-refresh and manual both)
-        window.location.href = "/login";
+        // Not logged in. Viewing stays free — surface the header login chip
+        // instead of bouncing the page into the OAuth flow.
+        _kiteLoggedIn = false;
+        const chip = document.getElementById("kiteLoginChip");
+        if (chip) chip.hidden = false;
+        if (!silent) alert("Not logged in to Kite — the data shown may be stale.\nUse the \u26a1 Login to Kite button (top right) to fetch fresh data.");
         return;
       }
       if (!r.ok){
@@ -2547,6 +2577,7 @@
   const STALE_HOURS = 6;
   function maybeAutoRefresh(d){
     if (_autoRefreshAttempted || refreshing) return;
+    if (_kiteLoggedIn === false) return;   // logged out: viewing only, no 401 spam
     const asof = d && d.as_of ? new Date(d.as_of) : null;
     if (!asof || isNaN(asof.getTime())) return;
     const ageHours = (Date.now() - asof.getTime()) / 3600000;
@@ -2565,17 +2596,21 @@
       renderLiveData(d);
       decorateStrategyCards(d.signals || {});
       renderRecommendations(d);
-      if (!skipAutoRefresh) maybeAutoRefresh(d);
+      if (!skipAutoRefresh){
+        if (_kiteProbe) await _kiteProbe;   // know the login state before deciding
+        maybeAutoRefresh(d);
+      }
     } catch (e) {
       // Keep header + Refresh button visible; show stale message inside the grid slot.
       document.getElementById("liveSpots").innerHTML = "";
-      document.getElementById("liveGrid").innerHTML = `<div class="live-stale"><b>No live data yet.</b><br>Click <b>Refresh</b> above to fetch the latest 3:15 PM snapshot. If you aren't logged in to Kite, you'll be redirected to login first.</div>`;
+      document.getElementById("liveGrid").innerHTML = `<div class="live-stale"><b>No live data yet.</b><br>Click <b>Refresh</b> above to fetch the latest 3:15 PM snapshot (needs the \u26a1 Kite login — top right).</div>`;
       document.getElementById("liveAsof").textContent = "";
       document.getElementById("recBlock").innerHTML = "";
     }
   }
 
   function init(){
+    _kiteProbe = checkKiteSession();   // async; loadSignals awaits it pre-auto-refresh
     purgeOld();
     const f = renderTop();
     renderTriggers(f);
