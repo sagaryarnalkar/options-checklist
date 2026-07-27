@@ -2558,6 +2558,21 @@
     return _kiteLoggedIn;
   }
   let _kiteProbe = null;   // promise; awaited before the boot auto-refresh
+  // ---------- Daily auto-login attempt ----------
+  // The token can only be minted via Zerodha's OAuth hop, but the HOP itself
+  // can be automatic: if the server is logged out, bounce through /login once
+  // per local day. With a live Kite-web session in this browser, Zerodha
+  // redirects straight back — feels like auto-login. Without one, the user
+  // sees Zerodha's login page once (useful anyway — it's the login they'll
+  // need); every later open that day is view-only with just the chip (#62
+  // contract preserved). Logout stamps the same key so it isn't undone.
+  function _todayLocal(){ return new Date().toLocaleDateString("en-CA"); }
+  function maybeAutoLogin(loggedIn){
+    if (loggedIn !== false) return;                       // logged in / unknown
+    if (localStorage.getItem("hz_autologin_day") === _todayLocal()) return;
+    localStorage.setItem("hz_autologin_day", _todayLocal());
+    window.location.href = "/login";
+  }
 
   let refreshing = false;
   async function triggerRefresh(opts){
@@ -2657,6 +2672,7 @@
 
   function init(){
     _kiteProbe = checkKiteSession();   // async; loadSignals awaits it pre-auto-refresh
+    _kiteProbe.then(maybeAutoLogin);   // once-a-day OAuth bounce when logged out
     setInterval(checkKiteSession, 5 * 60 * 1000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) checkKiteSession(); });
     const lo = document.getElementById("kiteLogout");
@@ -2667,6 +2683,8 @@
       _kiteLoggedIn = false;
       _renderAcct(null);
       document.getElementById("kiteLoginChip").hidden = false;
+      // An explicit logout must stick: block today's remaining auto-attempt.
+      localStorage.setItem("hz_autologin_day", _todayLocal());
     });
     purgeOld();
     const f = renderTop();
