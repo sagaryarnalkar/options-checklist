@@ -1554,15 +1554,42 @@
   // the candles + a right-rail feed with the OI-quadrant classification.
   let _lastScoreMarkerObjs = [];
   let _lastLltPoints = [];   // {time, price, side, lots} per print
+  let _lastCandleClose = new Map();   // candle time -> spot close (basis calc)
+  let _lltPlotted = [];               // last plotted LLT points (verification)
   function _applyOiMarkers(){
     if (!_oiCandleSeries) return;
     _oiCandleSeries.setMarkers([..._lastScoreMarkerObjs].sort((a, b) => a.time - b.time));
     if (!_oiLltSeries) return;
     const pts = [..._lastLltPoints].sort((a, b) => a.time - b.time);
-    _oiLltSeries.setData(pts.map(p => ({ time: p.time, value: p.price })));
-    _oiLltSeries.setMarkers(pts.map(p => ({
+    // LLT prints are FUTURES prices on a SPOT chart. After a contract roll
+    // the premium can exceed the whole candle range (Jul-28: August future
+    // ~130pts over spot), and since this series is autoscale-excluded the
+    // raw price would draw above the pane — invisible. Translate each print
+    // by its DAY's median (print − same-minute spot close) basis: tags land
+    // at the spot-equivalent level and relative structure is preserved.
+    const dayOf = t => t - (t % 86400);
+    const samplesByDay = new Map();
+    for (const p of pts){
+      const close = _lastCandleClose.get(p.time);
+      if (close == null) continue;
+      const d = dayOf(p.time);
+      if (!samplesByDay.has(d)) samplesByDay.set(d, []);
+      samplesByDay.get(d).push(p.price - close);
+    }
+    const basisByDay = new Map();
+    for (const [d, arr] of samplesByDay){
+      arr.sort((a, b) => a - b);
+      basisByDay.set(d, arr[Math.floor(arr.length / 2)]);
+    }
+    const plotted = pts.map(p => {
+      const basis = basisByDay.get(dayOf(p.time));
+      return { ...p, plot: basis == null ? p.price : p.price - basis };
+    });
+    _lltPlotted = plotted;   // exposed for verification/debugging
+    _oiLltSeries.setData(plotted.map(p => ({ time: p.time, value: p.plot })));
+    _oiLltSeries.setMarkers(plotted.map(p => ({
       time: p.time,
-      position: "inBar",                     // ON the data point = at print price
+      position: "inBar",                     // ON the data point
       color: p.side === "BUY" ? cssv("--pos") : cssv("--neg"),
       shape: p.side === "BUY" ? "arrowUp" : "arrowDown",
       text: `LLT ${p.lots}`,
@@ -1821,6 +1848,8 @@
     }
 
     _oiCandleSeries.setData(candles);
+    // time -> close map for the LLT basis translation (see _applyOiMarkers)
+    _lastCandleClose = new Map(candles.map(c => [c.time, c.close]));
 
     // Flow strip — single-direction (all bars rise UPWARD from the baseline),
     // matching the reference indicator. Each significant minute draws ONLY
