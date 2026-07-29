@@ -412,6 +412,34 @@
   .pt-chip{ font-size:10.5px; padding:2px 7px; border-radius:0; border:1px solid var(--border); background:var(--chip); color:var(--muted); font-family:var(--mono); }
   .pt-chip.seed{ color:var(--warn); border-color:rgba(255,180,84,.4); }
   .pt-chip.open{ color:var(--pos); border-color:var(--pos); }
+  /* Per-strategy detail (#68): live position block, MTM strip, recent trades */
+  .pt-shead{ display:flex; flex-wrap:wrap; gap:6px 14px; align-items:baseline; }
+  .pt-sstats{ display:flex; flex-wrap:wrap; gap:4px 14px; font-family:var(--mono);
+    font-size:12px; color:var(--muted); margin-left:auto; }
+  .pt-sstats b{ font-family:var(--mono); }
+  .pt-live{ background:var(--panel-2); border:1px solid var(--pos); padding:10px 12px; margin:6px 0 12px; }
+  .pt-live.is-loss{ border-color:var(--neg); }
+  .pt-live-hd{ display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline;
+    font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px; }
+  .pt-mtm{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr));
+    gap:1px; background:var(--border); border:1px solid var(--border); margin:8px 0 0; }
+  .pt-mtm > div{ background:var(--panel); padding:7px 10px; }
+  .pt-mtm .k{ font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; }
+  .pt-mtm .v{ font-family:var(--mono); font-size:14px; font-weight:600; margin-top:2px; }
+  .pt-sub{ font-size:11px; color:var(--muted); font-family:var(--mono); margin-top:6px; }
+  table.pt-recent{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; margin:4px 0 2px; }
+  table.pt-recent th{ text-align:right; font-weight:600; color:var(--muted); font-size:10px;
+    text-transform:uppercase; letter-spacing:.06em; padding:4px 6px; border-bottom:1px solid var(--border); }
+  table.pt-recent th:first-child, table.pt-recent td:first-child{ text-align:left; }
+  table.pt-recent td{ text-align:right; padding:5px 6px; border-bottom:1px solid var(--border); }
+  table.pt-recent tr:last-child td{ border-bottom:none; }
+  table.pt-recent tr.is-void{ opacity:.55; }
+  .pt-more{ background:transparent; border:1px solid var(--border); color:var(--muted);
+    font-family:var(--sans); font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+    padding:4px 10px; cursor:pointer; margin-top:6px; }
+  .pt-more:hover{ color:var(--color-accent); border-color:var(--color-accent); }
+  .pt-flat{ font-size:12px; color:var(--muted); padding:6px 0; }
+  :root[data-skin="fintech"] .pt-live,:root[data-skin="fintech"] .pt-more{ border-radius:12px; }
   .pt-void{ opacity:.55; }
 
   /* Auto-refresh pulse dot for the OI Flow status */
@@ -1348,7 +1376,10 @@
     const cls = ctx.startsWith("seed") ? " seed" : "";
     return `<span class="pt-chip${cls}">${ctx}</span>`;
   }
+  const _paperShowAll = {};   // strategy -> show full trade history
+  let _lastLedger = null;     // cached payload so toggles can re-render
   function renderPaperLedger(d){
+    _lastLedger = d;
     const open = d.open || [];
     const closedAll = d.closed || [];
     const voided = closedAll.filter(t => String(t.exit_reason||"").startsWith("void:"));
@@ -1397,8 +1428,11 @@
       eq.innerHTML = "";
     }
 
-    // ---- per-strategy trade log ----
+    // ---- per-strategy detail (#68) ----
+    // Every strategy in the roster gets a card — including ones that have
+    // never traded (rendered FLAT) — so the whole book is visible at a glance.
     const byStrat = {};
+    Object.keys(STRAT_LABELS).forEach(k => { byStrat[k] = { open:[], closed:[], voided:[] }; });
     const add = (t, bucket) => {
       const k = t.strategy;
       (byStrat[k] = byStrat[k] || { open:[], closed:[], voided:[] })[bucket].push(t);
@@ -1407,64 +1441,124 @@
     closed.forEach(t=>add(t,"closed"));
     voided.forEach(t=>add(t,"voided"));
 
-    const tradeRow = (t, kind) => {
-      const units = (t.lot_size||0) * (t.lots||0);
-      const isVoid = kind === "voided";
-      const net = kind === "open" ? (t.last_mark ? t.last_mark.upnl : null) : t.realized_pnl;
-      const statusChip = kind === "open"
-        ? `<span class="pt-chip open">OPEN</span>`
-        : `<span class="pt-chip">${(t.exit_reason||"closed")}</span>`;
-      const when = `${String(t.opened_ts).slice(0,10)}${t.closed_ts?` → ${String(t.closed_ts).slice(0,10)}`:""}`;
-      const gross = kind === "open" ? null : t.gross_pnl;
-      const cost = (t.entry_costs||0) + (t.exit_costs||0);
-      const legs = (t.legs||[]).map(l=>`
-        <tr><td class="act-${String(l.action).toLowerCase()}">${l.action}</td>
-        <td>${(l.strike??0).toLocaleString("en-IN")} ${l.option_type}</td>
-        <td>${l.tradingsymbol}</td><td>₹${fmtNum(l.premium)}</td><td>${l.quantity}</td></tr>`).join("");
-      const rolls = ((t.meta||{}).hedge_rolls||[]).map(r=>
-        `<div class="strat-ref">↻ ${String(r.ts).slice(0,10)}: ${r.old} @${r.old_px} → ${r.new} @${r.new_px} (cash ${r.cash_per_unit>0?"+":""}${r.cash_per_unit}/u, costs ₹${r.costs_rs})</div>`).join("");
-      const markLine = kind === "open" && t.last_mark
-        ? `<div class="strat-ref">last mark ${String(t.last_mark.ts).slice(0,16).replace("T"," ")} · mark ${fmtNum(t.last_mark.mark_value)}/u · spot ${t.last_mark.spot ?? "—"}${t.last_mark.note?` · ${t.last_mark.note}`:""}</div>` : "";
-      return `<details class="pt-trade${isVoid?" pt-void":""}">
-        <summary>
-          <b>#${t.id}</b> ${statusChip} ${_ctxChip(t)}
-          <span>${when}</span>
-          <span>entry ${fmtNum(t.entry_value)}/u</span>
-          ${kind!=="open" && t.exit_value!=null ? `<span>exit ${fmtNum(t.exit_value)}/u</span>` : ""}
-          ${gross!=null ? `<span>gross <b class="${_plCls(gross)}">${_rs(gross)}</b></span>` : ""}
-          <span>costs ₹${fmtNum(cost,0)}</span>
-          <span style="margin-left:auto">NET <b class="${_plCls(isVoid?null:net)}">${isVoid?"₹0 (void)":_rs(net)}</b></span>
-        </summary>
-        <div class="body">
-          <table class="rec-legs">
-            <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Entry premium</th><th>Qty</th></tr></thead>
-            <tbody>${legs}</tbody>
-          </table>
-          ${rolls}${markLine}
-          <div class="strat-ref">expiry: ${t.expiry || "—"} · units/leg: ${units} (${t.lots} lots × ${t.lot_size})</div>
-        </div>
-      </details>`;
+    const legsTable = t => `<table class="rec-legs">
+        <thead><tr><th>Action</th><th>Strike</th><th>Symbol</th><th>Entry premium</th><th>Qty</th></tr></thead>
+        <tbody>${(t.legs||[]).map(l=>`
+          <tr><td class="act-${String(l.action).toLowerCase()}">${l.action}</td>
+          <td>${(l.strike??0).toLocaleString("en-IN")} ${l.option_type}</td>
+          <td>${l.tradingsymbol}</td><td>₹${fmtNum(l.premium)}</td><td>${l.quantity}</td></tr>`).join("")}</tbody>
+      </table>`;
+
+    // Calendars (same strikes, two expiries) have no meaningful single-expiry
+    // payoff — recommend.py suppresses it there too. Short+hedge structures
+    // render one, and payoffSvg self-labels it "approximate" off the expiry
+    // string. Passing expiry through keeps that behaviour identical here.
+    const payoffFor = (t, spot) => {
+      const e = String(t.expiry || "");
+      if (/^front/i.test(e)) return `<div class="payoff-wrap"><div class="payoff-head">
+        <span class="payoff-title">Payoff at expiry</span></div>
+        <div class="note" style="padding:6px 0">Not shown — the two legs expire on different
+        dates, so a single-expiry payoff would misrepresent this calendar.</div></div>`;
+      return payoffSvg({ legs: t.legs, expiry: e }, spot) || "";
     };
 
-    const sections = Object.keys(byStrat).sort().map(k => {
-      const g = byStrat[k];
+    const rollsOf = t => ((t.meta||{}).hedge_rolls||[]).map(r=>
+      `<div class="pt-sub">↻ ${String(r.ts).slice(0,10)}: ${r.old} @${r.old_px} → ${r.new} @${r.new_px} (cash ${r.cash_per_unit>0?"+":""}${r.cash_per_unit}/u, costs ₹${fmtNum(r.costs_rs,0)})</div>`).join("");
+
+    // Live position: legs + payoff side by side, then the MTM strip.
+    const liveBlock = t => {
+      const m = t.last_mark || {};
+      const meta = t.meta || {};
+      const upnl = (m.upnl != null) ? m.upnl : null;
+      const margin = meta.margin_total;
+      const roi = (margin && upnl != null) ? (upnl / margin * 100) : null;
+      const days = Math.max(0, Math.round((Date.now() - Date.parse(t.opened_ts)) / 86400000));
+      const cost = (t.entry_costs||0);
+      return `<div class="pt-live${(upnl!=null && upnl<0)?" is-loss":""}">
+        <div class="pt-live-hd">
+          <span class="pt-chip open">LIVE</span> ${_ctxChip(t)}
+          <span>#${t.id} · opened ${String(t.opened_ts).slice(0,10)} · ${days}d held</span>
+          <span style="margin-left:auto">${meta.structure || ""}</span>
+        </div>
+        <div class="rec-cols">${legsTable(t)}${payoffFor(t, m.spot)}</div>
+        <div class="pt-mtm">
+          <div><div class="k">Entry</div><div class="v">${fmtNum(t.entry_value)}/u</div></div>
+          <div><div class="k">Mark now</div><div class="v">${m.mark_value!=null?fmtNum(m.mark_value)+"/u":"—"}</div></div>
+          <div><div class="k">MTM (net)</div><div class="v ${_plCls(upnl)}">${_rs(upnl)}</div></div>
+          <div><div class="k">On margin</div><div class="v ${_plCls(roi)}">${roi!=null?(roi>=0?"+":"−")+Math.abs(roi).toFixed(1)+"%":"—"}</div></div>
+          <div><div class="k">Entry costs</div><div class="v">₹${fmtNum(cost,0)}</div></div>
+          <div><div class="k">Margin</div><div class="v">${margin?fmtINR(Math.round(margin)):"—"}</div></div>
+        </div>
+        ${rollsOf(t)}
+        <div class="pt-sub">expiry ${t.expiry || "—"} · ${t.lots} lots × ${t.lot_size} = ${(t.lots||0)*(t.lot_size||0)} units/leg${m.ts?` · last mark ${String(m.ts).slice(0,16).replace("T"," ")}${m.spot?` · spot ${fmtNum(m.spot)}`:""}`:""}${m.note?` · ${m.note}`:""}</div>
+      </div>`;
+    };
+
+    // Closed trade -> one compact row; the whole row expands for legs/costs.
+    const closedRow = (t, isVoid) => {
+      const gross = t.gross_pnl, net = t.realized_pnl;
+      const cost = (t.entry_costs||0) + (t.exit_costs||0);
+      return `<tr class="${isVoid?"is-void":""}">
+        <td><b>#${t.id}</b> ${String(t.opened_ts).slice(5,10)}→${String(t.closed_ts||"").slice(5,10)}
+            <span class="pt-chip">${isVoid?"void":(t.exit_reason||"closed")}</span></td>
+        <td>${fmtNum(t.entry_value)}</td>
+        <td>${t.exit_value!=null?fmtNum(t.exit_value):"—"}</td>
+        <td class="${_plCls(isVoid?null:gross)}">${isVoid?"—":_rs(gross)}</td>
+        <td>₹${fmtNum(cost,0)}</td>
+        <td class="${_plCls(isVoid?null:net)}"><b>${isVoid?"₹0":_rs(net)}</b></td>
+      </tr>`;
+    };
+
+    const RECENT_N = 5;
+    const sections = Object.keys(STRAT_LABELS).map(k => {
+      const g = byStrat[k] || { open:[], closed:[], voided:[] };
+      const closedSorted = [...g.closed].sort((a,b)=>String(b.closed_ts).localeCompare(String(a.closed_ts)));
       const net = g.closed.reduce((s,t)=>s+(t.realized_pnl||0),0);
       const w = g.closed.filter(t=>(t.realized_pnl||0)>0).length;
-      const openNote = g.open.length ? `1 open (${_rs((g.open[0].last_mark||{}).upnl ?? null)})` : "flat";
-      const stats = `${g.closed.length} closed${g.closed.length?` · ${w}/${g.closed.length} wins · net <b class="${_plCls(net)}">${_rs(net)}</b>`:""} · ${openNote}${g.voided.length?` · ${g.voided.length} voided`:""}`;
-      const rows = [
-        ...g.open.map(t=>tradeRow(t,"open")),
-        ...[...g.closed].sort((a,b)=>b.id-a.id).map(t=>tradeRow(t,"closed")),
-        ...g.voided.map(t=>tradeRow(t,"voided")),
-      ].join("");
-      return `<details class="card" open>
-        <summary><span class="stitle"><span class="caret">▸</span> ${STRAT_LABELS[k]||k} <span class="sub" style="font-weight:400; font-size:12px; color:var(--muted)">${stats}</span></span></summary>
-        <div class="section-body">${rows || `<div class="note">no trades yet</div>`}</div>
+      const openU = g.open.reduce((s,t)=>s+((t.last_mark&&t.last_mark.upnl)||0),0);
+      const sCosts = g.closed.reduce((s,t)=>s+(t.entry_costs||0)+(t.exit_costs||0),0)
+                   + g.open.reduce((s,t)=>s+(t.entry_costs||0),0);
+      const hasAny = g.open.length || g.closed.length || g.voided.length;
+
+      const stats = [
+        g.open.length ? `<span class="pt-chip open">LIVE</span>` : `<span class="pt-chip">FLAT</span>`,
+        g.open.length ? `MTM <b class="${_plCls(openU)}">${_rs(openU)}</b>` : "",
+        g.closed.length ? `realized <b class="${_plCls(net)}">${_rs(net)}</b>` : "",
+        g.closed.length ? `${w}/${g.closed.length} wins` : "",
+        sCosts ? `costs ₹${fmtNum(sCosts,0)}` : "",
+        g.voided.length ? `${g.voided.length} void` : "",
+      ].filter(Boolean).join(" ");
+
+      const shown = _paperShowAll[k] ? closedSorted : closedSorted.slice(0, RECENT_N);
+      const recent = closedSorted.length ? `
+        <div class="payoff-title" style="margin:10px 0 2px">Trade history${
+          _paperShowAll[k] ? ` — all ${closedSorted.length}` : (closedSorted.length>RECENT_N?` — last ${RECENT_N} of ${closedSorted.length}`:"")}</div>
+        <table class="pt-recent">
+          <thead><tr><th>Trade</th><th>Entry/u</th><th>Exit/u</th><th>Gross</th><th>Costs</th><th>Net</th></tr></thead>
+          <tbody>${shown.map(t=>closedRow(t,false)).join("")}${g.voided.map(t=>closedRow(t,true)).join("")}</tbody>
+        </table>
+        ${closedSorted.length>RECENT_N?`<button type="button" class="pt-more" data-more="${k}">${_paperShowAll[k]?"Show last 5":`Show all ${closedSorted.length}`}</button>`:""}` : "";
+
+      const body = hasAny
+        ? `${g.open.map(liveBlock).join("")}${g.open.length?"":`<div class="pt-flat">No live position — the book opens one when this strategy's next signal is actionable.</div>`}${recent}`
+        : `<div class="pt-flat">No trades yet — never triggered an actionable signal since the ledger started.</div>`;
+
+      return `<details class="card"${g.open.length?" open":""}>
+        <summary><span class="stitle pt-shead"><span class="caret">▸</span> ${STRAT_LABELS[k]||k}
+          <span class="pt-sstats">${stats}</span></span></summary>
+        <div class="section-body">${body}</div>
       </details>`;
     }).join("");
 
-    document.getElementById("paperLog").innerHTML = sections ||
-      `<div class="note">No paper trades yet — the book opens positions when recommendations become actionable.</div>`;
+    document.getElementById("paperLog").innerHTML = sections;
+    document.querySelectorAll("#paperLog .pt-more").forEach(b => {
+      b.addEventListener("click", ev => {
+        ev.preventDefault();
+        const k = b.dataset.more;
+        _paperShowAll[k] = !_paperShowAll[k];
+        renderPaperLedger(_lastLedger);
+      });
+    });
   }
 
   // ---------- OI Flow tab ----------
