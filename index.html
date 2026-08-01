@@ -439,6 +439,30 @@
     padding:4px 10px; cursor:pointer; margin-top:6px; }
   .pt-more:hover{ color:var(--color-accent); border-color:var(--color-accent); }
   .pt-flat{ font-size:12px; color:var(--muted); padding:6px 0; }
+  /* Market-direction panel (#69) */
+  .dir-row{ display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px;
+    align-items:center; padding:7px 0; border-bottom:1px solid var(--border); }
+  .dir-row:last-of-type{ border-bottom:none; }
+  .dir-tf{ font-family:var(--mono); font-size:10.5px; color:var(--muted);
+    text-transform:uppercase; letter-spacing:.06em; }
+  .dir-call{ font-weight:800; font-size:14px; letter-spacing:-.01em; }
+  .dir-call.up{ color:var(--pos); } .dir-call.down{ color:var(--neg); }
+  .dir-call.weak{ color:var(--amber); }
+  .dir-nums{ font-family:var(--mono); font-size:11.5px; color:var(--muted); text-align:right; }
+  .dir-bar{ grid-column:1/-1; height:4px; background:var(--panel-2);
+    border:1px solid var(--border); position:relative; }
+  .dir-bar i{ position:absolute; top:0; bottom:0; width:2px; background:var(--color-text); }
+  .dir-bar u{ position:absolute; top:0; bottom:0; width:2px; background:var(--neg); opacity:.75; }
+  .dir-note{ grid-column:1/-1; font-size:11px; color:var(--muted); }
+  .dir-alert{ grid-column:1/-1; font-size:11.5px; padding:6px 8px; margin-top:4px;
+    border:1px solid var(--amber); color:var(--amber);
+    background:color-mix(in srgb, var(--amber) 10%, transparent); }
+  .dir-srt{ display:flex; flex-wrap:wrap; gap:4px 12px; align-items:baseline;
+    font-family:var(--mono); font-size:11.5px; margin-top:8px;
+    padding-top:8px; border-top:1px solid var(--border); }
+  .dir-srt b{ font-size:13px; }
+  .dir-foot{ font-size:10.5px; color:var(--muted); margin-top:8px; line-height:1.5; }
+  :root[data-skin="fintech"] .dir-alert{ border-radius:10px; }
   :root[data-skin="fintech"] .pt-live,:root[data-skin="fintech"] .pt-more{ border-radius:12px; }
   .pt-void{ opacity:.55; }
 
@@ -814,6 +838,11 @@
   </div>
 
   <div id="recBlock"></div>
+
+  <div class="triggers" id="dirPanel">
+    <h2>Market direction · Hilega Milega</h2>
+    <div id="dirBody"><div class="note">Loading…</div></div>
+  </div>
 
   <div class="triggers">
     <h2>Today's triggers</h2>
@@ -2070,6 +2099,74 @@
     }
   }
 
+  // ---------- Market direction: Hilega Milega + SRT (#69) ----------
+  // Renders compute.py's `direction` block. Rules are the indicator author's
+  // (see the compute.py header) — we display his read, we do not trade it
+  // automatically and it does NOT feed the paper ledger.
+  const DIR_CALL = {
+    buy:       { txt: "BUY SIDE",   cls: "up",   hint: "RSI above the red line and over 55" },
+    buy_weak:  { txt: "BUY (WEAK)", cls: "weak", hint: "above the red line but still under 55 — he says wait" },
+    sell:      { txt: "SELL SIDE",  cls: "down", hint: "red line on top — no fresh buying" },
+  };
+  function _dirRow(label, hm){
+    if (!hm || !hm.ok){
+      return `<div class="dir-row"><span class="dir-tf">${label}</span>
+        <span class="dir-nums" style="grid-column:2/-1;text-align:left">${(hm&&hm.reason)||"no data"}</span></div>`;
+    }
+    const c = DIR_CALL[hm.verdict] || DIR_CALL.sell;
+    // 0-100 RSI scale: black tick = RSI, red tick = the WMA-21 "red line"
+    const pos = v => Math.max(0, Math.min(100, v));
+    const flags = [
+      hm.v_turn ? `<span class="pt-chip" style="color:var(--pos);border-color:var(--pos)">V-turn done</span>` : "",
+      hm.book_profit ? `<span class="pt-chip" style="color:var(--amber);border-color:var(--amber)">RSI ≥ 86 · book</span>` : "",
+    ].filter(Boolean).join(" ");
+    return `<div class="dir-row">
+      <span class="dir-tf">${label}</span>
+      <span class="dir-call ${c.cls}">${c.txt}</span>
+      <span class="dir-nums">RSI ${hm.rsi} · red ${hm.red_wma} · ${hm.bars_in_state}d</span>
+      <div class="dir-bar" title="RSI ${hm.rsi} vs red line ${hm.red_wma}">
+        <i style="left:${pos(hm.rsi)}%"></i><u style="left:${pos(hm.red_wma)}%"></u></div>
+      <div class="dir-note">${c.hint}${flags?" · "+flags:""}</div>
+    </div>`;
+  }
+  function renderDirection(d){
+    const el = document.getElementById("dirBody");
+    if (!el) return;
+    const dir = (d && d.direction && d.direction.NIFTY) || null;
+    if (!dir || dir.error){
+      el.innerHTML = `<div class="note">Not available${dir&&dir.error?`: ${dir.error}`:""} — runs on the next Refresh.</div>`;
+      return;
+    }
+    const day = dir.daily, wk = dir.weekly;
+    // The author's headline rule: day + week agreeing is the conviction trade.
+    let agree = "";
+    if (day && wk && day.ok && wk.ok){
+      const both = day.state === wk.state;
+      agree = both
+        ? `<div class="dir-note" style="margin:6px 0 2px"><b class="${day.state==="buy"?"profit":"loss"}">Daily and weekly agree — ${day.state==="buy"?"buy":"sell"} side.</b> This is the conviction case; he trades the aligned ones.</div>`
+        : `<div class="dir-note" style="margin:6px 0 2px">Daily and weekly <b>disagree</b> — lower conviction; the weekly is the senior timeframe.</div>`;
+    }
+    const olb = day && day.old_low_break;
+    const alert = olb
+      ? `<div class="dir-alert"><b>Old-low-break setup.</b> It flipped to buy for
+         ${olb.buy_bars} bar${olb.buy_bars===1?"":"s"} and went straight back to sell —
+         his rule says the prior swing low${olb.level?` (<b>${fmtNum(olb.level,0)}</b>${olb.swing_date?`, ${olb.swing_date}`:""})`:""}
+         breaks, and fast. He claims 8/10; we have not verified that on NIFTY.</div>` : "";
+    const srtD = dir.srt_daily || {}, srtW = dir.srt_weekly || {};
+    const ZONE = { generational_buy:["GENERATIONAL BUY","--pos"], positional_buy:["POSITIONAL BUY","--pos"],
+                   normal:["normal","--muted"], stretched:["STRETCHED","--neg"], distribution:["DISTRIBUTION","--neg"] };
+    const zTxt = z => (ZONE[z]||["—","--muted"]);
+    const srtLine = (srtD.ok || srtW.ok) ? `<div class="dir-srt">
+        <span style="color:var(--muted)">SRT</span>
+        ${srtD.ok?`<span>daily <b>${srtD.srt}</b> <span style="color:var(${zTxt(srtD.zone)[1]})">${zTxt(srtD.zone)[0]}</span></span>`:""}
+        ${srtW.ok?`<span>weekly <b>${srtW.srt}</b> <span style="color:var(${zTxt(srtW.zone)[1]})">${zTxt(srtW.zone)[0]}</span></span>`:""}
+      </div>` : "";
+    el.innerHTML = `${_dirRow("Daily", day)}${_dirRow("Weekly", wk)}${agree}${alert}${srtLine}
+      <div class="dir-foot">RSI ${dir.rsi_period} · red line = WMA ${dir.wma_period} of the RSI ·
+        buy floor ${dir.buy_level} · book ${dir.book_level}. Exit on the 20-SMA of price.
+        Author's rules as described; informational only — not wired to the paper book.</div>`;
+  }
+
   // ---------- live data (data.json from compute.py) ----------
   function fmt(n, digits=2){ return (n==null || isNaN(n)) ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:digits, maximumFractionDigits:digits}); }
   function sigClass(s){ return "sig-" + (s || "unknown").replace(/_/g, "-"); }
@@ -2778,6 +2875,7 @@
       if (!r.ok) throw new Error("HTTP " + r.status);
       const d = await r.json();
       renderLiveData(d);
+      renderDirection(d);
       decorateStrategyCards(d.signals || {});
       renderRecommendations(d);
       if (!skipAutoRefresh){
