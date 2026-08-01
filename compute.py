@@ -247,12 +247,17 @@ def srt_read(close: pd.Series, period: int = SRT_PERIOD, weekly: bool = False) -
 
 def direction_block(kite, token: int) -> dict:
     """Hilega Milega (daily + weekly) + SRT (daily + weekly) for one index.
-    One extra historical call; weekly is resampled from the same daily frame
-    so 124 *weeks* of SRT needs ~900 calendar days of history."""
+
+    One extra historical call; weekly is resampled from the same daily frame.
+    The binding constraint is the WEEKLY SRT: it needs 124 weekly bars, and
+    900 calendar days yields only ~128 — a four-week margin that a holiday
+    stretch can erase, silently blanking the weekly zone. 1100 days (~157
+    weeks) leaves real headroom and is still one request, far under Kite's
+    2000-day cap for daily candles."""
     out: dict = {"rsi_period": HM_RSI_PERIOD, "wma_period": HM_WMA_PERIOD,
                  "buy_level": HM_BUY_LEVEL, "book_level": HM_BOOK_LEVEL}
     try:
-        d = _historical(kite, token, "day", days=900)
+        d = _historical(kite, token, "day", days=1100)
     except Exception as e:
         return {"error": f"history: {type(e).__name__}: {e}"}
     if d.empty:
