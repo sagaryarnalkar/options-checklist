@@ -627,10 +627,15 @@ def main() -> None:
     calendar_flags = compute_calendar_flags(datetime.now(IST).date())
 
     print("Computing directional read (Hilega Milega + SRT)...")
+    # Keys come from INDICES (lowercase: "nifty"/"banknifty") — hardcoding
+    # "NIFTY" here silently produced an EMPTY direction block in #69, because
+    # the lookup never matched and the loop just `continue`d. Derive the
+    # targets from the same dict the blocks are built from.
     direction = {}
-    for name in ("NIFTY", "BANKNIFTY"):
+    for name in [k for k in INDICES if k != "indiavix"]:
         tok = (blocks.get(name) or {}).get("instrument_token")
         if not tok:
+            direction[name] = {"error": "no instrument_token in block"}
             continue
         try:
             direction[name] = direction_block(kite, tok)

@@ -2132,7 +2132,10 @@
   function renderDirection(d){
     const el = document.getElementById("dirBody");
     if (!el) return;
-    const dir = (d && d.direction && d.direction.NIFTY) || null;
+    // instrument keys are lowercase (see INDICES in compute.py); accept the
+    // uppercase spelling too so an older payload still renders.
+    const dd = (d && d.direction) || {};
+    const dir = dd.nifty || dd.NIFTY || null;
     if (!dir || dir.error){
       el.innerHTML = `<div class="note">Not available${dir&&dir.error?`: ${dir.error}`:""} — runs on the next Refresh.</div>`;
       return;
