@@ -79,6 +79,196 @@ def vwma21(close: pd.Series, vol: pd.Series) -> pd.Series:
     return pv / v
 
 
+# ---------- Hilega Milega / SRT (directional read) ----------
+# Source: podcast transcript of the indicator's author (Bihar-based trader,
+# ~25 yrs; "Hilega Milega" released free in 2020, widely used on TradingView).
+# Transcribed rules, implemented verbatim — NOT tuned by us:
+#
+#   RSI period 9 (he uses 9-10, not the standard 14, "to get the data a
+#     little earlier than the world"; drops to 7 only when SRT <= 0.85).
+#   RED LINE = WMA-21 *of the RSI series* (not of price). He tested all 11
+#     MA types and picked weighted because it tracks the volume average
+#     most closely — that is the whole point of the indicator.
+#   STATE: RSI above the red line = buy side ("red line went inside");
+#     RSI below it = sell side ("red line came up") -> stop buying.
+#   FRESH-BUY FILTER: RSI must be > 55 AND have completed a V-turn up
+#     through it. Below 55 is "in the water" — no buying at all. He is
+#     emphatic that jumping in before the curve completes is THE reason
+#     people say it doesn't work.
+#   86 = profit-book line on whatever timeframe you trade.
+#   OLD-LOW-BREAK: if it flips to buy and IMMEDIATELY flips back to sell,
+#     the previous swing low breaks, "and badly" (his backtest: 8/10).
+#   TIMEFRAME: day and above is reliable; intraday needs expertise.
+#
+#   SRT = last price / 124-period average (124 = half of ~248 trading days
+#     = 6 months). DAILY timeframe only for the NIFTY zones. Range ~0.55-1.5.
+#     <= 0.60 generational buy zone (once in 10-14 years; "don't short even
+#     if paid"); ~0.85 = positional buy zone (~17% off the top); weekly SRT
+#     (124 *weeks*) > 1.24 = distribution, exit to InvIT/gold.
+#
+# We compute and display it; we do NOT auto-trade it. Treat as one opinion.
+
+HM_RSI_PERIOD = 9
+HM_WMA_PERIOD = 21
+HM_BUY_LEVEL = 55.0        # his changed "oversold" setting — fresh-buy floor
+HM_BOOK_LEVEL = 86.0       # profit-book / resistance line on the RSI
+HM_FLIP_BARS = 3           # "immediately" back to sell, in bars
+SRT_PERIOD = 124
+
+
+def _rma(s: pd.Series, period: int) -> pd.Series:
+    """Wilder's smoothing SEEDED WITH THE SMA of the first `period` values.
+
+    This seeding is not cosmetic: pandas' bare ewm() seeds from the first
+    observation instead, which left our RSI up to ~3 points off the textbook
+    value on a 35-bar sample — enough to flip a verdict around the 55 line.
+    ta.rma() (what TradingView's RSI, and therefore the published Hilega
+    Milega, actually uses) seeds with the SMA, so we match it exactly.
+    """
+    s = s.dropna()
+    if len(s) < period:
+        return pd.Series(index=s.index, dtype="float64")
+    seed = float(s.iloc[:period].mean())
+    tail = s.iloc[period:]
+    seeded = pd.concat([pd.Series([seed], index=[s.index[period - 1]]), tail])
+    return seeded.ewm(alpha=1 / period, adjust=False).mean()
+
+
+def rsi(close: pd.Series, period: int = HM_RSI_PERIOD) -> pd.Series:
+    """Wilder's RSI — matches TradingView (ta.rsi) bar for bar."""
+    delta = close.diff()
+    ag = _rma(delta.clip(lower=0), period)
+    al = _rma((-delta).clip(lower=0), period)
+    rs = ag / al.replace(0, pd.NA)
+    out = 100 - (100 / (1 + rs))
+    out = out.where(al != 0, 100.0)
+    return out.reindex(close.index)
+
+
+def wma(series: pd.Series, period: int) -> pd.Series:
+    w = pd.Series(range(1, period + 1), dtype="float64")
+    return series.rolling(period).apply(
+        lambda x: float((x * w.values).sum() / w.sum()), raw=True)
+
+
+def _swing_low(low: pd.Series, upto: int, lookback: int = 20):
+    """Lowest low in the `lookback` bars ending at positional index `upto`."""
+    seg = low.iloc[max(0, upto - lookback):upto + 1]
+    return (float(seg.min()), str(seg.idxmin().date())) if len(seg) else (None, None)
+
+
+def hilega_milega(df: pd.DataFrame) -> dict:
+    """Full HM read for one timeframe. df needs close (and low for the
+    old-low-break target). Returns None-ish dict when history is short."""
+    if df is None or df.empty or len(df) < HM_RSI_PERIOD + HM_WMA_PERIOD + 5:
+        return {"ok": False, "reason": "not enough history"}
+    r = rsi(df["close"])
+    red = wma(r, HM_WMA_PERIOD)
+    state = (r > red)                       # True = buy side
+    valid = r.notna() & red.notna()
+    if not valid.any():
+        return {"ok": False, "reason": "not enough history"}
+
+    i = len(df) - 1
+    cur_state = bool(state.iloc[i])
+    rsi_now, red_now = float(r.iloc[i]), float(red.iloc[i])
+
+    # bars the current state has lasted, counted 1-based (a state that just
+    # began today = 1). Keep one convention everywhere: an off-by-one here
+    # silently widens/narrows the "immediately" window of the flip rule.
+    j = i
+    while j > 0 and bool(state.iloc[j - 1]) == cur_state and valid.iloc[j - 1]:
+        j -= 1
+    flip_idx = j                            # first bar of the current state
+    bars_in_state = i - flip_idx + 1
+
+    # "came into buying then IMMEDIATELY went back to sell" -> old low breaks
+    old_low_break = None
+    if (not cur_state) and bars_in_state <= HM_FLIP_BARS and flip_idx > 0 \
+            and bool(state.iloc[flip_idx - 1]):
+        k = flip_idx - 1                    # last bar of the previous (buy) run
+        while k > 0 and bool(state.iloc[k - 1]) and valid.iloc[k - 1]:
+            k -= 1
+        buy_bars = flip_idx - k             # length of that buy run
+        if buy_bars <= HM_FLIP_BARS:
+            lvl, when = _swing_low(df["low"], k - 1) if "low" in df else (None, None)
+            old_low_break = {"level": lvl, "swing_date": when,
+                             "buy_bars": buy_bars, "sell_bars": bars_in_state}
+
+    # V-turn: RSI dipped below the buy level within the current buy leg and
+    # has since crossed back above it (the curve he insists you wait for).
+    v_turn = False
+    if cur_state:
+        leg = r.iloc[flip_idx:i + 1]
+        v_turn = bool((leg < HM_BUY_LEVEL).any() and rsi_now > HM_BUY_LEVEL)
+
+    if cur_state:
+        verdict = "buy" if rsi_now > HM_BUY_LEVEL else "buy_weak"
+    else:
+        verdict = "sell"
+    return {
+        "ok": True,
+        "state": "buy" if cur_state else "sell",
+        "verdict": verdict,
+        "rsi": round(rsi_now, 2),
+        "red_wma": round(red_now, 2),
+        "gap": round(rsi_now - red_now, 2),
+        "bars_in_state": bars_in_state,
+        "above_buy_level": rsi_now > HM_BUY_LEVEL,
+        "v_turn": v_turn,
+        "book_profit": rsi_now >= HM_BOOK_LEVEL,
+        "old_low_break": old_low_break,
+        "close": round(float(df["close"].iloc[i]), 2),
+        "asof": str(df.index[i].date()),
+    }
+
+
+def srt_read(close: pd.Series, period: int = SRT_PERIOD, weekly: bool = False) -> dict:
+    """SRT = last close / N-period average, with his NIFTY zone labels."""
+    if close is None or len(close) < period:
+        return {"ok": False, "reason": f"need {period} bars"}
+    avg = float(close.tail(period).mean())
+    if not avg:
+        return {"ok": False, "reason": "zero average"}
+    val = float(close.iloc[-1]) / avg
+    if weekly:
+        zone = "distribution" if val > 1.24 else "normal"
+    elif val <= 0.60:
+        zone = "generational_buy"
+    elif val <= 0.87:
+        zone = "positional_buy"
+    elif val >= 1.24:
+        zone = "stretched"
+    else:
+        zone = "normal"
+    return {"ok": True, "srt": round(val, 3), "avg": round(avg, 2), "zone": zone,
+            "period": period, "basis": "weekly" if weekly else "daily"}
+
+
+def direction_block(kite, token: int) -> dict:
+    """Hilega Milega (daily + weekly) + SRT (daily + weekly) for one index.
+    One extra historical call; weekly is resampled from the same daily frame
+    so 124 *weeks* of SRT needs ~900 calendar days of history."""
+    out: dict = {"rsi_period": HM_RSI_PERIOD, "wma_period": HM_WMA_PERIOD,
+                 "buy_level": HM_BUY_LEVEL, "book_level": HM_BOOK_LEVEL}
+    try:
+        d = _historical(kite, token, "day", days=900)
+    except Exception as e:
+        return {"error": f"history: {type(e).__name__}: {e}"}
+    if d.empty:
+        return {"error": "no daily history"}
+    out["daily"] = hilega_milega(d)
+    out["srt_daily"] = srt_read(d["close"])
+    try:
+        w = d.resample("W-FRI").agg({"open": "first", "high": "max",
+                                     "low": "min", "close": "last"}).dropna()
+        out["weekly"] = hilega_milega(w)
+        out["srt_weekly"] = srt_read(w["close"], weekly=True)
+    except Exception as e:
+        out["weekly_error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
 # ---------- data fetching ----------
 
 def _instrument_token(kite, exchange: str, tradingsymbol: str) -> int:
@@ -431,6 +621,24 @@ def main() -> None:
     signals = derive_signals(blocks)
     calendar_flags = compute_calendar_flags(datetime.now(IST).date())
 
+    print("Computing directional read (Hilega Milega + SRT)...")
+    direction = {}
+    for name in ("NIFTY", "BANKNIFTY"):
+        tok = (blocks.get(name) or {}).get("instrument_token")
+        if not tok:
+            continue
+        try:
+            direction[name] = direction_block(kite, tok)
+            dd = (direction[name].get("daily") or {})
+            ww = (direction[name].get("weekly") or {})
+            srt = (direction[name].get("srt_daily") or {})
+            print(f"  {name:11s} HM day={dd.get('verdict','?')} "
+                  f"week={ww.get('verdict','?')} SRT={srt.get('srt','?')} "
+                  f"({srt.get('zone','?')})")
+        except Exception as e:
+            direction[name] = {"error": str(e)}
+            print(f"  {name:11s} direction ERROR: {e}")
+
     print("Building trade recommendations for fresh signals + calendar...")
     recommendations = build_recommendations(kite, signals, blocks, calendar_flags)
     for strat, rec in recommendations.items():
@@ -454,6 +662,7 @@ def main() -> None:
         "instruments": blocks,
         "signals": signals,
         "calendar_flags": calendar_flags,
+        "direction": direction,
         "recommendations": recommendations,
         "portfolio": portfolio,
     }
