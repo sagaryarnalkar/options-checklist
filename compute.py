@@ -113,6 +113,9 @@ HM_WMA_PERIOD = 21
 HM_BUY_LEVEL = 55.0        # his changed "oversold" setting — fresh-buy floor
 HM_BOOK_LEVEL = 86.0       # profit-book / resistance line on the RSI
 HM_FLIP_BARS = 3           # "immediately" back to sell, in bars
+HM_EMA_SPAN = 3            # GREEN line: EMA-3 of the RSI (his fast structure line)
+HM_EXIT_SMA = 20           # exit/trailing = 20-SMA OF PRICE (100 on 1h)
+HM_FAST_RSI = 7            # he drops to RSI 7 once SRT <= 0.85
 SRT_PERIOD = 124
 
 
@@ -157,13 +160,21 @@ def _swing_low(low: pd.Series, upto: int, lookback: int = 20):
     return (float(seg.min()), str(seg.idxmin().date())) if len(seg) else (None, None)
 
 
-def hilega_milega(df: pd.DataFrame) -> dict:
+def hilega_milega(df: pd.DataFrame, period: int = HM_RSI_PERIOD,
+                  series_bars: int = 60) -> dict:
     """Full HM read for one timeframe. df needs close (and low for the
     old-low-break target). Returns None-ish dict when history is short."""
-    if df is None or df.empty or len(df) < HM_RSI_PERIOD + HM_WMA_PERIOD + 5:
+    if df is None or df.empty or len(df) < period + HM_WMA_PERIOD + 5:
         return {"ok": False, "reason": "not enough history"}
-    r = rsi(df["close"])
+    r = rsi(df["close"], period)
     red = wma(r, HM_WMA_PERIOD)
+    # GREEN line: EMA-3 of the RSI. He adds it "so we catch the price
+    # structure faster" — it is the early-warning line that turns before
+    # the RSI/red-line cross confirms.
+    grn = r.ewm(span=HM_EMA_SPAN, adjust=False).mean()
+    # Exit/trailing rule: the 20-SMA OF PRICE (100 on 1h). "Stop loss hi
+    # aapka target hai" — the same line trails the trade.
+    sma20 = df["close"].rolling(HM_EXIT_SMA).mean()
     state = (r > red)                       # True = buy side
     valid = r.notna() & red.notna()
     if not valid.any():
@@ -206,20 +217,54 @@ def hilega_milega(df: pd.DataFrame) -> dict:
         verdict = "buy" if rsi_now > HM_BUY_LEVEL else "buy_weak"
     else:
         verdict = "sell"
+
+    # "How far from the signal firing?" — the distance still to travel on
+    # the RSI scale, and which condition is the binding one.
+    grn_now = float(grn.iloc[i])
+    if not cur_state:
+        need_cross = max(0.0, red_now - rsi_now)
+        need_level = max(0.0, HM_BUY_LEVEL - rsi_now)
+        trigger = {"needs": "cross the red line" + (" and reclaim 55" if need_level > 0 else ""),
+                   "rsi_gap": round(max(need_cross, need_level), 2),
+                   "to_red": round(need_cross, 2),
+                   "to_level": round(need_level, 2),
+                   "armed": False}
+    elif rsi_now <= HM_BUY_LEVEL:
+        trigger = {"needs": f"reclaim {HM_BUY_LEVEL:.0f}", "rsi_gap": round(HM_BUY_LEVEL - rsi_now, 2),
+                   "to_red": 0.0, "to_level": round(HM_BUY_LEVEL - rsi_now, 2), "armed": False}
+    else:
+        trigger = {"needs": "live — trail the 20-SMA", "rsi_gap": 0.0, "to_red": 0.0,
+                   "to_level": 0.0, "armed": True,
+                   "to_book": round(max(0.0, HM_BOOK_LEVEL - rsi_now), 2)}
+
+    px = float(df["close"].iloc[i])
+    sma_now = _f(sma20.iloc[i])
+    tail = slice(max(0, i - series_bars + 1), i + 1)
     return {
         "ok": True,
         "state": "buy" if cur_state else "sell",
         "verdict": verdict,
+        "rsi_period": period,
         "rsi": round(rsi_now, 2),
         "red_wma": round(red_now, 2),
+        "green_ema": round(grn_now, 2),
         "gap": round(rsi_now - red_now, 2),
         "bars_in_state": bars_in_state,
         "above_buy_level": rsi_now > HM_BUY_LEVEL,
         "v_turn": v_turn,
         "book_profit": rsi_now >= HM_BOOK_LEVEL,
         "old_low_break": old_low_break,
-        "close": round(float(df["close"].iloc[i]), 2),
+        "trigger": trigger,
+        "close": round(px, 2),
+        "sma20": sma_now,
+        "sma20_gap_pct": round((px - sma_now) / sma_now * 100, 2) if sma_now else None,
         "asof": str(df.index[i].date()),
+        # compact series for the mini-chart (his TradingView pane)
+        "series": {
+            "rsi":   [None if pd.isna(v) else round(float(v), 2) for v in r.iloc[tail]],
+            "red":   [None if pd.isna(v) else round(float(v), 2) for v in red.iloc[tail]],
+            "green": [None if pd.isna(v) else round(float(v), 2) for v in grn.iloc[tail]],
+        },
     }
 
 
@@ -262,12 +307,19 @@ def direction_block(kite, token: int) -> dict:
         return {"error": f"history: {type(e).__name__}: {e}"}
     if d.empty:
         return {"error": "no daily history"}
-    out["daily"] = hilega_milega(d)
+    # SRT first: he switches the RSI to 7 once SRT reaches ~0.85 ("when the
+    # market is well down"), so the period is data-dependent, not fixed.
     out["srt_daily"] = srt_read(d["close"])
+    srt_val = (out["srt_daily"] or {}).get("srt")
+    period = HM_FAST_RSI if (srt_val is not None and srt_val <= 0.85) else HM_RSI_PERIOD
+    out["rsi_period"] = period
+    out["rsi_period_reason"] = ("SRT <= 0.85 — his fast setting" if period == HM_FAST_RSI
+                                else "default")
+    out["daily"] = hilega_milega(d, period)
     try:
         w = d.resample("W-FRI").agg({"open": "first", "high": "max",
                                      "low": "min", "close": "last"}).dropna()
-        out["weekly"] = hilega_milega(w)
+        out["weekly"] = hilega_milega(w, period)
         out["srt_weekly"] = srt_read(w["close"], weekly=True)
     except Exception as e:
         out["weekly_error"] = f"{type(e).__name__}: {e}"

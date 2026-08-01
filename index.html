@@ -462,6 +462,11 @@
     padding-top:8px; border-top:1px solid var(--border); }
   .dir-srt b{ font-size:13px; }
   .dir-foot{ font-size:10.5px; color:var(--muted); margin-top:8px; line-height:1.5; }
+  .dir-spark{ grid-column:1/-1; width:100%; height:auto; display:block; margin:4px 0 2px;
+    background:var(--panel-2); border:1px solid var(--border); }
+  .dir-trig{ font-family:var(--mono); font-size:11px; }
+  .dir-trig b{ color:var(--color-text); }
+  .dir-trig.live{ color:var(--pos); font-weight:600; }
   :root[data-skin="fintech"] .dir-alert{ border-radius:10px; }
   :root[data-skin="fintech"] .pt-live,:root[data-skin="fintech"] .pt-more{ border-radius:12px; }
   .pt-void{ opacity:.55; }
@@ -2108,6 +2113,59 @@
     buy_weak:  { txt: "BUY (WEAK)", cls: "weak", hint: "above the red line but still under 55 — he says wait" },
     sell:      { txt: "SELL SIDE",  cls: "down", hint: "red line on top — no fresh buying" },
   };
+  // His TradingView pane in miniature: black RSI, red WMA-21, green EMA-3,
+  // and the gap between RSI and the red line shaded green (buy) / red (sell)
+  // — that shaded band IS the signal, so you can see how close it is to
+  // pinching shut. Auto-scaled to the visible window, with the 55 floor and
+  // 86 book line drawn where they fall.
+  function _dirSpark(hm){
+    const S = hm && hm.series;
+    if (!S || !S.rsi || S.rsi.length < 5) return "";
+    const n = S.rsi.length, W = 320, H = 74, PX = 2, PT = 5, PB = 5;
+    const all = [...S.rsi, ...S.red, ...S.green].filter(v => v != null);
+    if (!all.length) return "";
+    let lo = Math.min(...all), hi = Math.max(...all);
+    [HM_LEVELS.buy, HM_LEVELS.book].forEach(L => {
+      if (L >= lo - 12 && L <= hi + 12){ lo = Math.min(lo, L); hi = Math.max(hi, L); }
+    });
+    const pad = Math.max((hi - lo) * 0.12, 2); lo -= pad; hi += pad;
+    const X = i => PX + i * (W - 2 * PX) / Math.max(n - 1, 1);
+    const Y = v => PT + (hi - v) * (H - PT - PB) / (hi - lo);
+    const path = arr => arr.map((v, i) => v == null ? null : `${X(i).toFixed(1)},${Y(v).toFixed(1)}`)
+      .filter(Boolean).map((p, i) => (i ? "L" : "M") + p).join("");
+    // shaded band between RSI and red line, split by which is on top
+    const bands = [];
+    let run = null;
+    for (let i = 0; i < n; i++){
+      const a = S.rsi[i], b = S.red[i];
+      const up = (a != null && b != null) ? a >= b : null;
+      if (up === null){ if (run) { bands.push(run); run = null; } continue; }
+      if (!run || run.up !== up){ if (run) bands.push(run); run = { up, pts: [] }; }
+      run.pts.push(i);
+    }
+    if (run) bands.push(run);
+    const fills = bands.filter(b => b.pts.length > 1).map(b => {
+      const top = b.pts.map(i => `${X(i).toFixed(1)},${Y(S.rsi[i]).toFixed(1)}`);
+      const bot = [...b.pts].reverse().map(i => `${X(i).toFixed(1)},${Y(S.red[i]).toFixed(1)}`);
+      return `<path d="M${top.join("L")}L${bot.join("L")}Z" fill="var(${b.up ? "--pos" : "--neg"})" opacity=".18"/>`;
+    }).join("");
+    const lvl = (L, cls) => (L > lo && L < hi)
+      ? `<line x1="${PX}" y1="${Y(L).toFixed(1)}" x2="${W - PX}" y2="${Y(L).toFixed(1)}"
+           stroke="var(${cls})" stroke-width="1" stroke-dasharray="3,3" opacity=".55"/>
+         <text x="${W - PX - 1}" y="${(Y(L) - 2).toFixed(1)}" text-anchor="end" font-size="7.5"
+           fill="var(${cls})" font-family="var(--mono)">${L}</text>` : "";
+    return `<svg class="dir-spark" viewBox="0 0 ${W} ${H}" role="img"
+        aria-label="RSI versus its weighted average, last ${n} bars">
+      ${fills}
+      ${lvl(HM_LEVELS.buy, "--muted")}${lvl(HM_LEVELS.book, "--amber")}
+      <path d="${path(S.green)}" fill="none" stroke="var(--pos)" stroke-width="1.3" opacity=".85"/>
+      <path d="${path(S.red)}" fill="none" stroke="var(--neg)" stroke-width="1.6"/>
+      <path d="${path(S.rsi)}" fill="none" stroke="var(--color-text)" stroke-width="1.6"/>
+      <circle cx="${X(n - 1).toFixed(1)}" cy="${Y(S.rsi[n - 1]).toFixed(1)}" r="2.6" fill="var(--color-text)"/>
+    </svg>`;
+  }
+  const HM_LEVELS = { buy: 55, book: 86 };
+
   function _dirRow(label, hm){
     if (!hm || !hm.ok){
       return `<div class="dir-row"><span class="dir-tf">${label}</span>
@@ -2120,12 +2178,18 @@
       hm.v_turn ? `<span class="pt-chip" style="color:var(--pos);border-color:var(--pos)">V-turn done</span>` : "",
       hm.book_profit ? `<span class="pt-chip" style="color:var(--amber);border-color:var(--amber)">RSI ≥ 86 · book</span>` : "",
     ].filter(Boolean).join(" ");
+    const t = hm.trigger || {};
+    const dist = t.armed
+      ? `<span class="dir-trig live">SIGNAL LIVE${t.to_book?` · ${t.to_book} to the 86 book line`:""}</span>`
+      : `<span class="dir-trig">needs <b>${t.rsi_gap}</b> RSI pts — ${t.needs}</span>`;
+    const sma = (hm.sma20 != null)
+      ? `<span title="his exit / trailing stop">20-SMA ${fmtNum(hm.sma20,0)} · price ${hm.sma20_gap_pct>=0?"+":""}${hm.sma20_gap_pct}%</span>` : "";
     return `<div class="dir-row">
       <span class="dir-tf">${label}</span>
       <span class="dir-call ${c.cls}">${c.txt}</span>
-      <span class="dir-nums">RSI ${hm.rsi} · red ${hm.red_wma} · ${hm.bars_in_state}d</span>
-      <div class="dir-bar" title="RSI ${hm.rsi} vs red line ${hm.red_wma}">
-        <i style="left:${pos(hm.rsi)}%"></i><u style="left:${pos(hm.red_wma)}%"></u></div>
+      <span class="dir-nums">RSI ${hm.rsi} · red ${hm.red_wma} · green ${hm.green_ema} · ${hm.bars_in_state}d</span>
+      ${_dirSpark(hm)}
+      <div class="dir-note">${dist}${sma?" · "+sma:""}</div>
       <div class="dir-note">${c.hint}${flags?" · "+flags:""}</div>
     </div>`;
   }
@@ -2165,8 +2229,10 @@
         ${srtW.ok?`<span>weekly <b>${srtW.srt}</b> <span style="color:var(${zTxt(srtW.zone)[1]})">${zTxt(srtW.zone)[0]}</span></span>`:""}
       </div>` : "";
     el.innerHTML = `${_dirRow("Daily", day)}${_dirRow("Weekly", wk)}${agree}${alert}${srtLine}
-      <div class="dir-foot">RSI ${dir.rsi_period} · red line = WMA ${dir.wma_period} of the RSI ·
-        buy floor ${dir.buy_level} · book ${dir.book_level}. Exit on the 20-SMA of price.
+      <div class="dir-foot">Black = RSI ${dir.rsi_period}${dir.rsi_period_reason&&dir.rsi_period_reason!=="default"?` (${dir.rsi_period_reason})`:""} ·
+        <span style="color:var(--neg)">red</span> = WMA ${dir.wma_period} of the RSI ·
+        <span style="color:var(--pos)">green</span> = EMA 3 of the RSI (early turn) ·
+        buy floor ${dir.buy_level} · book ${dir.book_level} · exit/trail = 20-SMA of price.
         Author's rules as described; informational only — not wired to the paper book.</div>`;
   }
 
