@@ -467,6 +467,14 @@
   .dir-trig{ font-family:var(--mono); font-size:11px; }
   .dir-trig b{ color:var(--color-text); }
   .dir-trig.live{ color:var(--pos); font-weight:600; }
+  .wc-head{ display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline; }
+  .wc-val{ font-family:var(--mono); font-size:22px; font-weight:700; letter-spacing:-.02em; }
+  .wc-state{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
+  .wc-spark{ width:100%; height:auto; display:block; margin:6px 0 2px;
+    background:var(--panel-2); border:1px solid var(--border); }
+  .wc-meta{ display:flex; flex-wrap:wrap; gap:4px 14px; font-family:var(--mono);
+    font-size:11px; color:var(--muted); }
+  .wc-foot{ font-size:10.5px; color:var(--muted); margin-top:8px; line-height:1.5; }
   :root[data-skin="fintech"] .dir-alert{ border-radius:10px; }
   :root[data-skin="fintech"] .pt-live,:root[data-skin="fintech"] .pt-more{ border-radius:12px; }
   .pt-void{ opacity:.55; }
@@ -847,6 +855,11 @@
   <div class="triggers" id="dirPanel">
     <h2>Market direction · Hilega Milega</h2>
     <div id="dirBody"><div class="note">Loading…</div></div>
+  </div>
+
+  <div class="triggers" id="wcashPanel">
+    <h2>Writer cash · are option sellers being squeezed?</h2>
+    <div id="wcashBody"><div class="note">Loading…</div></div>
   </div>
 
   <div class="triggers">
@@ -2236,6 +2249,69 @@
         Author's rules as described; informational only — not wired to the paper book.</div>`;
   }
 
+  // ---------- WCash: option-writer mark-to-market (#73) ----------
+  // VALIDATED as a STATE gauge on 40 recorded sessions: corr -0.62 with the
+  // day's |move| and -0.70 with range, correct sign, and ~0 against SIGNED
+  // move (writers are hurt both ways, exactly as the maths requires).
+  // NOT a forecast: writer stress at 11:00 vs the afternoon's range came out
+  // -0.008 (-0.045 controlling for morning activity). The copy below says so
+  // deliberately — this must not drift into being read as a direction call.
+  const WC_STATE = {
+    comfortable:        ["COMFORTABLE",  "--pos",   "writers in profit and holding it"],
+    comfortable_fading: ["FADING",       "--amber", "in profit but giving it back late"],
+    pressured_easing:   ["EASING",       "--amber", "underwater but recovering"],
+    pressured:          ["PRESSURED",    "--neg",   "underwater and still bleeding"],
+  };
+  function _wcSpark(w){
+    const S = w.series || [];
+    if (S.length < 4) return "";
+    const W = 320, H = 60, PX = 2, PT = 5, PB = 5;
+    let lo = Math.min(0, ...S), hi = Math.max(0, ...S);
+    const pad = Math.max((hi - lo) * 0.1, 1); lo -= pad; hi += pad;
+    const X = i => PX + i * (W - 2 * PX) / (S.length - 1);
+    const Y = v => PT + (hi - v) * (H - PT - PB) / (hi - lo);
+    const line = S.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    const col = w.close_cr >= 0 ? "--pos" : "--neg";
+    const zero = Y(0).toFixed(1);
+    return `<svg class="wc-spark" viewBox="0 0 ${W} ${H}" role="img"
+        aria-label="Writer mark-to-market through the session">
+      <path d="${line}L${X(S.length-1).toFixed(1)},${zero}L${X(0).toFixed(1)},${zero}Z"
+        fill="var(${col})" opacity=".14"/>
+      <line x1="${PX}" y1="${zero}" x2="${W-PX}" y2="${zero}" stroke="var(--muted)"
+        stroke-width="1" opacity=".6" stroke-dasharray="3,3"/>
+      <path d="${line}" fill="none" stroke="var(${col})" stroke-width="1.8"/>
+      <circle cx="${X(S.length-1).toFixed(1)}" cy="${Y(S[S.length-1]).toFixed(1)}" r="2.6" fill="var(${col})"/>
+    </svg>`;
+  }
+  function renderWCash(d){
+    const el = document.getElementById("wcashBody");
+    if (!el) return;
+    const w = (d && d.wcash && (d.wcash.NIFTY || d.wcash.nifty)) || null;
+    if (!w || !w.ok){
+      el.innerHTML = `<div class="note">Not available${w&&w.reason?`: ${w.reason}`:""} — needs a recorded chain for the session.</div>`;
+      return;
+    }
+    const [txt, col, hint] = WC_STATE[w.state] || WC_STATE.comfortable;
+    const cr = v => `${v<0?"−":"+"}₹${Math.abs(v).toLocaleString("en-IN",{maximumFractionDigits:0})}cr`;
+    el.innerHTML = `
+      <div class="wc-head">
+        <span class="wc-val" style="color:var(${col})">${cr(w.close_cr)}</span>
+        <span class="wc-state" style="color:var(${col})">${txt}</span>
+        <span style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted)">${w.day}</span>
+      </div>
+      <div class="wc-meta">${hint}</div>
+      ${_wcSpark(w)}
+      <div class="wc-meta">
+        <span>trough ${cr(w.trough_cr)}</span><span>peak ${cr(w.peak_cr)}</span>
+        <span>last hour ${cr(w.drift_cr)}</span><span>${w.n_minutes} min</span>
+      </div>
+      <div class="wc-foot">Mark-to-market of everyone short options in NIFTY (ATM±10), the cohort
+        your book sits in — every open contract has exactly one writer, so this needs no assumption
+        about who holds what. <b>A state gauge, not a forecast:</b> on our 40 recorded sessions it
+        tracks the day's realised move (−0.62) but shows no predictive power over the rest of the
+        day (−0.01). Read it as "how much stress is in the room now".</div>`;
+  }
+
   // ---------- live data (data.json from compute.py) ----------
   function fmt(n, digits=2){ return (n==null || isNaN(n)) ? "—" : Number(n).toLocaleString("en-IN", {minimumFractionDigits:digits, maximumFractionDigits:digits}); }
   function sigClass(s){ return "sig-" + (s || "unknown").replace(/_/g, "-"); }
@@ -2945,6 +3021,7 @@
       const d = await r.json();
       renderLiveData(d);
       renderDirection(d);
+      renderWCash(d);
       decorateStrategyCards(d.signals || {});
       renderRecommendations(d);
       if (!skipAutoRefresh){

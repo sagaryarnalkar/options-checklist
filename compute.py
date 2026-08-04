@@ -31,6 +31,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from kite_auth import get_kite, get_kite_from_cache
@@ -288,6 +289,78 @@ def srt_read(close: pd.Series, period: int = SRT_PERIOD, weekly: bool = False) -
         zone = "normal"
     return {"ok": True, "srt": round(val, 3), "avg": round(avg, 2), "zone": zone,
             "period": period, "basis": "weekly" if weekly else "daily"}
+
+
+# ---------- WCash: aggregate option-writer mark-to-market ----------
+# From the Vtrender manual's "Writer Cash". Every open contract has exactly
+# ONE writer, so when a strike's premium rises the short side of that strike
+# loses that much per unit: dWCash = -sum(OI * d_premium) over strikes. That
+# needs NO assumption about who the dealer is — which is precisely why this
+# is sound where our two gamma attempts (#GEX sign, #HHI concentration) were
+# not: both of those required guessing the dealer's side from OI, which OI
+# cannot tell you.
+#
+# WHAT WE VERIFIED on 40 recorded sessions (see BUILD_LOG):
+#   corr(WCash, |day move|%)   = -0.62   correct sign, strong
+#   corr(WCash, day range%)    = -0.70   correct sign, strong
+#   corr(WCash, SIGNED move%)  = +0.20   ~0 as theory demands (hurt both ways)
+#   writers profitable 30/40 sessions (75%) — matches how selling behaves
+# WHAT IT IS NOT: predictive. WCash at 11:00 vs the afternoon's range is
+#   -0.008 (-0.045 after controlling for morning activity). It is a STATE
+#   gauge — "is the cohort I trade in being squeezed right now" — not a
+#   forecast. The UI says so; do not let it drift into a direction signal.
+#
+# Kite reports option OI in UNITS, not lots — do NOT multiply by lot size.
+# (The first prototype did, inflating every figure 75x.)
+
+def wcash_read(conn, underlying: str = "NIFTY", day: str | None = None,
+               points: int = 80) -> dict:
+    """Writer mark-to-market for one session, in Rs crore, from the recorded
+    per-minute chain. Read-only; returns a downsampled series for plotting."""
+    try:
+        if day is None:
+            row = conn.execute("SELECT MAX(DATE(ts)) FROM chain_snapshot "
+                               "WHERE underlying=?", (underlying,)).fetchone()
+            day = row[0] if row else None
+        if not day:
+            return {"ok": False, "reason": "no chain data"}
+        rows = conn.execute(
+            "SELECT ts, strike, opt_type, ltp, oi, spot FROM chain_snapshot "
+            "WHERE underlying=? AND DATE(ts)=? ORDER BY ts", (underlying, day)).fetchall()
+        if len(rows) < 50:
+            return {"ok": False, "reason": f"only {len(rows)} rows for {day}"}
+        df = pd.DataFrame([dict(r) for r in rows])
+        prem = df.pivot_table(index="ts", columns=["strike", "opt_type"], values="ltp").ffill()
+        oi = df.pivot_table(index="ts", columns=["strike", "opt_type"], values="oi").ffill()
+        cols = prem.columns.intersection(oi.columns)
+        if not len(cols):
+            return {"ok": False, "reason": "no aligned strikes"}
+        step = -(prem[cols].diff() * oi[cols].shift(1)).sum(axis=1) / 1e7   # OI already units
+        cum = step.cumsum().dropna()
+        if cum.empty:
+            return {"ok": False, "reason": "no usable minutes"}
+        close = float(cum.iloc[-1])
+        # last-hour drift decides "improving" vs "deteriorating"
+        tail_n = max(2, len(cum) // 6)
+        drift = close - float(cum.iloc[-tail_n])
+        if close >= 0:
+            state = "comfortable" if drift >= 0 else "comfortable_fading"
+        else:
+            state = "pressured_easing" if drift >= 0 else "pressured"
+        idx = np.linspace(0, len(cum) - 1, min(points, len(cum))).astype(int)
+        return {
+            "ok": True, "day": str(day), "underlying": underlying,
+            "close_cr": round(close, 1),
+            "trough_cr": round(float(cum.min()), 1),
+            "peak_cr": round(float(cum.max()), 1),
+            "drift_cr": round(float(drift), 1),
+            "state": state,
+            "n_minutes": int(len(cum)),
+            "series": [round(float(v), 1) for v in cum.iloc[idx]],
+            "labels": [str(t)[11:16] for t in cum.index[idx]],
+        }
+    except Exception as e:
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
 
 
 def direction_block(kite, token: int) -> dict:
@@ -701,6 +774,19 @@ def main() -> None:
             direction[name] = {"error": str(e)}
             print(f"  {name:11s} direction ERROR: {e}")
 
+    print("Computing writer cash (WCash)...")
+    wcash = {}
+    try:
+        import db as _dbw
+        with _dbw.get_conn() as _c:
+            for u in ("NIFTY", "BANKNIFTY"):
+                wcash[u] = wcash_read(_c, u)
+                w = wcash[u]
+                print(f"  {u:11s} " + (f"close Rs {w['close_cr']:+.1f}cr ({w['state']}) "
+                      f"trough {w['trough_cr']:+.1f}" if w.get("ok") else f"n/a: {w.get('reason')}"))
+    except Exception as e:
+        print(f"  WCash ERROR: {e}")
+
     print("Building trade recommendations for fresh signals + calendar...")
     recommendations = build_recommendations(kite, signals, blocks, calendar_flags)
     for strat, rec in recommendations.items():
@@ -725,6 +811,7 @@ def main() -> None:
         "signals": signals,
         "calendar_flags": calendar_flags,
         "direction": direction,
+        "wcash": wcash,
         "recommendations": recommendations,
         "portfolio": portfolio,
     }
