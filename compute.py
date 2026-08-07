@@ -703,6 +703,7 @@ def compute_calendar_flags(today) -> dict:
             second_last_wed = last_wed - _timedelta(days=7)
 
     return {
+        "is_monday":              weekday == 0,
         "is_mon_before_weekly":   weekday == 0 and days_to_tue == 1,
         "is_tuesday_expiry":      weekday == 1 and days_to_tue == 0,
         "is_last_friday":         is_last_friday,
