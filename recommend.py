@@ -784,10 +784,15 @@ def _format_multileg(strategy: str, structure: str, expiry, lot_size: int,
     """Helper for non-credit-spread structures (flies, broken-wing condors).
     `legs_in` is a list of dicts: {action, transaction_type, tradingsymbol,
     strike, option_type, premium, quantity}. Computes net cash + margin."""
+    # QUANTITY-WEIGHTED. Ratio structures (EDB / Batman / No Brainer 1-2-1,
+    # Matrix Calendar 2:1) carry legs of unequal size, so a bare sum prices a
+    # 1-1-1 trade that was never built: a real EDB entry stored -94.70/unit
+    # when the true net was -30.60. Weight each leg by its lots-vs-base ratio.
     net_premium_per_unit = 0.0
     for leg in legs_in:
         sign = -1 if leg["transaction_type"] == "BUY" else +1
-        net_premium_per_unit += sign * (leg["premium"] or 0)
+        mult = (leg.get("quantity") or lot_size) / float(lot_size or 1)
+        net_premium_per_unit += sign * (leg["premium"] or 0) * mult
     qty = lot_size
     margin = _basket_margin(kite, legs_in)
     margin_total = None
@@ -806,6 +811,56 @@ def _format_multileg(strategy: str, structure: str, expiry, lot_size: int,
         "margin_total": margin_total,
         "margin_raw": margin,
     }
+
+
+# ---------- Black-Scholes delta (for delta-targeted strike selection) ----------
+# Matrix Calendar picks strikes by DELTA (~0.23), which none of the older
+# builders needed. Kite's quote API returns no greeks, so we back IV out of
+# the traded premium and differentiate. Same maths as the GEX probe; the
+# only consumer today is _build_matrix_calendar.
+
+def _norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _bs_price(S, K, T, sig, cp, r=0.065, q=0.012):
+    if T <= 0 or sig <= 0:
+        return max(0.0, (S - K) if cp == "CE" else (K - S))
+    d1 = (math.log(S / K) + (r - q + 0.5 * sig * sig) * T) / (sig * math.sqrt(T))
+    d2 = d1 - sig * math.sqrt(T)
+    if cp == "CE":
+        return S * math.exp(-q * T) * _norm_cdf(d1) - K * math.exp(-r * T) * _norm_cdf(d2)
+    return K * math.exp(-r * T) * _norm_cdf(-d2) - S * math.exp(-q * T) * _norm_cdf(-d1)
+
+
+def _implied_vol(price, S, K, T, cp):
+    """Bisection IV. Returns None when the quote can't support one (price at
+    or below intrinsic, illiquid strike, expiry passed)."""
+    if price is None or price <= 0.05 or T <= 0:
+        return None
+    intrinsic = max(0.0, (S - K) if cp == "CE" else (K - S))
+    if price <= intrinsic + 0.05:
+        return None
+    lo, hi = 1e-4, 5.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        if _bs_price(S, K, T, mid, cp) > price:
+            hi = mid
+        else:
+            lo = mid
+    v = (lo + hi) / 2
+    return None if (v > 4.9 or v < 2e-4) else v
+
+
+def _bs_delta(price, S, K, T, cp, r=0.065, q=0.012):
+    """ABSOLUTE delta (0..1) implied by the traded premium. Absolute so a
+    0.23-delta put and a 0.23-delta call compare directly."""
+    sig = _implied_vol(price, S, K, T, cp)
+    if sig is None:
+        return None
+    d1 = (math.log(S / K) + (r - q + 0.5 * sig * sig) * T) / (sig * math.sqrt(T))
+    delta = math.exp(-q * T) * _norm_cdf(d1)
+    return abs(delta if cp == "CE" else delta - math.exp(-q * T))
 
 
 def _nearest_strike_in_chain(strikes: list, target: float) -> int:
@@ -1075,6 +1130,162 @@ def _build_triple_calendar(kite, instruments, spot, vix, today):
     return out
 
 
+def _build_matrix_calendar(kite, instruments, spot, vix, today):
+    """Matrix Calendar (Kundan Prajapati) — a RATIO calendar, not a classic or
+    diagonal one. Transcript rules, implemented verbatim:
+
+      WHEN: India VIX / IV ABOVE 20 (he stresses 20-25+; the edge is the
+        positive vega, which only pays when IV is rich and uncertain).
+        Also suited to frequent gap-up/gap-down tape.
+      ENTRY: Monday 3:16 PM. Zero adjustment thereafter — set and forget.
+      EXPIRY: sell the weekly that is ~8-10 days out, explicitly NOT
+        tomorrow's expiry ("ek din baad wali expiry mein nahi") — so a
+        Monday entry skips the Tuesday expiry and uses the next one.
+      STRUCTURE (per base lot):
+        SELL 2x ~0.23-delta CE   (weekly)      SELL 2x ~0.23-delta PE
+        BUY  1x  sold_CE + 500   (weekly)      BUY  1x  sold_PE - 500
+        BUY  1x  sold_CE strike  (MONTHLY)     BUY  1x  sold_PE strike
+        -> 4 sold lots, 4 bought lots: fully hedged, but the second hedge
+           sits in the monthly, which is what makes it a calendar and flips
+           position vega POSITIVE (an iron condor on the same strikes is
+           short vega and bleeds when IV spikes).
+      STRIKES: 100-point grid only — he explicitly rejects the 50s. Delta may
+        flex ~0.20-0.28 to keep the two sold premiums comparable (he moved to
+        0.26 when one side quoted Rs 13 against Rs 70).
+      EXIT: target +1.5%, stop -2%, hard time stop 2 days.
+
+    Returns filters_failed (not an error) when VIX is too low, so the card
+    still renders as monitor-only rather than vanishing."""
+    STRAT = "matrix_calendar"
+    fails = []
+    if vix is None:
+        fails.append("India VIX unavailable — cannot confirm the IV>20 gate")
+    elif vix < 20.0:
+        fails.append(f"India VIX {vix:.1f} < 20 — his hard gate; the positive-vega "
+                     f"edge needs rich IV, so this is monitor-only today")
+
+    exps = _option_expiries(instruments, "NIFTY", today)
+    if not exps:
+        return {"strategy": STRAT, "error": "no NIFTY option expiries"}
+    # "not tomorrow's expiry" — skip anything <= 3 DTE, take the next weekly
+    weekly = next((e for e in exps if 5 <= (e - today).days <= 12), None)
+    if weekly is None:
+        return {"strategy": STRAT,
+                "error": "no NIFTY weekly expiry in the 5-12 DTE window "
+                         "(he skips tomorrow's expiry and uses the next one)"}
+    monthly = next((e for e in exps if (e - weekly).days >= 7
+                    and _is_monthly_expiry(e, exps)), None)
+    if monthly is None:
+        monthly = next((e for e in exps if (e - weekly).days >= 14), None)
+    if monthly is None:
+        return {"strategy": STRAT, "error": "no monthly expiry after the sold weekly"}
+
+    chains = {}
+    for exp, ot in ((weekly, "CE"), (weekly, "PE"), (monthly, "CE"), (monthly, "PE")):
+        chains[(exp, ot)] = _option_chain(instruments, "NIFTY", exp, ot)
+        if not chains[(exp, ot)]:
+            return {"strategy": STRAT, "error": f"empty chain for {exp} {ot}"}
+
+    T = max((weekly - today).days, 1) / 365.0
+    lot_size = None
+
+    def _delta_candidates(ot):
+        """100-pt strikes on the correct side of spot, with |delta| in band,
+        quoted. Returns [(strike, premium, delta)] nearest-to-0.23 first."""
+        nonlocal lot_size
+        chain = chains[(weekly, ot)]
+        grid = [k for k in chain
+                if k % 100 == 0 and (k > spot if ot == "CE" else k < spot)
+                and abs(k - spot) <= 2000]
+        if not grid:
+            return []
+        syms = [f"NFO:{chain[k]['tradingsymbol']}" for k in grid]
+        q = _ltp_batch(kite, syms)
+        out = []
+        for k in grid:
+            ins = chain[k]
+            if lot_size is None:
+                lot_size = int(ins.get("lot_size") or 75)
+            px = q.get(f"NFO:{ins['tradingsymbol']}", {}).get("last_price")
+            d = _bs_delta(px, spot, k, T, ot)
+            if d is not None and 0.20 <= d <= 0.28:
+                out.append((k, px, d))
+        return sorted(out, key=lambda r: abs(r[2] - 0.23))
+
+    ce_cands, pe_cands = _delta_candidates("CE"), _delta_candidates("PE")
+    if not ce_cands or not pe_cands:
+        return {"strategy": STRAT,
+                "error": "no 100-pt strike with delta in the 0.20-0.28 band "
+                         f"(CE {len(ce_cands)}, PE {len(pe_cands)})"}
+
+    # He flexes delta to keep the two sold premiums comparable — pick the pair
+    # with the closest premiums, tie-broken by nearness to the 0.23 target.
+    best, best_score = None, None
+    for ck, cp_, cd in ce_cands[:6]:
+        for pk, pp, pd_ in pe_cands[:6]:
+            if cp_ is None or pp is None or cp_ <= 0 or pp <= 0:
+                continue
+            imbalance = abs(cp_ - pp) / max(cp_, pp)          # 0 = perfectly matched
+            drift = (abs(cd - 0.23) + abs(pd_ - 0.23)) / 2
+            score = imbalance + 2.0 * drift
+            if best_score is None or score < best_score:
+                best, best_score = (ck, cp_, cd, pk, pp, pd_), score
+    if best is None:
+        return {"strategy": STRAT, "error": "no quotable delta pair"}
+    ce_k, ce_px, ce_d, pe_k, pe_px, pe_d = best
+    lot_size = int(lot_size or 75)
+
+    hedge_ce, hedge_pe = ce_k + 500, pe_k - 500
+    spec = [
+        ("SELL", weekly,  ce_k,     "CE", 2),
+        ("SELL", weekly,  pe_k,     "PE", 2),
+        ("BUY",  weekly,  hedge_ce, "CE", 1),
+        ("BUY",  weekly,  hedge_pe, "PE", 1),
+        ("BUY",  monthly, ce_k,     "CE", 1),
+        ("BUY",  monthly, pe_k,     "PE", 1),
+    ]
+    for _, e, k, ot, _m in spec:
+        if k not in chains[(e, ot)]:
+            return {"strategy": STRAT, "error": f"strike {k} {ot} missing from {e} chain"}
+    syms = [f"NFO:{chains[(e,ot)][k]['tradingsymbol']}" for _, e, k, ot, _m in spec]
+    quotes = _ltp_batch(kite, syms)
+    legs = []
+    for (action, exp, k, ot, mult), sym in zip(spec, syms):
+        prem = quotes.get(sym, {}).get("last_price")
+        if prem is None:
+            return {"strategy": STRAT, "error": f"no quote for {sym}"}
+        legs.append({
+            "action": action, "transaction_type": action,
+            "tradingsymbol": sym.split(":", 1)[1],
+            "strike": int(k), "option_type": ot,
+            "leg_expiry": str(exp),
+            "premium": prem, "quantity": lot_size * mult,
+        })
+
+    out = _format_multileg(
+        STRAT, "Matrix Calendar (ratio: 2x short strangle, weekly wings + monthly calendar)",
+        f"weekly {weekly}, monthly {monthly}", lot_size, legs, kite)
+    out.update({
+        "weekly_expiry": str(weekly), "monthly_expiry": str(monthly),
+        "sold_ce": ce_k, "sold_pe": pe_k,
+        "sold_ce_delta": round(ce_d, 3), "sold_pe_delta": round(pe_d, 3),
+        "hedge_ce": hedge_ce, "hedge_pe": hedge_pe,
+        "target_pct": 1.5, "stop_pct": 2.0,
+        "max_hold_days": 2,
+        "time_stop": str(today + timedelta(days=2)),
+        # two expiries -> a single-expiry payoff curve would misprice the
+        # monthly legs, exactly as for Triple Calendar
+        "payoff_unsupported": True,
+        "filters_failed": fails or None,
+    })
+    return out
+
+
+def _is_monthly_expiry(e, all_exps) -> bool:
+    """True when `e` is the last expiry of its calendar month."""
+    return not any(x.year == e.year and x.month == e.month and x > e for x in all_exps)
+
+
 SCHEDULE_BUILDERS = {
     "edb":        _build_expiry_double_butterfly,
     "batman":     _build_batman,
@@ -1191,6 +1402,19 @@ def build_recommendations(kite, signals: dict, blocks: dict,
     # calendar trigger — it's buildable whenever its filters pass. Context
     # 'scheduled' = actionable (paper ledger opens it if flat); 'monitor' =
     # shown on the card but NOT actionable (filters failed).
+    # Matrix Calendar: Monday-only entry (3:16 PM). Off-Monday it is not
+    # offered at all — the entry day is structurally load-bearing (the sold
+    # weekly must be the ~8-12 DTE one, not tomorrow's).
+    if flags.get("is_monday"):
+        try:
+            mc = _build_matrix_calendar(kite, _get_instruments(), spot, vix, today)
+            if isinstance(mc, dict) and "context" not in mc:
+                mc["context"] = "monitor" if (mc.get("filters_failed") or mc.get("error")) else "scheduled"
+            out["matrix_calendar"] = mc
+        except Exception as e:
+            out["matrix_calendar"] = {"strategy": "matrix_calendar", "context": "monitor",
+                                      "error": f"{type(e).__name__}: {e}"}
+
     try:
         tc = _build_triple_calendar(kite, _get_instruments(), spot, vix, today)
         if isinstance(tc, dict) and "context" not in tc:

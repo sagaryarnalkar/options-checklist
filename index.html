@@ -1141,6 +1141,19 @@
       </div>
     </details>
 
+    <details class="card" data-strat="mc">
+      <summary>
+        <span class="stitle"><span class="caret">▸</span> Matrix Calendar <span class="today" data-today hidden>Action today</span></span><span class="qstats" data-strat-stats></span>
+      </summary>
+      <div class="section-body">
+        <div class="strat-meta">Monday 3:16 PM · ratio calendar · zero adjustment · <b>gate: India VIX &gt; 20</b> · SELL 2× ~0.23-delta CE + 2× ~0.23-delta PE in the 5–12 DTE weekly (deliberately NOT tomorrow's expiry) · BUY 1× wings 500 pts further OTM, same weekly · BUY 1× at the SAME sold strikes in the MONTHLY — the calendar leg that turns position vega POSITIVE · 100-pt strikes only, delta flexed 0.20–0.28 to keep both sold premiums comparable · Exit +1.5% / −2% ON MARGIN, hard 2-day time stop · No payoff chart (two expiries)</div>
+        <div class="inline-rec" data-strat-rec></div>
+        <div class="strat-status" data-strat-cond></div>
+        <div class="strat-roll" data-strat-roll></div>
+        <div class="strat-ref">Source: Kundan Prajapati (same author as Batman) — transcript in docs/strategies/. His claim is that it beats an iron condor on the same strikes in every regime because it is long vega. We verified the vega sign from first principles: this build is <b>+1.24 vega</b> vs <b>−10.62</b> for the equivalent condor, and on a 6-point IV spike it gains ₹13.9/unit where the condor loses ₹55.9. His win-rate claims are NOT verified. Paper-tracked at 10 lots.</div>
+      </div>
+    </details>
+
   </div>
 
   <!-- ============================ OI FLOW TAB ============================ -->
@@ -2443,7 +2456,7 @@
     nidhi_kalash:"Nidhi Kalash", golden_goose:"Golden Goose", panther:"Panther",
     ocean_treasure:"Ocean Treasure", gg_leaps:"Golden Goose LEAPS",
     batman:"Batman", no_brainer:"No Brainer NIFTY", edb:"Expiry Double Butterfly",
-    triple_calendar:"Triple Calendar",
+    triple_calendar:"Triple Calendar", matrix_calendar:"Matrix Calendar",
   };
   function renderRelaxations(rec){
     if (!rec.relaxations || !rec.relaxations.length) return "";
@@ -2606,7 +2619,7 @@
     gg: "golden_goose", panther: "panther", nk: "nidhi_kalash",
     ot: "ocean_treasure", gg_leaps: "gg_leaps",
     batman: "batman", nb: "no_brainer", edb: "edb",
-    tc: "triple_calendar",
+    tc: "triple_calendar", mc: "matrix_calendar",
   };
 
   // ---- Auto-checked strategy conditions (replaces the manual checklists) ----

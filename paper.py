@@ -18,7 +18,8 @@ What sync() does per strategy, in order:
      the expiry-day NIFTY close from the recorder's candles).
   2. EXIT if a rule fires — expired-settle first, then per strategy:
      GG/Panther/NK close on rollover context (rebuild reopens same run);
-     batman +2%; no_brainer +2.5%/−3%; triple_calendar +8% of debit / hard
+     batman +2%; no_brainer +2.5%/−3%; matrix_calendar +1.5%/−2% ON MARGIN
+     with a hard 2-day time stop; triple_calendar +8% of debit / hard
      time stop front−7d / −40% circuit; OT & GG-LEAPS on signal flip.
      Targets/stops fire on the GROSS structure move; the ledger records NET.
   3. If still open, ROLL the monthly hedge when due (PR #49): OT at T-4 from
@@ -164,6 +165,7 @@ def _close_cash(legs, leg_exps, quotes, conn, today_iso, spot) -> tuple:
     intrinsic vs that day's NIFTY close. Returns (cash, notes, leg_fills)
     where leg_fills = [(leg, px, settled_at_expiry)] for the cost model."""
     cash, notes, fills = 0.0, [], []
+    base = _leg_base(legs)      # weight per base lot — must match _entry_value
     for leg, lexp in zip(legs, leg_exps):
         px = quotes.get(leg["tradingsymbol"])
         settled = False
@@ -180,13 +182,31 @@ def _close_cash(legs, leg_exps, quotes, conn, today_iso, spot) -> tuple:
         if px is None:
             notes.append(f"{leg['tradingsymbol']}: NO QUOTE, mark degraded (used 0)")
             px = 0.0
-        cash += (-px) if leg["action"] == "SELL" else (+px)
+        mult = (leg.get("quantity") or base) / base
+        cash += ((-px) if leg["action"] == "SELL" else (+px)) * mult
         fills.append((leg, px, settled))
     return cash, notes, fills
 
 
+def _leg_base(legs) -> float:
+    """Units in ONE base lot = the smallest leg. Ratio structures (EDB /
+    Batman / No Brainer 1-2-1, Matrix Calendar 2:1) always carry their base
+    as the smallest leg, so this recovers the multiplier without threading
+    lot_size through every call site."""
+    qs = [l.get("quantity") or 0 for l in legs if (l.get("quantity") or 0) > 0]
+    return float(min(qs)) if qs else 1.0
+
+
 def _entry_value(legs) -> float:
-    return sum((l["premium"] or 0) * (1 if l["action"] == "SELL" else -1) for l in legs)
+    """Net cash per BASE unit, SELL +, BUY −, WEIGHTED BY LEG SIZE.
+
+    The weighting is not cosmetic: without it a 1-2-1 fly is priced as a
+    1-1-1 that was never traded (a real EDB entry stored −94.70/unit when
+    the true net was −30.60). _close_cash weights identically, so the
+    invariant realized_gross = (entry_value + close_cash) x units holds."""
+    base = _leg_base(legs)
+    return sum((l["premium"] or 0) * (1 if l["action"] == "SELL" else -1)
+               * ((l.get("quantity") or base) / base) for l in legs)
 
 
 # ---- Monthly hedge rolls (OT / GG-LEAPS) ----
@@ -329,8 +349,10 @@ def _open_trade(conn, strategy, rec, now_iso) -> int:
     ev = _entry_value(legs)
     lot_size = int(rec.get("lot_size") or 75)
     meta = {k: rec.get(k) for k in
-            ("structure", "target_pct", "time_stop", "front_expiry", "back_expiry",
-             "wing_offset", "debit_per_unit", "credit_per_unit", "margin_total")
+            ("structure", "target_pct", "stop_pct", "time_stop", "front_expiry",
+             "back_expiry", "wing_offset", "debit_per_unit", "credit_per_unit",
+             "margin_total", "max_hold_days", "weekly_expiry", "monthly_expiry",
+             "sold_ce", "sold_pe", "sold_ce_delta", "sold_pe_delta")
             if rec.get(k) is not None}
     ecosts = _entry_costs(legs, lot_size * PAPER_LOTS)
     cur = conn.execute(
@@ -374,6 +396,29 @@ def _exit_reason(strategy, pos, upnl_unit, rec, signal, today: date) -> Optional
             return "time-stop(front-7d)"
         if upnl_unit <= -0.40 * basis:
             return "catastrophe-40%"
+        return None
+    if strategy == "matrix_calendar":
+        # His 1.5% / 2% are ON DEPLOYED CAPITAL, not on premium — in the video
+        # he sizes a ~Rs 10 lakh position and reads the P&L against it. So
+        # measure against margin; fall back to the premium basis only if the
+        # margin call failed, and say so in the reason string.
+        units = pos["lot_size"] * pos["lots"]
+        margin = meta.get("margin_total")
+        if margin:
+            cap = float(margin) * pos["lots"]
+            pnl = upnl_unit * units
+            if pnl >= 0.015 * cap:
+                return "target+1.5%(margin)"
+            if pnl <= -0.02 * cap:
+                return "stop-2%(margin)"
+        else:
+            if upnl_unit >= 0.015 * basis:
+                return "target+1.5%(premium-basis)"
+            if upnl_unit <= -0.02 * basis:
+                return "stop-2%(premium-basis)"
+        ts = meta.get("time_stop")
+        if ts and today.isoformat() >= ts:
+            return "time-stop(2d)"
         return None
     if strategy == "batman":
         return "target+2%" if upnl_unit >= 0.02 * basis else None
