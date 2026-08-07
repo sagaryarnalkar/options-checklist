@@ -475,6 +475,19 @@
   .wc-meta{ display:flex; flex-wrap:wrap; gap:4px 14px; font-family:var(--mono);
     font-size:11px; color:var(--muted); }
   .wc-foot{ font-size:10.5px; color:var(--muted); margin-top:8px; line-height:1.5; }
+  .wc-tilt{ margin:10px 0 2px; }
+  .wc-tilt-hd{ display:flex; align-items:baseline; gap:8px; font-size:11px;
+    text-transform:uppercase; letter-spacing:.06em; color:var(--muted); }
+  .wc-tilt-hd b{ font-family:var(--mono); font-size:17px; letter-spacing:-.02em; }
+  .wc-gauge{ position:relative; height:12px; margin:6px 0 3px;
+    background:linear-gradient(90deg, var(--neg-bg), var(--panel-2) 50%, var(--pos-bg));
+    border:1px solid var(--border); }
+  .wc-gauge .mid{ position:absolute; left:50%; top:-2px; bottom:-2px; width:1px;
+    background:var(--muted); opacity:.7; }
+  .wc-gauge .pin{ position:absolute; top:-3px; bottom:-3px; width:3px;
+    background:var(--color-text); transform:translateX(-50%); }
+  .wc-gauge-lbl{ display:flex; justify-content:space-between; font-family:var(--mono);
+    font-size:9.5px; color:var(--muted); }
   :root[data-skin="fintech"] .dir-alert{ border-radius:10px; }
   :root[data-skin="fintech"] .pt-live,:root[data-skin="fintech"] .pt-more{ border-radius:12px; }
   .pt-void{ opacity:.55; }
@@ -2283,6 +2296,30 @@
       <circle cx="${X(S.length-1).toFixed(1)}" cy="${Y(S[S.length-1]).toFixed(1)}" r="2.6" fill="var(${col})"/>
     </svg>`;
   }
+  // Bear/bull pressure gauge. The HEADLINE WCash number is deliberately
+  // non-directional (writers bleed both ways, +0.20 vs signed move) — but the
+  // CALL-vs-PUT split is: +0.765 vs the day's signed move, sign agrees 98% of
+  // sessions. It is COINCIDENT though: at 11:00 it calls the afternoon right
+  // only 43% of the time (worse than chance), so the copy says "right now",
+  // never "next".
+  function _wcTilt(w){
+    if (w.tilt_pct == null) return "";
+    const t = Math.max(-100, Math.min(100, w.tilt_pct));
+    const col = Math.abs(t) < 20 ? "--muted" : (t > 0 ? "--pos" : "--neg");
+    const lbl = (w.tilt_label || "").toUpperCase();
+    const cr = v => `${v<0?"−":"+"}₹${Math.abs(v).toLocaleString("en-IN",{maximumFractionDigits:0})}cr`;
+    return `<div class="wc-tilt">
+      <div class="wc-tilt-hd"><span>pressure now</span>
+        <b style="color:var(${col})">${t>0?"+":""}${t.toFixed(0)}%</b>
+        <span style="color:var(${col});font-weight:600">${lbl}</span></div>
+      <div class="wc-gauge" title="put-writer P&L minus call-writer P&L, normalised">
+        <span class="mid"></span>
+        <span class="pin" style="left:${(t+100)/2}%"></span>
+      </div>
+      <div class="wc-gauge-lbl"><span>bearish</span><span>balanced</span><span>bullish</span></div>
+      <div class="wc-meta" style="margin-top:3px">call writers ${cr(w.ce_cr)} · put writers ${cr(w.pe_cr)}</div>
+    </div>`;
+  }
   function renderWCash(d){
     const el = document.getElementById("wcashBody");
     if (!el) return;
@@ -2300,6 +2337,7 @@
         <span style="margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted)">${w.day}</span>
       </div>
       <div class="wc-meta">${hint}</div>
+      ${_wcTilt(w)}
       ${_wcSpark(w)}
       <div class="wc-meta">
         <span>trough ${cr(w.trough_cr)}</span><span>peak ${cr(w.peak_cr)}</span>
@@ -2307,9 +2345,12 @@
       </div>
       <div class="wc-foot">Mark-to-market of everyone short options in NIFTY (ATM±10), the cohort
         your book sits in — every open contract has exactly one writer, so this needs no assumption
-        about who holds what. <b>A state gauge, not a forecast:</b> on our 40 recorded sessions it
-        tracks the day's realised move (−0.62) but shows no predictive power over the rest of the
-        day (−0.01). Read it as "how much stress is in the room now".</div>`;
+        about who holds what. <b>A state gauge, not a forecast:</b> on our 40 recorded sessions the
+        total tracks the day's realised move (−0.62) but shows no predictive power over the rest of
+        the day (−0.01). The bull/bear % is the call-vs-put split — it does track direction
+        (+0.77, sign right on 98% of sessions) but <b>coincidently</b>: at 11:00 it called the
+        afternoon right only 43% of the time, worse than a coin flip. Read both as "where the
+        stress is right now", never as "what happens next".</div>`;
   }
 
   // ---------- live data (data.json from compute.py) ----------
