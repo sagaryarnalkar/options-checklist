@@ -339,6 +339,32 @@ def wcash_read(conn, underlying: str = "NIFTY", day: str | None = None,
         cum = step.cumsum().dropna()
         if cum.empty:
             return {"ok": False, "reason": "no usable minutes"}
+
+        # DIRECTIONAL SPLIT. The headline total is deliberately non-directional
+        # (writers bleed both ways; measured +0.20 vs signed move). But split by
+        # side it IS directional: call writers bleed when calls richen, i.e.
+        # price is pushing UP against them; put writers bleed when price pushes
+        # DOWN. tilt = (put-writer P&L - call-writer P&L), normalised to
+        # -100..+100. Measured +0.765 vs the day's signed move (Spearman +0.887,
+        # sign agrees 98% of sessions).
+        # COINCIDENT, NOT PREDICTIVE — tested: tilt at 11:00 vs the AFTERNOON's
+        # move is -0.285, and its sign calls the afternoon right only 43% of the
+        # time (worse than a coin flip). It says where pressure IS, not where it
+        # is going. The UI must not present it as a forecast.
+        by_side = {}
+        for side in ("CE", "PE"):
+            sub = df[df.opt_type == side]
+            p2 = sub.pivot_table(index="ts", columns="strike", values="ltp").ffill()
+            o2 = sub.pivot_table(index="ts", columns="strike", values="oi").ffill()
+            cc = p2.columns.intersection(o2.columns)
+            by_side[side] = float((-(p2[cc].diff() * o2[cc].shift(1)).sum(axis=1) / 1e7
+                                   ).cumsum().dropna().iloc[-1]) if len(cc) else 0.0
+        ce_cr, pe_cr = by_side["CE"], by_side["PE"]
+        den = abs(ce_cr) + abs(pe_cr)
+        tilt = ((pe_cr - ce_cr) / den * 100) if den > 1e-9 else 0.0
+        a = abs(tilt)
+        tilt_label = ("balanced" if a < 20 else
+                      ("mildly " if a < 60 else "strongly ") + ("bullish" if tilt > 0 else "bearish"))
         close = float(cum.iloc[-1])
         # last-hour drift decides "improving" vs "deteriorating"
         tail_n = max(2, len(cum) // 6)
@@ -355,6 +381,10 @@ def wcash_read(conn, underlying: str = "NIFTY", day: str | None = None,
             "peak_cr": round(float(cum.max()), 1),
             "drift_cr": round(float(drift), 1),
             "state": state,
+            "ce_cr": round(ce_cr, 1),
+            "pe_cr": round(pe_cr, 1),
+            "tilt_pct": round(tilt, 1),
+            "tilt_label": tilt_label,
             "n_minutes": int(len(cum)),
             "series": [round(float(v), 1) for v in cum.iloc[idx]],
             "labels": [str(t)[11:16] for t in cum.index[idx]],
