@@ -467,6 +467,17 @@
   .dir-trig{ font-family:var(--mono); font-size:11px; }
   .dir-trig b{ color:var(--color-text); }
   .dir-trig.live{ color:var(--pos); font-weight:600; }
+  .pl-verdict{ display:flex; flex-wrap:wrap; gap:4px 10px; align-items:baseline; margin-bottom:4px; }
+  .pl-dir{ font-weight:800; font-size:15px; letter-spacing:-.01em; }
+  .pl-vol{ font-size:11px; color:var(--muted); }
+  .pl-nums{ display:flex; flex-wrap:wrap; gap:2px 12px; font-family:var(--mono);
+    font-size:11px; color:var(--muted); margin-top:2px; }
+  .pl-chart{ width:100%; height:auto; display:block; margin:6px 0 3px;
+    background:var(--panel-2); border:1px solid var(--border); }
+  .pl-legend{ display:flex; flex-wrap:wrap; gap:2px 10px; font-family:var(--mono);
+    font-size:9.5px; color:var(--muted); }
+  .pl-legend i{ display:inline-block; width:8px; height:2px; vertical-align:middle;
+    margin-right:3px; }
   .wc-head{ display:flex; flex-wrap:wrap; gap:6px 12px; align-items:baseline; }
   .wc-val{ font-family:var(--mono); font-size:22px; font-weight:700; letter-spacing:-.02em; }
   .wc-state{ font-size:11px; text-transform:uppercase; letter-spacing:.06em; font-weight:600; }
@@ -991,7 +1002,11 @@
 
         </div>
         <div class="oi-side-panel">
-        <div class="oi-side-title" style="margin-top:12px">Top 10 BIG prints (today)</div>
+        <div class="oi-side-title">Premium ladder — change since 09:15</div>
+        <div id="oiLadder"><div class="note">no data yet</div></div>
+        </div>
+        <div class="oi-side-panel">
+        <div class="oi-side-title">Top 10 BIG prints (today)</div>
         <div class="oi-side-body" id="oiBigList"><div class="note">No data yet.</div></div>
         </div>
       </aside>
@@ -1825,6 +1840,88 @@
     }
     return color;
   }
+  // ---------- Premium ladder (#76) ----------
+  // The disaggregated view of WCash: per-strike premium change since 09:15.
+  // Two axes, because one number can't separate them:
+  //   SKEW     = PE change - CE change  -> which side is richening
+  //   STRADDLE = ATM CE + ATM PE change -> pure vol/time (delta-neutral)
+  // The skew axis is COINCIDENT (measured on the WCash split: +0.77 vs the
+  // day's realised move, but -0.29 against the afternoon from 11:00), so the
+  // copy says "pressure now" and never forecasts.
+  function renderLadder(d){
+    const el = document.getElementById("oiLadder");
+    if (!el) return;
+    const l = (d && (d.nifty || d.NIFTY)) || null;
+    if (!l || !l.ok){
+      el.innerHTML = `<div class="note">${(l && l.reason) || "no data"}</div>`;
+      return;
+    }
+    const dirCol = l.direction === "bearish" ? "--neg"
+                 : (l.direction === "bullish" ? "--pos" : "--muted");
+    const S = l.series || {};
+    const labels = Object.keys(S);
+    const W = 320, H = 108, PX = 3, PT = 6, PB = 6;
+    const all = labels.flatMap(k => S[k]).filter(v => v != null);
+    let out = "";
+    if (all.length){
+      let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
+      const pad = Math.max((hi - lo) * 0.08, 1); lo -= pad; hi += pad;
+      const n = S[labels[0]].length;
+      const X = i => PX + i * (W - 2 * PX) / Math.max(n - 1, 1);
+      const Y = v => PT + (hi - v) * (H - PT - PB) / (hi - lo);
+      // CE shades red (losing when spot rises is the seller's win), PE green
+      const paths = labels.map(k => {
+        const isCE = k.includes("CE");
+        const depth = k === "ATM CE" || k === "ATM PE" ? 0
+                    : parseInt(k.replace(/\D+/g, ""), 10) || 0;
+        const alpha = 1 - depth * 0.13;
+        const col = withAlpha(cssv(isCE ? "--neg" : "--pos"), Math.max(0.3, alpha));
+        const dash = depth % 2 === 1 ? ' stroke-dasharray="3,2"' : "";
+        const dpath = S[k].map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+        return `<path d="${dpath}" fill="none" stroke="${col}" stroke-width="${depth ? 1 : 1.7}"${dash}/>`;
+      }).join("");
+      out = `<svg class="pl-chart" viewBox="0 0 ${W} ${H}" role="img"
+          aria-label="Premium change since 09:15 for ATM and OTM strikes">
+        <line x1="${PX}" y1="${Y(0).toFixed(1)}" x2="${W-PX}" y2="${Y(0).toFixed(1)}"
+          stroke="var(--muted)" stroke-width="1" opacity=".55" stroke-dasharray="3,3"/>
+        ${paths}</svg>`;
+    }
+    const sgn = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(0);
+    el.innerHTML = `
+      <div class="pl-verdict">
+        <span class="pl-dir" style="color:var(${dirCol})">${l.dir_word}</span>
+        <span class="pl-vol">${l.vol_word}</span>
+      </div>
+      <div class="pl-nums">
+        <span>spot ${sgn(l.spot_chg)} (${l.spot_chg_pct >= 0 ? "+" : ""}${l.spot_chg_pct}%)</span>
+        <span>skew ${l.skew_pct >= 0 ? "+" : ""}${l.skew_pct}%</span>
+        <span>straddle ${l.straddle_now} (${l.straddle_pct >= 0 ? "+" : ""}${l.straddle_pct}%)</span>
+      </div>
+      ${out}
+      <div class="pl-legend">
+        <span><i style="background:var(--neg)"></i>CE (calls)</span>
+        <span><i style="background:var(--pos)"></i>PE (puts)</span>
+        <span>solid = ATM · fading/dashed = OTM 1–5</span>
+      </div>
+      <div class="pl-nums" style="margin-top:4px">
+        <span>Σ CE ${sgn(l.ce_chg)}</span><span>Σ PE ${sgn(l.pe_chg)}</span>
+        <span>ATM ${l.atm_strike}</span><span>${l.n_minutes} min</span>
+      </div>
+      <div class="note" style="font-size:10px;margin-top:5px">Skew = which side is
+        richening <b>right now</b> (coincident with the move, not a forecast).
+        Straddle = the delta-neutral vol read: falling means theta is paying you
+        even if price moved.</div>`;
+  }
+
+  async function loadLadder(){
+    try {
+      const r = await fetch("data.json?_=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) return;
+      const d = await r.json();
+      renderLadder(d.premium_ladder || {});
+    } catch(e){ /* rail panel is non-critical */ }
+  }
+
   function chartTheme(){
     const text = cssv("--color-text");
     return {
@@ -1969,6 +2066,7 @@
       const d = await r.json();
       renderOiData(d, { keepView: silent });
       loadLLT(days);
+      loadLadder();
     } catch(e) {
       setOiStatus("Failed to load aggregate: " + e.message, "error");
     }
