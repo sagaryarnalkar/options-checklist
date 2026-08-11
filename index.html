@@ -472,8 +472,10 @@
   .pl-vol{ font-size:11px; color:var(--muted); }
   .pl-nums{ display:flex; flex-wrap:wrap; gap:2px 12px; font-family:var(--mono);
     font-size:11px; color:var(--muted); margin-top:2px; }
-  .pl-chart{ width:100%; height:auto; display:block; margin:6px 0 3px;
-    background:var(--panel-2); border:1px solid var(--border); }
+  .pl-chart{ width:100%; height:auto; display:block; margin:2px 0 4px; }
+  #ladderCard .oi-chart-title{ align-items:baseline; }
+  .pl-badge{ display:inline-flex; align-items:baseline; gap:8px; white-space:nowrap; }
+  .pl-badge .pl-dir{ font-size:14px; }
   .pl-legend{ display:flex; flex-wrap:wrap; gap:2px 10px; font-family:var(--mono);
     font-size:9.5px; color:var(--muted); }
   .pl-legend i{ display:inline-block; width:8px; height:2px; vertical-align:middle;
@@ -982,6 +984,16 @@
           </div>
           <div id="oiPriceChart" class="oi-chart oi-chart-merged"></div>
         </div>
+
+        <div class="oi-chart-card" id="ladderCard">
+          <div class="oi-chart-title">
+            <span>Premium ladder — change since 09:15 · ATM and OTM 1–5, both sides
+              (<span style="color:var(--neg)">▮ calls</span> ·
+               <span style="color:var(--pos)">▮ puts</span>)</span>
+            <span id="ladderVerdict"></span>
+          </div>
+          <div id="oiLadder"><div class="note">no data yet</div></div>
+        </div>
       </div>
       <aside class="oi-side">
         <div class="oi-side-panel">
@@ -1000,10 +1012,6 @@
         <div class="oi-side-title">LLT prints — futures <span class="oi-live-dot" style="width:6px;height:6px;display:inline-block;border-radius:50%;margin-left:4px"></span></div>
         <div class="oi-side-body" id="oiLltList"><div class="note">no futures data yet</div></div>
 
-        </div>
-        <div class="oi-side-panel">
-        <div class="oi-side-title">Premium ladder — change since 09:15</div>
-        <div id="oiLadder"><div class="note">no data yet</div></div>
         </div>
         <div class="oi-side-panel">
         <div class="oi-side-title">Top 10 BIG prints (today)</div>
@@ -1850,74 +1858,88 @@
   // copy says "pressure now" and never forecasts.
   function renderLadder(d){
     const el = document.getElementById("oiLadder");
+    const badge = document.getElementById("ladderVerdict");
     if (!el) return;
+    const setBadge = html => { if (badge) badge.innerHTML = html; };
     const l = (d && (d.nifty || d.NIFTY)) || null;
     if (!l){
-      // key absent entirely = compute.py has not run since this shipped.
-      // Say so, instead of a bare "no data" that reads like a failure.
+      setBadge("");
       el.innerHTML = `<div class="note">Not computed yet — this fills in on the next
         <b>Refresh</b> (or the 3:16 PM scheduled run).</div>`;
       return;
     }
     if (!l.ok){
+      setBadge("");
       el.innerHTML = `<div class="note">Unavailable: ${l.reason || "unknown"}</div>`;
       return;
     }
     const dirCol = l.direction === "bearish" ? "--neg"
                  : (l.direction === "bullish" ? "--pos" : "--muted");
+    setBadge(`<span class="pl-badge">
+      <b class="pl-dir" style="color:var(${dirCol})">${l.dir_word}</b>
+      <span class="pl-vol">${l.vol_word}</span></span>`);
+
     const S = l.series || {};
     const labels = Object.keys(S);
-    const W = 320, H = 108, PX = 3, PT = 6, PB = 6;
+    if (!labels.length){ el.innerHTML = `<div class="note">no series</div>`; return; }
+    // Full-width geometry now that this sits under the chart, not in the rail.
+    const W = 1040, H = 190, PX = 46, PT = 12, PB = 24;
     const all = labels.flatMap(k => S[k]).filter(v => v != null);
-    let out = "";
-    if (all.length){
-      let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
-      const pad = Math.max((hi - lo) * 0.08, 1); lo -= pad; hi += pad;
-      const n = S[labels[0]].length;
-      const X = i => PX + i * (W - 2 * PX) / Math.max(n - 1, 1);
-      const Y = v => PT + (hi - v) * (H - PT - PB) / (hi - lo);
-      // CE shades red (losing when spot rises is the seller's win), PE green
-      const paths = labels.map(k => {
-        const isCE = k.includes("CE");
-        const depth = k === "ATM CE" || k === "ATM PE" ? 0
-                    : parseInt(k.replace(/\D+/g, ""), 10) || 0;
-        const alpha = 1 - depth * 0.13;
-        const col = withAlpha(cssv(isCE ? "--neg" : "--pos"), Math.max(0.3, alpha));
-        const dash = depth % 2 === 1 ? ' stroke-dasharray="3,2"' : "";
-        const dpath = S[k].map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
-        return `<path d="${dpath}" fill="none" stroke="${col}" stroke-width="${depth ? 1 : 1.7}"${dash}/>`;
-      }).join("");
-      out = `<svg class="pl-chart" viewBox="0 0 ${W} ${H}" role="img"
-          aria-label="Premium change since 09:15 for ATM and OTM strikes">
-        <line x1="${PX}" y1="${Y(0).toFixed(1)}" x2="${W-PX}" y2="${Y(0).toFixed(1)}"
-          stroke="var(--muted)" stroke-width="1" opacity=".55" stroke-dasharray="3,3"/>
-        ${paths}</svg>`;
-    }
+    let lo = Math.min(0, ...all), hi = Math.max(0, ...all);
+    const pad = Math.max((hi - lo) * 0.08, 1); lo -= pad; hi += pad;
+    const n = S[labels[0]].length;
+    const X = i => PX + i * (W - PX - 12) / Math.max(n - 1, 1);
+    const Y = v => PT + (hi - v) * (H - PT - PB) / (hi - lo);
+
+    // y gridlines at 0 and the extremes
+    const ticks = [lo + (hi - lo) * 0.25, 0, hi - (hi - lo) * 0.25]
+      .map(v => Math.round(v)).filter((v, i, a) => a.indexOf(v) === i);
+    const grid = ticks.map(v => `
+      <line x1="${PX}" y1="${Y(v).toFixed(1)}" x2="${W-12}" y2="${Y(v).toFixed(1)}"
+        stroke="var(${v === 0 ? "--muted" : "--border"})" stroke-width="1"
+        opacity="${v === 0 ? .6 : .5}"${v === 0 ? ' stroke-dasharray="4,3"' : ""}/>
+      <text x="${PX-6}" y="${(Y(v)+3).toFixed(1)}" text-anchor="end" font-size="9.5"
+        fill="var(--muted)" font-family="var(--mono)">${v > 0 ? "+" : ""}${v}</text>`).join("");
+
+    // time axis — every ~6th label, matching the candle chart's cadence
+    const tl = l.labels || [];
+    const step = Math.max(1, Math.round(n / 8));
+    const xaxis = tl.map((t, i) => (i % step === 0 || i === n - 1)
+      ? `<text x="${X(i).toFixed(1)}" y="${H-8}" text-anchor="middle" font-size="9.5"
+           fill="var(--muted)" font-family="var(--mono)">${t}</text>` : "").join("");
+
+    const paths = labels.map(k => {
+      const isCE = k.includes("CE");
+      const depth = (k === "ATM CE" || k === "ATM PE") ? 0
+                  : (parseInt(k.replace(/\D+/g, ""), 10) || 0);
+      const col = withAlpha(cssv(isCE ? "--neg" : "--pos"), Math.max(0.32, 1 - depth * 0.13));
+      const dash = depth % 2 === 1 ? ' stroke-dasharray="4,3"' : "";
+      const d2 = S[k].map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+      return `<path d="${d2}" fill="none" stroke="${col}" stroke-width="${depth ? 1.1 : 2}"${dash}/>`;
+    }).join("");
+    // label the two ATM lines at the right edge — the ones that matter most
+    const endLbl = ["ATM CE", "ATM PE"].filter(k => S[k]).map(k => {
+      const v = S[k][n-1], isCE = k.includes("CE");
+      return `<text x="${(X(n-1)+4).toFixed(1)}" y="${(Y(v)+3).toFixed(1)}" font-size="9.5"
+        font-family="var(--mono)" fill="var(${isCE ? "--neg" : "--pos"})">${k.slice(4)} ${v>=0?"+":""}${v.toFixed(0)}</text>`;
+    }).join("");
+
     const sgn = v => (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(0);
     el.innerHTML = `
-      <div class="pl-verdict">
-        <span class="pl-dir" style="color:var(${dirCol})">${l.dir_word}</span>
-        <span class="pl-vol">${l.vol_word}</span>
-      </div>
+      <svg class="pl-chart" viewBox="0 0 ${W} ${H}" role="img"
+        aria-label="Premium change since 09:15 for ATM and OTM strikes">
+        ${grid}${paths}${endLbl}${xaxis}</svg>
       <div class="pl-nums">
         <span>spot ${sgn(l.spot_chg)} (${l.spot_chg_pct >= 0 ? "+" : ""}${l.spot_chg_pct}%)</span>
         <span>skew ${l.skew_pct >= 0 ? "+" : ""}${l.skew_pct}%</span>
-        <span>straddle ${l.straddle_now} (${l.straddle_pct >= 0 ? "+" : ""}${l.straddle_pct}%)</span>
-      </div>
-      ${out}
-      <div class="pl-legend">
-        <span><i style="background:var(--neg)"></i>CE (calls)</span>
-        <span><i style="background:var(--pos)"></i>PE (puts)</span>
-        <span>solid = ATM · fading/dashed = OTM 1–5</span>
-      </div>
-      <div class="pl-nums" style="margin-top:4px">
+        <span>ATM straddle ${l.straddle_now} (${l.straddle_pct >= 0 ? "+" : ""}${l.straddle_pct}%)</span>
         <span>Σ CE ${sgn(l.ce_chg)}</span><span>Σ PE ${sgn(l.pe_chg)}</span>
-        <span>ATM ${l.atm_strike}</span><span>${l.n_minutes} min</span>
+        <span>ATM ${l.atm_strike}</span><span>solid = ATM · fading/dashed = OTM 1–5</span>
       </div>
-      <div class="note" style="font-size:10px;margin-top:5px">Skew = which side is
+      <div class="note" style="font-size:10.5px;margin-top:3px">Skew = which side is
         richening <b>right now</b> (coincident with the move, not a forecast).
-        Straddle = the delta-neutral vol read: falling means theta is paying you
-        even if price moved.</div>`;
+        ATM straddle = the delta-neutral volatility read: falling means theta is paying
+        you even if price moved.</div>`;
   }
 
   async function loadLadder(){
@@ -1926,7 +1948,7 @@
       if (!r.ok) return;
       const d = await r.json();
       renderLadder(d.premium_ladder || {});
-    } catch(e){ /* rail panel is non-critical */ }
+    } catch(e){ /* rail/secondary panel — never block the main chart */ }
   }
 
   function chartTheme(){
