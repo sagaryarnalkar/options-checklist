@@ -393,6 +393,119 @@ def wcash_read(conn, underlying: str = "NIFTY", day: str | None = None,
         return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
 
 
+# ---------- Premium ladder: change since the 09:15 baseline ----------
+# The disaggregated view of what WCash sums up. WCash gives one OI-weighted
+# number; this shows the SHAPE underneath it, strike by strike.
+#
+# Why it earns its place: it separates the two forces that move a seller's
+# book, which a single number cannot.
+#   SKEW      = PE change - CE change  -> which side is richening (direction)
+#   STRADDLE  = ATM CE change + ATM PE change -> pure vol/time, delta-neutral
+# A day where spot falls 130 pts, calls lose 120 and puts end FLAT is not a
+# "bearish day" in any useful sense — it is a volatility collapse that paid
+# the seller despite the move. Only the two axes together say that.
+#
+# HONESTY: the skew axis is COINCIDENT, not predictive. We measured exactly
+# this family on the WCash call/put split: +0.765 vs the day's realised move
+# but -0.285 against the AFTERNOON once you stand at 11:00. The UI says
+# "pressure now", never "next".
+
+def premium_ladder(conn, underlying: str = "NIFTY", day: str | None = None,
+                   otm: int = 5, points: int = 60) -> dict:
+    """ATM + OTM 1..N premium change vs the session's first tick, both sides."""
+    try:
+        if day is None:
+            row = conn.execute("SELECT MAX(DATE(ts)) FROM chain_snapshot "
+                               "WHERE underlying=?", (underlying,)).fetchone()
+            day = row[0] if row else None
+        if not day:
+            return {"ok": False, "reason": "no chain data"}
+        rows = conn.execute(
+            "SELECT ts, strike, opt_type, ltp, spot FROM chain_snapshot "
+            "WHERE underlying=? AND DATE(ts)=? ORDER BY ts", (underlying, day)).fetchall()
+        if len(rows) < 50:
+            return {"ok": False, "reason": f"only {len(rows)} rows for {day}"}
+        df = pd.DataFrame([dict(r) for r in rows])
+        piv = df.pivot_table(index="ts", columns=["strike", "opt_type"],
+                             values="ltp").ffill()
+        if piv.empty:
+            return {"ok": False, "reason": "no premium series"}
+        spot = df.groupby("ts").spot.first()
+        spot_open = float(spot.iloc[0])
+        # strike step from the recorded grid (NIFTY 50, BANKNIFTY 100)
+        ks = sorted({int(k) for k, _ in piv.columns})
+        step = min((b - a) for a, b in zip(ks, ks[1:])) if len(ks) > 1 else 50
+        # ATM pinned to the OPEN, so every series shares one baseline
+        atm = min(ks, key=lambda k: abs(k - spot_open))
+
+        wanted = []
+        for i in range(0, otm + 1):
+            wanted.append((atm + i * step, "CE", "ATM CE" if i == 0 else f"OTM CE {i}"))
+            wanted.append((atm - i * step, "PE", "ATM PE" if i == 0 else f"OTM PE {i}"))
+        idx = np.linspace(0, len(piv) - 1, min(points, len(piv))).astype(int)
+        legs, series = [], {}
+        for k, ot, label in wanted:
+            if (k, ot) not in piv.columns:
+                continue
+            s = piv[(k, ot)].astype(float)
+            base = float(s.iloc[0])
+            chg = s - base
+            legs.append({"label": label, "strike": int(k), "opt_type": ot,
+                         "open": round(base, 2), "now": round(float(s.iloc[-1]), 2),
+                         "change": round(float(chg.iloc[-1]), 2)})
+            series[label] = [round(float(v), 2) for v in chg.iloc[idx]]
+        if not legs:
+            return {"ok": False, "reason": "no ATM/OTM strikes present"}
+
+        ce_chg = sum(l["change"] for l in legs if l["opt_type"] == "CE")
+        pe_chg = sum(l["change"] for l in legs if l["opt_type"] == "PE")
+        atm_ce = next((l for l in legs if l["label"] == "ATM CE"), None)
+        atm_pe = next((l for l in legs if l["label"] == "ATM PE"), None)
+        straddle_open = (atm_ce["open"] + atm_pe["open"]) if (atm_ce and atm_pe) else None
+        straddle_now = (atm_ce["now"] + atm_pe["now"]) if (atm_ce and atm_pe) else None
+        straddle_pct = (round((straddle_now / straddle_open - 1) * 100, 1)
+                        if straddle_open else None)
+        den = abs(ce_chg) + abs(pe_chg)
+        skew = round((pe_chg - ce_chg) / den * 100, 1) if den > 1e-9 else 0.0
+
+        # two axes -> one plain-English read
+        a = abs(skew)
+        if a < 20:
+            direction, dir_word = "balanced", "BALANCED"
+        elif skew > 0:
+            direction = "bearish"
+            dir_word = ("MILDLY BEARISH" if a < 60 else "BEARISH")
+        else:
+            direction = "bullish"
+            dir_word = ("MILDLY BULLISH" if a < 60 else "BULLISH")
+        if straddle_pct is None:
+            vol_state, vol_word = "unknown", ""
+        elif straddle_pct <= -10:
+            vol_state, vol_word = "crushed", "vol crushed — theta paid"
+        elif straddle_pct >= 10:
+            vol_state, vol_word = "bid", "vol bid — movement being priced in"
+        else:
+            vol_state, vol_word = "flat", "vol flat"
+        return {
+            "ok": True, "day": str(day), "underlying": underlying,
+            "atm_strike": int(atm), "strike_step": int(step),
+            "spot_open": round(spot_open, 2), "spot_now": round(float(spot.iloc[-1]), 2),
+            "spot_chg": round(float(spot.iloc[-1]) - spot_open, 2),
+            "spot_chg_pct": round((float(spot.iloc[-1]) / spot_open - 1) * 100, 2),
+            "legs": legs, "series": series,
+            "labels": [str(t)[11:16] for t in piv.index[idx]],
+            "ce_chg": round(ce_chg, 2), "pe_chg": round(pe_chg, 2),
+            "straddle_open": round(straddle_open, 2) if straddle_open else None,
+            "straddle_now": round(straddle_now, 2) if straddle_now else None,
+            "straddle_pct": straddle_pct,
+            "skew_pct": skew, "direction": direction, "dir_word": dir_word,
+            "vol_state": vol_state, "vol_word": vol_word,
+            "n_minutes": int(len(piv)),
+        }
+    except Exception as e:
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+
+
 def direction_block(kite, token: int) -> dict:
     """Hilega Milega (daily + weekly) + SRT (daily + weekly) for one index.
 
@@ -818,6 +931,20 @@ def main() -> None:
     except Exception as e:
         print(f"  WCash ERROR: {e}")
 
+    print("Computing premium ladder...")
+    ladder = {}
+    try:
+        import db as _dbl
+        with _dbl.get_conn() as _c:
+            for u in ("NIFTY", "BANKNIFTY"):
+                ladder[u] = premium_ladder(_c, u)
+                l = ladder[u]
+                print(f"  {u:11s} " + (f"{l['dir_word']} (skew {l['skew_pct']:+.0f}%) · "
+                      f"straddle {l['straddle_pct']:+.1f}% · {l['vol_word']}"
+                      if l.get("ok") else f"n/a: {l.get('reason')}"))
+    except Exception as e:
+        print(f"  ladder ERROR: {e}")
+
     print("Building trade recommendations for fresh signals + calendar...")
     recommendations = build_recommendations(kite, signals, blocks, calendar_flags)
     for strat, rec in recommendations.items():
@@ -843,6 +970,7 @@ def main() -> None:
         "calendar_flags": calendar_flags,
         "direction": direction,
         "wcash": wcash,
+        "premium_ladder": ladder,
         "recommendations": recommendations,
         "portfolio": portfolio,
     }
