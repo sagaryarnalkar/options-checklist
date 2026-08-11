@@ -1852,8 +1852,15 @@
     const el = document.getElementById("oiLadder");
     if (!el) return;
     const l = (d && (d.nifty || d.NIFTY)) || null;
-    if (!l || !l.ok){
-      el.innerHTML = `<div class="note">${(l && l.reason) || "no data"}</div>`;
+    if (!l){
+      // key absent entirely = compute.py has not run since this shipped.
+      // Say so, instead of a bare "no data" that reads like a failure.
+      el.innerHTML = `<div class="note">Not computed yet — this fills in on the next
+        <b>Refresh</b> (or the 3:16 PM scheduled run).</div>`;
+      return;
+    }
+    if (!l.ok){
+      el.innerHTML = `<div class="note">Unavailable: ${l.reason || "unknown"}</div>`;
       return;
     }
     const dirCol = l.direction === "bearish" ? "--neg"
