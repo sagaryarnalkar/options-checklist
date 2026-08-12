@@ -178,6 +178,64 @@ CREATE TABLE IF NOT EXISTS llt_prints (
 );
 CREATE INDEX IF NOT EXISTS idx_llt_ts ON llt_prints(ts);
 
+-- Cash-Secured Puts (#79). Daily equity bars are the expensive fetch (one
+-- historical call per F&O name), so they are cached once a day and only the
+-- QUOTES refresh on the 30-minute cadence.
+CREATE TABLE IF NOT EXISTS csp_daily (
+    symbol      TEXT NOT NULL,
+    d           TEXT NOT NULL,          -- trading day (YYYY-MM-DD)
+    open        REAL, high REAL, low REAL, close REAL,
+    UNIQUE(symbol, d)
+);
+CREATE INDEX IF NOT EXISTS idx_csp_daily_sym ON csp_daily(symbol, d);
+
+-- One row per (30-min snapshot, symbol): the sized CSP idea. Premium is the
+-- BEST BID (what you'd actually receive selling), never the LTP.
+CREATE TABLE IF NOT EXISTS csp_snapshot (
+    ts              TEXT NOT NULL,
+    symbol          TEXT NOT NULL,
+    spot            REAL,
+    expiry          TEXT,
+    dte             INTEGER,
+    strike          REAL,
+    lot_size        INTEGER,
+    bid             REAL,               -- best bid on the PE (the fill price)
+    ask             REAL,
+    ltp             REAL,               -- kept only to expose the bid/LTP gap
+    spread_pct      REAL,
+    iv              REAL,               -- BS IV implied by the BID
+    realized_vol    REAL,
+    p_otm_realized  REAL,               -- P(expires worthless) on realized vol
+    p_otm_implied   REAL,               -- ...and on the market's own IV
+    otm_pct         REAL,
+    premium_total   REAL,
+    cash_required   REAL,
+    yield_pct       REAL,
+    ann_yield_pct   REAL,
+    cycle_open      REAL,
+    cycle_drop_pct  REAL,
+    d1_pct          REAL,
+    d5_pct          REAL,
+    from_52w_high   REAL,
+    above_200dma    INTEGER,
+    score           REAL,
+    risk_flags      TEXT,               -- JSON list of distress flags
+    fundamentals    TEXT,               -- JSON, best-effort; may be null
+    UNIQUE(ts, symbol)
+);
+CREATE INDEX IF NOT EXISTS idx_csp_snap_ts ON csp_snapshot(ts);
+
+-- Fundamentals cache. Refreshed at most once a day per symbol; every field is
+-- optional and the UI must render fine when this is empty (both sources are
+-- unofficial and block aggressively).
+CREATE TABLE IF NOT EXISTS csp_fundamentals (
+    symbol      TEXT PRIMARY KEY,
+    fetched_ts  TEXT,
+    source      TEXT,
+    data        TEXT,                   -- JSON blob
+    error       TEXT
+);
+
 CREATE TABLE IF NOT EXISTS paper_marks (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     trade_id   INTEGER NOT NULL,

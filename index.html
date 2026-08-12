@@ -476,6 +476,28 @@
   #ladderCard .oi-chart-title{ align-items:baseline; }
   .pl-badge{ display:inline-flex; align-items:baseline; gap:8px; white-space:nowrap; }
   .pl-badge .pl-dir{ font-size:14px; }
+  table.csp{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; }
+  table.csp th{ text-align:right; font-weight:600; color:var(--muted); font-size:10px;
+    text-transform:uppercase; letter-spacing:.05em; padding:6px 7px;
+    border-bottom:1px solid var(--border); white-space:nowrap; }
+  table.csp th:first-child, table.csp td:first-child{ text-align:left; }
+  table.csp td{ text-align:right; padding:7px; border-bottom:1px solid var(--border);
+    white-space:nowrap; }
+  table.csp tr.flagged td{ background:color-mix(in srgb,var(--neg) 5%,transparent); }
+  table.csp tr:hover td{ background:color-mix(in srgb,var(--color-text) 4%,transparent); }
+  .csp-sym{ font-weight:700; font-size:13px; }
+  .csp-score{ display:inline-block; min-width:30px; text-align:center; padding:2px 6px;
+    font-weight:700; border:1px solid var(--border); }
+  .csp-strike{ color:var(--color-accent); font-weight:600; }
+  .csp-flags{ display:flex; flex-wrap:wrap; gap:3px; margin-top:3px; }
+  .csp-flag{ font-size:9.5px; padding:1px 5px; border:1px solid var(--neg);
+    color:var(--neg); background:color-mix(in srgb,var(--neg) 8%,transparent); }
+  .csp-flag.fund{ border-color:var(--amber); color:var(--amber);
+    background:color-mix(in srgb,var(--amber) 10%,transparent); }
+  .csp-sub{ font-size:9.5px; color:var(--muted); }
+  .csp-tiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:10px; margin-bottom:12px; }
+  :root[data-skin="fintech"] .csp-flag,:root[data-skin="fintech"] .csp-score{ border-radius:999px; }
   .pl-legend{ display:flex; flex-wrap:wrap; gap:2px 10px; font-family:var(--mono);
     font-size:9.5px; color:var(--muted); }
   .pl-legend i{ display:inline-block; width:8px; height:2px; vertical-align:middle;
@@ -660,7 +682,7 @@
   .hz-header{ border-bottom:0; }
   .hz-tabbar{ border-top:2px solid var(--color-divider); border-bottom:2px solid var(--color-divider); }
   /* gap/align reset: .hz-header .in (brand row) also matches this element */
-  .hz-tabbar .in{ display:grid; grid-template-columns:repeat(4,1fr); max-width:1720px; margin:0 auto;
+  .hz-tabbar .in{ display:grid; grid-template-columns:repeat(5,1fr); max-width:1720px; margin:0 auto;
     padding:0; gap:0; align-items:stretch; }
   .hz-tabbar .tab{
     appearance:none; background:transparent; border:0; border-right:1px solid var(--color-divider);
@@ -850,6 +872,7 @@
       <button class="tab" data-tab="strategy" role="tab">By Strategy</button>
       <button class="tab active" data-tab="oiflow" role="tab">OI Flow</button>
       <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
+      <button class="tab" data-tab="csp" role="tab">Cash Puts</button>
     </div>
   </div>
 </header>
@@ -1195,6 +1218,69 @@
     <div id="paperLog"><div class="note">Loading…</div></div>
   </div>
 
+  <!-- ============================ CASH PUTS TAB (#79) ============================ -->
+  <div class="tab-panel" id="tabCsp">
+    <div class="oi-controls">
+      <label>Target P(expires worthless)
+        <select id="cspTargetP">
+          <option value="0.70">70%</option>
+          <option value="0.75">75%</option>
+          <option value="0.80" selected>80%</option>
+          <option value="0.85">85%</option>
+          <option value="0.90">90%</option>
+        </select>
+      </label>
+      <label>Min cycle drop
+        <select id="cspMinDrop">
+          <option value="0">any</option>
+          <option value="3">−3%</option>
+          <option value="5" selected>−5%</option>
+          <option value="8">−8%</option>
+          <option value="12">−12%</option>
+        </select>
+      </label>
+      <label>Names
+        <select id="cspOnlyDropped">
+          <option value="1" selected>Only dropped</option>
+          <option value="0">All F&amp;O</option>
+        </select>
+      </label>
+      <label>Hide flagged
+        <select id="cspHideRisky">
+          <option value="0" selected>No — show all</option>
+          <option value="1">Yes — clean only</option>
+        </select>
+      </label>
+      <label>Filter
+        <input type="text" id="cspFilter" placeholder="symbol…" style="width:120px">
+      </label>
+      <button type="button" id="cspReload" class="live-refresh">Reload</button>
+      <button type="button" id="cspRescan" class="live-refresh"
+        title="Runs a fresh scan on the server (needs a Kite session). Slower.">Re-scan now</button>
+    </div>
+    <div class="oi-status" id="cspStatus"></div>
+    <div id="cspBody"><div class="note">Loading…</div></div>
+    <p class="note" style="margin-top:14px">
+      <b>How to read.</b> A cash-secured put is a paid limit order: you hold
+      <b>strike × lot</b> in cash and get premium for agreeing to buy there.
+      <b>Premium is the BEST BID</b> — what you'd actually receive selling into the
+      book — never the last traded price, which on cheap options can overstate the
+      yield by 20%+ (the bid/LTP gap is shown per row).
+      <b>Two probabilities</b> are given: one on the stock's <em>realized</em>
+      volatility and one on the market's <em>implied</em> volatility. Screens that
+      quote only the realized number flatter the trade, because implied normally
+      runs above realized — that gap is what you're being paid, and it's shown.
+      Both assume a lognormal distribution and therefore <b>understate fat left
+      tails</b>, which is the only direction that hurts you. <b>If assigned</b>
+      shows your true cost basis (strike − premium) — for a CSP, assignment is the
+      plan, not the failure; being assigned far above market is. <b>Risk flags</b>
+      combine always-available price signals (below 200-DMA, off 52w high, sharp
+      decline, IV spike) with best-effort fundamentals (promoter pledge, debt,
+      margins) — an empty flag list means <em>nothing was found</em>, not that the
+      company is sound.
+    </p>
+  </div>
+
   <div class="footer">
     Conditions are auto-checked from the live built trade — a ✗ means a saved rule was relaxed to build it.<br/>
     All strategies are self-hedged (defined risk) — no discretionary stop-loss.
@@ -1401,12 +1487,14 @@
       strategy: document.getElementById("tabStrategy"),
       oiflow: document.getElementById("tabOiflow"),
       paper: document.getElementById("tabPaper"),
+      csp: document.getElementById("tabCsp"),
     };
     const activate = (key) => {
       tabs.forEach(x=>x.classList.toggle("active", x.dataset.tab === key));
       Object.entries(panels).forEach(([k,p])=>p.classList.toggle("active", k === key));
       if (key === "oiflow") initOiFlowTab();
       if (key === "paper") initPaperTab();
+      if (key === "csp") initCspTab();
     };
     tabs.forEach(t => t.addEventListener("click", ()=>{
       activate(t.dataset.tab);
@@ -1655,6 +1743,126 @@
         renderPaperLedger(_lastLedger);
       });
     });
+  }
+
+  // ---------- Cash Puts tab (#79) ----------
+  let _cspInited = false, _cspData = null;
+  function initCspTab(){
+    if (_cspInited){ loadCsp(); return; }
+    _cspInited = true;
+    ["cspTargetP","cspMinDrop","cspOnlyDropped","cspHideRisky"].forEach(id =>
+      document.getElementById(id).addEventListener("change", () => renderCsp(_cspData)));
+    document.getElementById("cspFilter").addEventListener("input", () => renderCsp(_cspData));
+    document.getElementById("cspReload").addEventListener("click", loadCsp);
+    document.getElementById("cspRescan").addEventListener("click", rescanCsp);
+    loadCsp();
+  }
+  async function loadCsp(){
+    const st = document.getElementById("cspStatus");
+    st.textContent = "Loading latest scan…"; st.className = "oi-status";
+    try {
+      const r = await fetch("/csp/ideas", { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      _cspData = await r.json();
+      renderCsp(_cspData);
+    } catch(e){
+      st.textContent = "Failed to load: " + e.message; st.className = "oi-status error";
+      document.getElementById("cspBody").innerHTML = "";
+    }
+  }
+  async function rescanCsp(){
+    const btn = document.getElementById("cspRescan"), st = document.getElementById("cspStatus");
+    const p = document.getElementById("cspTargetP").value;
+    const d = document.getElementById("cspMinDrop").value;
+    const o = document.getElementById("cspOnlyDropped").value === "1";
+    btn.disabled = true; btn.textContent = "Scanning… (~60s)";
+    st.textContent = "Running a fresh scan on the server…"; st.className = "oi-status";
+    try {
+      const r = await fetch(`/csp/refresh?target_p=${p}&min_drop=${d}&only_dropped=${o}`,
+                            { method: "POST", cache: "no-store" });
+      if (r.status === 401){ st.textContent = "Needs a Kite session — use the ⚡ login, top right.";
+                             st.className = "oi-status warn"; return; }
+      const j = await r.json();
+      st.textContent = j.ok ? `Scanned ${j.scanned} names → ${j.ideas} ideas` + 
+        (j.fundamentals ? ` · fundamentals ${j.fundamentals.enriched} ok / ${j.fundamentals.unavailable} unavailable` : "")
+        : `Scan returned nothing: ${j.reason || "unknown"}`;
+      await loadCsp();
+    } catch(e){ st.textContent = "Scan failed: " + e.message; st.className = "oi-status error"; }
+    finally { btn.disabled = false; btn.textContent = "Re-scan now"; }
+  }
+  function renderCsp(d){
+    const body = document.getElementById("cspBody"), st = document.getElementById("cspStatus");
+    if (!d || !d.ok){
+      body.innerHTML = `<div class="note">${(d && d.reason) || "No scan yet"} — press
+        <b>Re-scan now</b> (needs a Kite session), or wait for the next
+        half-hourly run during market hours.</div>`;
+      st.textContent = ""; return;
+    }
+    const minDrop = parseFloat(document.getElementById("cspMinDrop").value);
+    const onlyDropped = document.getElementById("cspOnlyDropped").value === "1";
+    const hideRisky = document.getElementById("cspHideRisky").value === "1";
+    const q = (document.getElementById("cspFilter").value || "").trim().toUpperCase();
+    let rows = (d.rows || []).filter(r =>
+      (!q || r.symbol.includes(q)) &&
+      (!onlyDropped || (r.cycle_drop_pct != null && r.cycle_drop_pct <= -minDrop)) &&
+      (!hideRisky || !(r.risk_flags || []).length));
+
+    const cash = rows.reduce((a, r) => a + (r.cash_required || 0), 0);
+    const prem = rows.reduce((a, r) => a + (r.premium_total || 0), 0);
+    const inr = v => "₹" + Math.round(v).toLocaleString("en-IN");
+    st.textContent = `snapshot ${String(d.ts).slice(0,16).replace("T"," ")} · `
+      + `${rows.length} of ${(d.rows||[]).length} ideas shown`;
+
+    const tiles = `<div class="csp-tiles">
+      <div class="pt-tile"><div class="lbl">Ideas</div><div class="val">${rows.length}</div></div>
+      <div class="pt-tile"><div class="lbl">Cash to deploy</div><div class="val">${inr(cash)}</div></div>
+      <div class="pt-tile"><div class="lbl">Premium (at bid)</div><div class="val profit">${inr(prem)}</div></div>
+      <div class="pt-tile"><div class="lbl">Blended yield</div><div class="val">${cash?(prem/cash*100).toFixed(2):"—"}%</div></div>
+      <div class="pt-tile"><div class="lbl">Flagged</div><div class="val ${rows.filter(r=>(r.risk_flags||[]).length).length?"loss":""}">${rows.filter(r=>(r.risk_flags||[]).length).length}</div></div>
+    </div>`;
+
+    if (!rows.length){
+      body.innerHTML = tiles + `<div class="note">Nothing matches these filters — try
+        "All F&amp;O" or a smaller minimum drop.</div>`;
+      return;
+    }
+    const pct = (v, dp=1) => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(dp) + "%";
+    const cls = v => v == null ? "" : (v < 0 ? "loss" : "profit");
+    body.innerHTML = tiles + `<table class="csp">
+      <thead><tr>
+        <th>Symbol</th><th>Score</th><th>Spot</th><th>DTE</th><th>Cycle</th><th>5d</th>
+        <th>Strike</th><th>OTM</th><th>Bid</th><th>vs LTP</th><th>Spread</th>
+        <th>IV / RV</th><th>P(real)</th><th>P(impl)</th><th>Premium</th>
+        <th>Cash</th><th>Yield</th><th>Ann.</th><th>If assigned</th>
+      </tr></thead><tbody>${rows.map(r => {
+        const flags = (r.risk_flags || []);
+        const fund = r.fundamentals && r.fundamentals.available;
+        return `<tr class="${flags.length ? "flagged" : ""}">
+        <td><span class="csp-sym">${r.symbol}</span>
+          ${flags.length ? `<div class="csp-flags">${flags.map(f =>
+            `<span class="csp-flag${/pledge|debt|ROE|margin|earnings|revenue/i.test(f)?" fund":""}">${f}</span>`).join("")}</div>` : ""}
+          ${!fund ? `<div class="csp-sub">fundamentals unavailable</div>` : ""}</td>
+        <td><span class="csp-score" style="color:var(${r.score>=60?"--pos":r.score>=40?"--amber":"--muted"})">${r.score}</span></td>
+        <td>${r.spot?.toLocaleString("en-IN")}</td>
+        <td>${r.dte}</td>
+        <td class="${cls(r.cycle_drop_pct)}">${pct(r.cycle_drop_pct)}</td>
+        <td class="${cls(r.d5_pct)}">${pct(r.d5_pct)}</td>
+        <td><span class="csp-strike">${r.strike?.toLocaleString("en-IN")} PE</span>
+          <div class="csp-sub">lot ${r.lot_size}</div></td>
+        <td>${pct(r.otm_pct)}</td>
+        <td><b>₹${r.bid?.toFixed(2)}</b><div class="csp-sub">ltp ₹${r.ltp?.toFixed(2) ?? "—"}</div></td>
+        <td class="${cls(r.bid_vs_ltp_pct)}">${pct(r.bid_vs_ltp_pct)}</td>
+        <td>${r.spread_pct == null ? "—" : r.spread_pct.toFixed(0) + "%"}</td>
+        <td>${r.iv ?? "—"}% <span class="csp-sub">/ ${r.realized_vol}%</span></td>
+        <td>${r.p_otm_realized ?? "—"}%</td>
+        <td><b>${r.p_otm_implied ?? "—"}%</b></td>
+        <td class="profit">${inr(r.premium_total)}</td>
+        <td>${inr(r.cash_required)}</td>
+        <td>${r.yield_pct?.toFixed(2)}%</td>
+        <td>${r.ann_yield_pct?.toFixed(0)}%</td>
+        <td>${r.assigned_cost?.toLocaleString("en-IN")}
+          <div class="csp-sub">${pct(r.assigned_vs_spot_pct)} vs spot</div></td>
+      </tr>`; }).join("")}</tbody></table>`;
   }
 
   // ---------- OI Flow tab ----------
