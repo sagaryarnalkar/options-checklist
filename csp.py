@@ -58,6 +58,7 @@ VOL_LOOKBACK = 60          # sessions for realized vol
 MIN_PREMIUM = 0.50         # ignore near-worthless puts (spread eats them)
 MAX_SPREAD_PCT = 25.0      # flag illiquid strikes
 QUOTE_CHUNK = 200
+MARGIN_CHUNK = 50   # orders per margin POST
 
 
 # ---------------- maths ----------------
@@ -401,7 +402,7 @@ def scan(kite, instruments, conn, *, target_p=TARGET_P_OTM, min_drop=MIN_DROP_PC
             "cycle_drop_pct": round(cyc_drop, 2) if cyc_drop is not None else None,
             "d1_pct": round(d1, 2) if d1 is not None else None,
             "d5_pct": round(d5, 2) if d5 is not None else None,
-            "strike": K, "lot_size": lot,
+            "strike": K, "lot_size": lot, "pe_symbol": c["pe_symbol"],
             "otm_pct": round((spot - K) / spot * 100, 2),
             "bid": bid, "ask": ask, "ltp": ltp,
             "spread_pct": round(spread_pct, 1) if spread_pct is not None else None,
@@ -419,13 +420,93 @@ def scan(kite, instruments, conn, *, target_p=TARGET_P_OTM, min_drop=MIN_DROP_PC
             "assigned_cost": round(K - bid, 2),
             "assigned_vs_spot_pct": round(((K - bid) / spot - 1) * 100, 2),
             "risk_flags": flags,
+            "margin_total": None, "margin_span": None, "margin_exposure": None,
+            "return_on_margin_pct": None, "ann_return_on_margin_pct": None,
             "score": score_idea(p_impl, ann, cyc_drop, len(flags), spread_pct),
         })
+    apply_margins(rows, fetch_margins(kite, rows))
     rows.sort(key=lambda r: r["score"], reverse=True)
     return {"ok": True, "ts": datetime.now(IST).isoformat(),
             "scanned": len(ctx), "universe_size": len(uni),
             "target_p": target_p, "min_drop": min_drop,
             "only_dropped": only_dropped, "rows": rows}
+
+
+def fetch_margins(kite, rows: list) -> dict:
+    """Exact blocked margin per idea from Kite's own margin calculator.
+
+    A short put is NOT actually cash-secured in an Indian F&O account: the
+    broker blocks SPAN + exposure, far less than strike x lot. So the margin
+    number has to come from the same engine the broker charges with — an
+    approximation here would corrupt the return-on-margin column, which is
+    exactly what the ideas get ranked on.
+
+    One POST per chunk; each order is costed standalone (no netting against
+    the user's real book), which is what a fresh position would block.
+    """
+    if not rows:
+        return {}
+    out = {}
+    for chunk in _chunks(rows, MARGIN_CHUNK):
+        orders = [{
+            "exchange": "NFO",
+            "tradingsymbol": r["pe_symbol"],
+            "transaction_type": "SELL",
+            "variety": "regular",
+            "product": "NRML",
+            "order_type": "LIMIT",
+            "quantity": int(r["lot_size"]),
+            "price": float(r["bid"]),
+            "trigger_price": 0,
+        } for r in chunk]
+        try:
+            res = kite.order_margins(orders)
+        except Exception:
+            res = None
+        if not res or len(res) != len(chunk):
+            continue
+        for r, m in zip(chunk, res):
+            if not isinstance(m, dict):
+                continue
+            total = m.get("total")
+            if total is None:
+                span, expo = m.get("span"), m.get("exposure")
+                total = (span or 0) + (expo or 0)
+            if not total:
+                continue
+            out[r["symbol"]] = {
+                "margin_total": round(float(total), 0),
+                "margin_span": round(float(m.get("span") or 0), 0),
+                "margin_exposure": round(float(m.get("exposure") or 0), 0),
+            }
+    return out
+
+
+def apply_margins(rows: list, margins: dict) -> int:
+    """Attach margin + return-on-margin. Rows with no margin keep None — a
+    missing number must read as missing, never as zero (which would rank the
+    idea top on any return-on-margin sort)."""
+    n = 0
+    for r in rows:
+        m = margins.get(r["symbol"])
+        if not m:
+            r["margin_total"] = None
+            r["return_on_margin_pct"] = None
+            r["ann_return_on_margin_pct"] = None
+            continue
+        r.update(m)
+        prem, mar, dte = r["premium_total"], m["margin_total"], max(r["dte"], 1)
+        rom = prem / mar * 100 if mar else None
+        r["return_on_margin_pct"] = round(rom, 2) if rom is not None else None
+        # SIMPLE annualisation, deliberately not compounded. Return on margin
+        # starts high (10-20% for a two-week put), and compounding that to 365
+        # days prints 6000%+ — arithmetically true, financially meaningless,
+        # and it would make every row look like a jackpot. Simple x365/DTE
+        # answers the real question: "what if I kept repeating this trade?"
+        r["ann_return_on_margin_pct"] = (
+            round(rom * 365 / dte, 0) if rom is not None else None)
+        n += 1
+    return n
 
 
 def store_snapshot(conn, res: dict) -> int:
@@ -439,15 +520,20 @@ def store_snapshot(conn, res: dict) -> int:
             "lot_size,bid,ask,ltp,spread_pct,iv,realized_vol,p_otm_realized,"
             "p_otm_implied,otm_pct,premium_total,cash_required,yield_pct,"
             "ann_yield_pct,cycle_open,cycle_drop_pct,d1_pct,d5_pct,from_52w_high,"
-            "above_200dma,score,risk_flags,fundamentals) VALUES "
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "above_200dma,score,risk_flags,fundamentals,pe_symbol,margin_total,"
+            "margin_span,margin_exposure,return_on_margin_pct,"
+            "ann_return_on_margin_pct) VALUES "
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (ts, r["symbol"], r["spot"], r["expiry"], r["dte"], r["strike"],
              r["lot_size"], r["bid"], r["ask"], r["ltp"], r["spread_pct"], r["iv"],
              r["realized_vol"], r["p_otm_realized"], r["p_otm_implied"], r["otm_pct"],
              r["premium_total"], r["cash_required"], r["yield_pct"], r["ann_yield_pct"],
              r["cycle_open"], r["cycle_drop_pct"], r["d1_pct"], r["d5_pct"],
              r["from_52w_high"], int(r["above_200dma"]), r["score"],
-             json.dumps(r["risk_flags"]), json.dumps(r.get("fundamentals"))))
+             json.dumps(r["risk_flags"]), json.dumps(r.get("fundamentals")),
+             r.get("pe_symbol"), r.get("margin_total"), r.get("margin_span"),
+             r.get("margin_exposure"), r.get("return_on_margin_pct"),
+             r.get("ann_return_on_margin_pct")))
         n += 1
     conn.commit()
     return n
@@ -485,18 +571,36 @@ _BROWSER_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.
 
 
 def _nse_session():
-    """NSE requires a cookie handshake from its homepage before its JSON
-    endpoints answer. Returns an opener or None."""
-    import http.cookiejar, urllib.request
-    cj = http.cookiejar.CookieJar()
-    op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cj))
-    op.addheaders = [("User-Agent", _BROWSER_UA), ("Accept", "*/*"),
-                     ("Accept-Language", "en-US,en;q=0.9")]
+    """NSE needs a cookie handshake from its homepage before its JSON endpoints
+    answer — and it must be made with `requests`, not urllib.
+
+    Verified #81: identical headers, urllib gets a hard 403 and requests gets
+    200. NSE fingerprints the TLS handshake (Akamai), so the HTTP headers are
+    not the gate — the client stack is. Returns a Session or None.
+    """
     try:
-        op.open(NSE_HOME, timeout=12).read(2048)
-        return op
+        import requests
     except Exception:
         return None
+    ses = requests.Session()
+    ses.headers.update({
+        "User-Agent": _BROWSER_UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+    })
+    try:
+        ses.get(NSE_HOME, timeout=15)
+        return ses
+    except Exception:
+        return None
+
+
+def _nse_json(ses, path: str):
+    """GET an NSE JSON endpoint on a primed session. Raises on failure."""
+    r = ses.get(f"{NSE_HOME}{path}", timeout=15,
+                headers={"Accept": "*/*", "Referer": NSE_HOME + "/"})
+    r.raise_for_status()
+    return r.json()
 
 
 def fetch_nse(symbol: str, opener=None) -> dict:
@@ -509,8 +613,7 @@ def fetch_nse(symbol: str, opener=None) -> dict:
         return {"error": "NSE unreachable (403/handshake failed)"}
     out = {}
     try:
-        r = op.open(f"{NSE_HOME}/api/quote-equity?symbol={symbol}", timeout=12)
-        d = _j.loads(r.read())
+        d = _nse_json(op, f"/api/quote-equity?symbol={symbol}")
         info = d.get("info") or {}
         meta = d.get("metadata") or {}
         pi = d.get("priceInfo") or {}
@@ -570,6 +673,113 @@ def fetch_yahoo(symbol: str) -> dict:
         return {"error": f"Yahoo parse {type(e).__name__}"}
 
 
+# --- Market-wide surveillance feeds (#81) ---------------------------------
+# These beat the per-symbol sources on every axis: THREE fetches cover the
+# whole market (vs ~200 Yahoo calls that 429), they are the exchange's own
+# published opinion that a name is troubled, and they are the single most
+# direct answer to "don't put me into stocks with big problems".
+NSE_ARCHIVES = "https://nsearchives.nseindia.com"
+_SURV_TTL_MIN = 180
+
+
+def fetch_surveillance() -> dict:
+    """NSE ASM + GSM surveillance stages and today's F&O ban list.
+
+    ASM = Additional Surveillance Measure (price/volume abnormality).
+    GSM = Graded Surveillance Measure — the severe one; its codes include IBC
+    (insolvency) admissions. A name under GSM is one you do not want to be
+    assigned. Ban = no fresh F&O positions allowed today at all.
+    """
+    import json as _j
+    out = {"asm": {}, "gsm": {}, "ban": [], "errors": []}
+    ses = _nse_session()
+    if ses is not None:
+        for key, path in (("asm", "/api/reportASM"), ("gsm", "/api/reportGSM")):
+            try:
+                d = _nse_json(ses, path)
+            except Exception as e:
+                out["errors"].append(f"{key}: {type(e).__name__}")
+                continue
+            # ASM nests under longterm/shortterm; GSM is a bare list
+            groups = []
+            if isinstance(d, dict):
+                for gk, gv in d.items():
+                    if isinstance(gv, dict) and isinstance(gv.get("data"), list):
+                        groups.append((gk, gv["data"]))
+            elif isinstance(d, list):
+                groups.append(("", d))
+            for gname, items in groups:
+                for it in items:
+                    sym = (it or {}).get("symbol")
+                    if not sym:
+                        continue
+                    stage = (it.get("asmSurvIndicator") or it.get("gsmStage")
+                             or it.get("survDesc") or "listed")
+                    label = f"{gname} {stage}".strip() if gname else str(stage)
+                    out[key][sym] = label
+    else:
+        out["errors"].append("nse: handshake failed")
+    try:                                    # plain CSV, no cookie needed
+        import urllib.request
+        req = urllib.request.Request(f"{NSE_ARCHIVES}/content/fo/fo_secban.csv",
+                                     headers={"User-Agent": _BROWSER_UA})
+        txt = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+        for line in txt.splitlines():
+            parts = [p.strip() for p in line.split(",")]
+            if len(parts) >= 2 and parts[0].isdigit():
+                out["ban"].append(parts[1])
+    except Exception as e:
+        out["errors"].append(f"ban: {type(e).__name__}")
+    return out
+
+
+def fetch_screener(symbol: str) -> dict:
+    """screener.in top-ratio box — reachable where Yahoo 429s and NSE 403s.
+    Returns {} on any failure; callers must treat empty as UNKNOWN."""
+    import re as _re, urllib.request
+    out = {}
+    for suffix in ("consolidated/", ""):
+        try:
+            req = urllib.request.Request(
+                f"https://www.screener.in/company/{symbol}/{suffix}",
+                headers={"User-Agent": _BROWSER_UA})
+            h = urllib.request.urlopen(req, timeout=15).read().decode("utf-8", "replace")
+        except Exception:
+            continue
+        pairs = _re.findall(
+            r'<li[^>]*>\s*<span class="name"[^>]*>\s*([^<]+?)\s*</span>\s*'
+            r'<span class="nowrap value">(.*?)</span>', h, _re.S)
+        for name, val in pairs:
+            v = _re.sub(r"<[^>]+>", " ", val)
+            v = v.replace("\u20b9", "").replace(",", "").replace("%", "").strip()
+            v = " ".join(v.split())
+            key = "scr_" + name.strip().lower().replace(" ", "_").replace("/", "_")
+            num = _re.match(r"^-?\d+(\.\d+)?", v)
+            if num:
+                out[key] = float(num.group())        # blanks stay absent, not ""
+        if out:
+            out["_source"] = "screener.in"
+            break
+    return out
+
+
+def surveillance_flags(sym: str, surv: dict) -> list:
+    """Exchange-published warnings for one symbol. Empty list = not listed on
+    any surveillance feed, which is meaningful ONLY if the fetch succeeded."""
+    if not surv:
+        return []
+    out = []
+    g = (surv.get("gsm") or {}).get(sym)
+    if g:
+        out.append(f"NSE GSM ({g})" + (" — IBC/insolvency" if "IBC" in str(g).upper() else ""))
+    a = (surv.get("asm") or {}).get(sym)
+    if a:
+        out.append(f"NSE ASM ({a})")
+    if sym in (surv.get("ban") or []):
+        out.append("in F&O ban today — no fresh positions")
+    return out
+
+
 def fundamental_flags(f: dict) -> list:
     """Turn whatever fundamentals we actually got into 'big problem' warnings.
     Silent when a field is missing — never invents a clean bill of health."""
@@ -584,20 +794,27 @@ def fundamental_flags(f: dict) -> list:
     if p is not None and p > 0:
         out.append(f"promoter pledge {p:.0f}%" + (" — HIGH" if p >= 25 else ""))
     de = f.get("debt_to_equity")
-    if de is not None and de > 150:
+    if isinstance(de, (int, float)) and de > 150:
         out.append(f"debt/equity {de:.0f}")
     roe = f.get("roe")
-    if roe is not None and roe < 0:
+    if isinstance(roe, (int, float)) and roe < 0:
         out.append(f"negative ROE {roe*100:.0f}%")
     pm = f.get("profit_margin")
-    if pm is not None and pm < 0:
+    if isinstance(pm, (int, float)) and pm < 0:
         out.append(f"negative margin {pm*100:.0f}%")
     eg = f.get("earnings_growth")
-    if eg is not None and eg < -0.25:
+    if isinstance(eg, (int, float)) and eg < -0.25:
         out.append(f"earnings {eg*100:.0f}%")
     rg = f.get("revenue_growth")
-    if rg is not None and rg < -0.15:
+    if isinstance(rg, (int, float)) and rg < -0.15:
         out.append(f"revenue {rg*100:.0f}%")
+    # screener.in keys are `scr_*` and are PERCENTS, unlike Yahoo's fractions
+    sroe = f.get("scr_roe")
+    if isinstance(sroe, (int, float)) and sroe < 0:
+        out.append(f"ROE {sroe:.0f}%")
+    roce = f.get("scr_roce")
+    if isinstance(roce, (int, float)) and roce < 0:
+        out.append(f"ROCE {roce:.1f}% — burning capital")
     return out
 
 
@@ -618,11 +835,14 @@ def get_fundamentals(conn, symbol: str, force=False) -> dict:
             pass
     nse = fetch_nse(symbol)
     yh = fetch_yahoo(symbol)
-    merged = {k: v for k, v in {**yh, **nse}.items() if k not in ("error",)}
+    scr = fetch_screener(symbol)          # reachable where NSE 403s and YF 429s
+    merged = {k: v for k, v in {**yh, **nse, **scr}.items() if k not in ("error",)}
     errs = [x.get("error") for x in (nse, yh) if x.get("error")]
+    if not scr:
+        errs.append("screener: no data")
     conn.execute("INSERT OR REPLACE INTO csp_fundamentals (symbol,fetched_ts,source,data,error)"
                  " VALUES (?,?,?,?,?)",
-                 (symbol, datetime.now(IST).isoformat(), "nse+yahoo",
+                 (symbol, datetime.now(IST).isoformat(), "nse+yahoo+screener",
                   json.dumps(merged), "; ".join(errs) if errs else None))
     conn.commit()
     return {"available": bool(merged), "data": merged,
@@ -631,8 +851,27 @@ def get_fundamentals(conn, symbol: str, force=False) -> dict:
 
 
 def enrich_with_fundamentals(conn, rows: list, top_n: int = 25) -> dict:
-    """Only fetch for the top-ranked ideas — both sources rate-limit, and
-    there is no point pulling 200 names you will never trade."""
+    """Per-symbol sources are fetched only for the top-ranked ideas (they rate-
+    limit, and there is no point pulling 200 names you will never trade).
+
+    The exchange surveillance feeds are different: THREE fetches cover the
+    whole market, so every row gets them. They are also the strongest signal
+    of the thing the user actually cares about — a name with real problems.
+    """
+    surv = fetch_surveillance()
+    surv_ok = not surv.get("errors")
+    n_surv = 0
+    for r in rows:
+        sf = surveillance_flags(r["symbol"], surv)
+        r["surveillance"] = sf
+        r["surveillance_checked"] = surv_ok
+        if sf:
+            r["risk_flags"] = list(r.get("risk_flags") or []) + sf
+            # GSM/ban are disqualifying, not a nudge
+            hard = any(("GSM" in x or "ban" in x) for x in sf)
+            r["score"] = max(0.0, round(r["score"] - (40 if hard else 12), 1))
+            n_surv += 1
+
     ok = fail = 0
     for r in rows[:top_n]:
         f = get_fundamentals(conn, r["symbol"])
@@ -645,4 +884,10 @@ def enrich_with_fundamentals(conn, rows: list, top_n: int = 25) -> dict:
             ok += 1
         else:
             fail += 1
-    return {"enriched": ok, "unavailable": fail}
+    rows.sort(key=lambda r: r["score"], reverse=True)   # penalties change order
+    return {"enriched": ok, "unavailable": fail,
+            "surveillance_ok": surv_ok, "surveillance_errors": surv.get("errors"),
+            "flagged_by_surveillance": n_surv,
+            "asm_listed": len(surv.get("asm") or {}),
+            "gsm_listed": len(surv.get("gsm") or {}),
+            "ban_listed": len(surv.get("ban") or [])}

@@ -261,6 +261,16 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE paper_trades ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass  # column already present
+        # #81: blocked margin + return on it. A short put is not cash-secured
+        # in an F&O account, so these are the numbers the broker actually uses.
+        for col, decl in (("pe_symbol", "TEXT"), ("margin_total", "REAL"),
+                          ("margin_span", "REAL"), ("margin_exposure", "REAL"),
+                          ("return_on_margin_pct", "REAL"),
+                          ("ann_return_on_margin_pct", "REAL")):
+            try:
+                conn.execute(f"ALTER TABLE csp_snapshot ADD COLUMN {col} {decl}")
+            except sqlite3.OperationalError:
+                pass
         # WAL mode → safe for concurrent reads while the recorder writes.
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
