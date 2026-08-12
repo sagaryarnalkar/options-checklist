@@ -495,6 +495,16 @@
   .csp-flag.fund{ border-color:var(--amber); color:var(--amber);
     background:color-mix(in srgb,var(--amber) 10%,transparent); }
   .csp-sub{ font-size:9.5px; color:var(--muted); }
+  /* Every header carries a title= explaining the column; make that
+     discoverable rather than a hidden easter egg. */
+  table.csp th[title]{ cursor:help; text-decoration:underline dotted 1px;
+    text-underline-offset:3px; text-decoration-color:var(--border); }
+  table.csp th[title]:hover{ color:var(--color-text);
+    text-decoration-color:var(--color-accent); }
+  /* Exchange surveillance (GSM / ASM / F&O ban) outranks a ratio wobble —
+     these are the exchange itself saying the name is troubled. */
+  .csp-flag.exch{ border-color:var(--neg); color:var(--neg); font-weight:700;
+    background:color-mix(in srgb,var(--neg) 12%,transparent); }
   .csp-tiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
     gap:10px; margin-bottom:12px; }
   :root[data-skin="fintech"] .csp-flag,:root[data-skin="fintech"] .csp-score{ border-radius:999px; }
@@ -1796,6 +1806,32 @@
     } catch(e){ st.textContent = "Scan failed: " + e.message; st.className = "oi-status error"; }
     finally { btn.disabled = false; btn.textContent = "Re-scan now"; }
   }
+  // Column spec — header text + the hover tooltip. Kept as data so a new
+  // column cannot ship without an explanation attached to it.
+  const CSP_COLS = [
+    {h:"Symbol", t:"NSE symbol. Risk flags list underneath; a tinted row means at least one flag fired."},
+    {h:"Score", t:"Rank 0-100 blending assignment probability, annualised yield, how far the stock has already fallen, and spread quality — minus penalties for risk flags. NSE GSM or F&O-ban names are pushed to the bottom."},
+    {h:"Spot", t:"Last traded price of the underlying stock."},
+    {h:"DTE", t:"Calendar days left to the monthly F&O expiry this idea uses."},
+    {h:"Cycle", t:"The stock's move since this expiry cycle began. The scanner deliberately hunts names that have ALREADY fallen — you are selling insurance after the scare, not before it."},
+    {h:"5d", t:"The stock's move over the last 5 trading sessions."},
+    {h:"Strike", t:"Put strike chosen so the chance of expiring worthless lands near your target probability. 'lot' is the contract size — one lot is the smallest trade possible."},
+    {h:"OTM", t:"How far below spot the strike sits. Further out = safer but less premium."},
+    {h:"Bid", t:"The BEST BID — what you would actually receive selling right now. LTP is shown beneath only for comparison; pricing off LTP overstated yield by 25% on our test data, so it is never used."},
+    {h:"vs LTP", t:"Gap between the bid and the last traded price. A large negative number means the LTP is stale and flattering."},
+    {h:"Spread", t:"Bid-ask spread as a percentage of the bid. Wide spreads quietly eat the edge — anything above ~15% is expensive to get out of."},
+    {h:"IV / RV", t:"Implied volatility (backed out of the BID) versus realized volatility from the price history. IV well above RV means options are richly priced — the seller's favourable case."},
+    {h:"P(real)", t:"Probability the put expires worthless, computed from REALIZED volatility. Lognormal, so it understates the fat left tail of a crash."},
+    {h:"P(impl)", t:"The same probability using the market's IMPLIED volatility. Usually the lower of the two, and the more honest one — it is the market's own view rather than the past repeating."},
+    {h:"Premium", t:"Total premium received for one lot at the bid = bid x lot size."},
+    {h:"Cash", t:"Full cash-secured requirement = strike x lot size. What you need if you intend to actually buy the shares on assignment."},
+    {h:"Margin", t:"What Zerodha actually blocks for one lot (SPAN + exposure), taken from Kite's own margin calculator — not an estimate. Far smaller than the Cash column, but a position run on this is NOT cash-secured: a gap-down can demand more than the premium you took in."},
+    {h:"Ret/margin", t:"Premium divided by the margin actually blocked, with a SIMPLE annualisation beneath (x365/DTE, not compounded — compounding a two-week margin return prints meaningless four-digit numbers). This is the leveraged return and will always look far better than Yield. It is only comparable to Yield if you are genuinely willing to run the trade on margin instead of setting the full cash aside, and it says nothing about the loss if the stock keeps falling."},
+    {h:"Yield", t:"Premium divided by the FULL cash requirement, over the holding period. The true cash-secured return."},
+    {h:"Ann.", t:"Yield annualised (compounded to 365 days), so ideas with different DTEs can be compared."},
+    {h:"If assigned", t:"Your effective cost per share if the put is exercised = strike minus premium. Beneath: how that price compares with today's spot. Assignment is the plan, not the failure case."},
+  ];
+
   function renderCsp(d){
     const body = document.getElementById("cspBody"), st = document.getElementById("cspStatus");
     if (!d || !d.ok){
@@ -1834,15 +1870,18 @@
 
     const cash = rows.reduce((a, r) => a + (r.cash_required || 0), 0);
     const prem = rows.reduce((a, r) => a + (r.premium_total || 0), 0);
+    const marg = rows.reduce((a, r) => a + (r.margin_total || 0), 0);
     const inr = v => "₹" + Math.round(v).toLocaleString("en-IN");
     st.textContent = `snapshot ${String(d.ts).slice(0,16).replace("T"," ")} · `
       + `${rows.length} of ${(d.rows||[]).length} ideas shown`;
 
     const tiles = `<div class="csp-tiles">
       <div class="pt-tile"><div class="lbl">Ideas</div><div class="val">${rows.length}</div></div>
-      <div class="pt-tile"><div class="lbl">Cash to deploy</div><div class="val">${inr(cash)}</div></div>
+      <div class="pt-tile" title="Full cash-secured requirement across every idea shown."><div class="lbl">Cash to deploy</div><div class="val">${inr(cash)}</div></div>
+      <div class="pt-tile" title="What Zerodha would actually block (SPAN + exposure) for all ideas shown. Much smaller than the cash figure — but running the book here is not cash-secured."><div class="lbl">Margin blocked</div><div class="val">${marg?inr(marg):"—"}</div></div>
       <div class="pt-tile"><div class="lbl">Premium (at bid)</div><div class="val profit">${inr(prem)}</div></div>
-      <div class="pt-tile"><div class="lbl">Blended yield</div><div class="val">${cash?(prem/cash*100).toFixed(2):"—"}%</div></div>
+      <div class="pt-tile" title="Premium as a share of full cash (top) and of blocked margin (beneath)."><div class="lbl">Blended yield</div><div class="val">${cash?(prem/cash*100).toFixed(2):"—"}%</div>
+        <div class="csp-sub">${marg?(prem/marg*100).toFixed(1)+"% on margin":""}</div></div>
       <div class="pt-tile"><div class="lbl">Flagged</div><div class="val ${rows.filter(r=>(r.risk_flags||[]).length).length?"loss":""}">${rows.filter(r=>(r.risk_flags||[]).length).length}</div></div>
     </div>`;
 
@@ -1854,19 +1893,16 @@
     const pct = (v, dp=1) => v == null ? "—" : (v >= 0 ? "+" : "") + v.toFixed(dp) + "%";
     const cls = v => v == null ? "" : (v < 0 ? "loss" : "profit");
     body.innerHTML = tiles + `<table class="csp">
-      <thead><tr>
-        <th>Symbol</th><th>Score</th><th>Spot</th><th>DTE</th><th>Cycle</th><th>5d</th>
-        <th>Strike</th><th>OTM</th><th>Bid</th><th>vs LTP</th><th>Spread</th>
-        <th>IV / RV</th><th>P(real)</th><th>P(impl)</th><th>Premium</th>
-        <th>Cash</th><th>Yield</th><th>Ann.</th><th>If assigned</th>
-      </tr></thead><tbody>${rows.map(r => {
+      <thead><tr>${CSP_COLS.map(c =>
+        `<th title="${c.t.replace(/"/g,"&quot;")}">${c.h}</th>`).join("")}</tr></thead><tbody>${rows.map(r => {
         const flags = (r.risk_flags || []);
         const fund = r.fundamentals && r.fundamentals.available;
         return `<tr class="${flags.length ? "flagged" : ""}">
         <td><span class="csp-sym">${r.symbol}</span>
           ${flags.length ? `<div class="csp-flags">${flags.map(f =>
-            `<span class="csp-flag${/pledge|debt|ROE|margin|earnings|revenue/i.test(f)?" fund":""}">${f}</span>`).join("")}</div>` : ""}
-          ${!fund ? `<div class="csp-sub">fundamentals unavailable</div>` : ""}</td>
+            `<span class="csp-flag${/GSM|ASM|ban/.test(f)?" exch":/pledge|debt|ROE|ROCE|margin|earnings|revenue/i.test(f)?" fund":""}">${f}</span>`).join("")}</div>` : ""}
+          ${!fund ? `<div class="csp-sub">fundamentals unavailable</div>` : ""}
+          ${r.surveillance_checked === false ? `<div class="csp-sub">surveillance check failed</div>` : ""}</td>
         <td><span class="csp-score" style="color:var(${r.score>=60?"--pos":r.score>=40?"--amber":"--muted"})">${r.score}</span></td>
         <td>${r.spot?.toLocaleString("en-IN")}</td>
         <td>${r.dte}</td>
@@ -1883,6 +1919,10 @@
         <td><b>${r.p_otm_implied ?? "—"}%</b></td>
         <td class="profit">${inr(r.premium_total)}</td>
         <td>${inr(r.cash_required)}</td>
+        <td>${r.margin_total == null ? '<span class="csp-sub">—</span>' : inr(r.margin_total)}</td>
+        <td>${r.return_on_margin_pct == null ? '<span class="csp-sub">—</span>'
+            : `<b>${r.return_on_margin_pct.toFixed(2)}%</b><div class="csp-sub">${
+               r.ann_return_on_margin_pct == null ? "" : r.ann_return_on_margin_pct.toFixed(0) + "% ann"}</div>`}</td>
         <td>${r.yield_pct?.toFixed(2)}%</td>
         <td>${r.ann_yield_pct?.toFixed(0)}%</td>
         <td>${r.assigned_cost?.toLocaleString("en-IN")}
