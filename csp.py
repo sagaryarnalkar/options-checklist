@@ -522,8 +522,9 @@ def store_snapshot(conn, res: dict) -> int:
             "ann_yield_pct,cycle_open,cycle_drop_pct,d1_pct,d5_pct,from_52w_high,"
             "above_200dma,score,risk_flags,fundamentals,pe_symbol,margin_total,"
             "margin_span,margin_exposure,return_on_margin_pct,"
-            "ann_return_on_margin_pct) VALUES "
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "ann_return_on_margin_pct,assigned_cost,assigned_vs_spot_pct,"
+            "bid_vs_ltp_pct,surveillance,surveillance_checked,news) VALUES "
+            "(" + ",".join(["?"] * 41) + ")",
             (ts, r["symbol"], r["spot"], r["expiry"], r["dte"], r["strike"],
              r["lot_size"], r["bid"], r["ask"], r["ltp"], r["spread_pct"], r["iv"],
              r["realized_vol"], r["p_otm_realized"], r["p_otm_implied"], r["otm_pct"],
@@ -533,7 +534,12 @@ def store_snapshot(conn, res: dict) -> int:
              json.dumps(r["risk_flags"]), json.dumps(r.get("fundamentals")),
              r.get("pe_symbol"), r.get("margin_total"), r.get("margin_span"),
              r.get("margin_exposure"), r.get("return_on_margin_pct"),
-             r.get("ann_return_on_margin_pct")))
+             r.get("ann_return_on_margin_pct"), r.get("assigned_cost"),
+             r.get("assigned_vs_spot_pct"), r.get("bid_vs_ltp_pct"),
+             json.dumps(r.get("surveillance") or []),
+             None if r.get("surveillance_checked") is None
+                  else int(bool(r["surveillance_checked"])),
+             json.dumps(r.get("news")) if r.get("news") else None))
         n += 1
     conn.commit()
     return n
@@ -552,6 +558,13 @@ def latest_snapshot(conn) -> dict:
             d["fundamentals"] = json.loads(d.get("fundamentals") or "null")
         except Exception:
             d["fundamentals"] = None
+        for k, dflt in (("surveillance", []), ("news", None)):
+            try:
+                d[k] = json.loads(d.get(k) or json.dumps(dflt))
+            except Exception:
+                d[k] = dflt
+        if d.get("surveillance_checked") is not None:
+            d["surveillance_checked"] = bool(d["surveillance_checked"])
         d["above_200dma"] = bool(d.get("above_200dma"))
         rows.append(d)
     return {"ok": True, "ts": ts, "rows": rows}

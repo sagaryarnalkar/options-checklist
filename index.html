@@ -505,6 +505,16 @@
      these are the exchange itself saying the name is troubled. */
   .csp-flag.exch{ border-color:var(--neg); color:var(--neg); font-weight:700;
     background:color-mix(in srgb,var(--neg) 12%,transparent); }
+  /* News cell. "clean" (check ran, found nothing) must look different from
+     "—" (check never ran) — they mean opposite things. */
+  .csp-news{ cursor:help; font-size:11px; padding:1px 6px; border-radius:10px;
+    border:1px solid var(--border); white-space:nowrap; }
+  .csp-news.ok{ color:var(--muted); border-color:transparent; }
+  .csp-news.info{ color:var(--muted); }
+  .csp-news.watch{ color:var(--amber); border-color:var(--amber);
+    background:color-mix(in srgb,var(--amber) 10%,transparent); }
+  .csp-news.hard{ color:var(--neg); border-color:var(--neg); font-weight:700;
+    background:color-mix(in srgb,var(--neg) 12%,transparent); }
   .csp-tiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
     gap:10px; margin-bottom:12px; }
   :root[data-skin="fintech"] .csp-flag,:root[data-skin="fintech"] .csp-score{ border-radius:999px; }
@@ -1815,6 +1825,7 @@
     {h:"DTE", t:"Calendar days left to the monthly F&O expiry this idea uses."},
     {h:"Cycle", t:"The stock's move since this expiry cycle began. The scanner deliberately hunts names that have ALREADY fallen — you are selling insurance after the scare, not before it."},
     {h:"5d", t:"The stock's move over the last 5 trading sessions."},
+    {h:"News", t:"Exchange filings for this name in the window (default 24h), from NSE's corporate-announcement feed — the SEBI-mandated disclosure that news reporting is downstream of. Red = a category that is bad however you read it (insolvency, auditor resignation, regulator action, delayed results). Amber = the exchange is asking questions, or the board/auditors/raters are moving — 'Price movement' and 'Rumour Verification' mean the exchange formally asked the company to explain. Grey = routine filings. 'clean' means the check ran and found nothing; a dash means the check did NOT run, which is not the same thing. Hover a row's flags, or open the filing, before selling a put into a fall you cannot explain."},
     {h:"Strike", t:"Put strike chosen so the chance of expiring worthless lands near your target probability. 'lot' is the contract size — one lot is the smallest trade possible."},
     {h:"OTM", t:"How far below spot the strike sits. Further out = safer but less premium."},
     {h:"Bid", t:"The BEST BID — what you would actually receive selling right now. LTP is shown beneath only for comparison; pricing off LTP overstated yield by 25% on our test data, so it is never used."},
@@ -1831,6 +1842,35 @@
     {h:"Ann.", t:"Yield annualised (compounded to 365 days), so ideas with different DTEs can be compared."},
     {h:"If assigned", t:"Your effective cost per share if the put is exercised = strike minus premium. Beneath: how that price compares with today's spot. Assignment is the plan, not the failure case."},
   ];
+
+  // r.assigned_cost was rendering the literal string "undefined" whenever the
+  // field was absent, because `undefined?.toLocaleString()` is undefined, not
+  // null. Route every optional number through here instead.
+  const num = (v, dp = 0) => (v == null || Number.isNaN(v)) ? "—"
+    : v.toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+
+  const esc = s => String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+  // "no news" and "we never looked" must never render the same way.
+  function newsCell(r){
+    const n = r.news;
+    if (!n || !n.checked)
+      return `<span class="csp-sub" title="${esc((n && n.error) || "the news check did not run for this scan")}">—</span>`;
+    const f = n.filings || [], h = n.headlines || [];
+    if (!f.length && !h.length)
+      return `<span class="csp-news ok" title="No exchange filings in the last ${n.window_h}h. The check ran and found nothing — that is not a guarantee, only an absence.">clean</span>`;
+    const tip = [
+      ...f.map(x => `[${x.severity.toUpperCase()} · ${x.age_h}h] ${x.desc}\n${x.text}`),
+      ...h.map(x => `[news · ${x.age_h}h] ${x.title}`),
+    ].join("\n\n");
+    const worst = n.worst || "info";
+    const age = f.length ? f[0].age_h : (h[0] && h[0].age_h);
+    return `<span class="csp-news ${worst}" title="${esc(tip)}">${
+      f.length || h.length}${n.fresh ? " ●" : ""}<span class="csp-sub"> ${
+      age == null ? "" : age + "h"}</span></span>`;
+  }
 
   function renderCsp(d){
     const body = document.getElementById("cspBody"), st = document.getElementById("cspStatus");
@@ -1882,6 +1922,10 @@
       <div class="pt-tile"><div class="lbl">Premium (at bid)</div><div class="val profit">${inr(prem)}</div></div>
       <div class="pt-tile" title="Premium as a share of full cash (top) and of blocked margin (beneath)."><div class="lbl">Blended yield</div><div class="val">${cash?(prem/cash*100).toFixed(2):"—"}%</div>
         <div class="csp-sub">${marg?(prem/marg*100).toFixed(1)+"% on margin":""}</div></div>
+      <div class="pt-tile" title="Ideas carrying an exchange filing in the news window. Red counts categories that are bad however you read them; amber counts the exchange asking questions."><div class="lbl">With news</div><div class="val ${
+        rows.filter(r=>r.news&&r.news.worst==="hard").length?"loss":""}">${
+        rows.filter(r=>r.news&&(r.news.worst==="hard"||r.news.worst==="watch")).length}</div>
+        <div class="csp-sub">${rows.filter(r=>r.news&&r.news.worst==="hard").length} serious</div></div>
       <div class="pt-tile"><div class="lbl">Flagged</div><div class="val ${rows.filter(r=>(r.risk_flags||[]).length).length?"loss":""}">${rows.filter(r=>(r.risk_flags||[]).length).length}</div></div>
     </div>`;
 
@@ -1902,12 +1946,15 @@
           ${flags.length ? `<div class="csp-flags">${flags.map(f =>
             `<span class="csp-flag${/GSM|ASM|ban/.test(f)?" exch":/pledge|debt|ROE|ROCE|margin|earnings|revenue/i.test(f)?" fund":""}">${f}</span>`).join("")}</div>` : ""}
           ${!fund ? `<div class="csp-sub">fundamentals unavailable</div>` : ""}
-          ${r.surveillance_checked === false ? `<div class="csp-sub">surveillance check failed</div>` : ""}</td>
+          ${r.surveillance_checked === false ? `<div class="csp-sub">surveillance check failed</div>` : ""}
+          ${(r.news && r.news.worst === "hard" && (r.news.filings||[]).length)
+            ? `<div class="csp-flags"><span class="csp-flag exch" title="${esc(r.news.filings[0].text)}">filing: ${esc(r.news.filings[0].desc)}</span></div>` : ""}</td>
         <td><span class="csp-score" style="color:var(${r.score>=60?"--pos":r.score>=40?"--amber":"--muted"})">${r.score}</span></td>
         <td>${r.spot?.toLocaleString("en-IN")}</td>
         <td>${r.dte}</td>
         <td class="${cls(r.cycle_drop_pct)}">${pct(r.cycle_drop_pct)}</td>
         <td class="${cls(r.d5_pct)}">${pct(r.d5_pct)}</td>
+        <td>${newsCell(r)}</td>
         <td><span class="csp-strike">${r.strike?.toLocaleString("en-IN")} PE</span>
           <div class="csp-sub">lot ${r.lot_size}</div></td>
         <td>${pct(r.otm_pct)}</td>
@@ -1925,7 +1972,7 @@
                r.ann_return_on_margin_pct == null ? "" : r.ann_return_on_margin_pct.toFixed(0) + "% ann"}</div>`}</td>
         <td>${r.yield_pct?.toFixed(2)}%</td>
         <td>${r.ann_yield_pct?.toFixed(0)}%</td>
-        <td>${r.assigned_cost?.toLocaleString("en-IN")}
+        <td>${num(r.assigned_cost, 2)}
           <div class="csp-sub">${pct(r.assigned_vs_spot_pct)} vs spot</div></td>
       </tr>`; }).join("")}</tbody></table>`;
   }
