@@ -566,7 +566,8 @@ async def csp_ideas():
 async def csp_refresh(background: BackgroundTasks,
                       target_p: float = 0.80, min_drop: float = 5.0,
                       only_dropped: bool = True, daily: bool = False,
-                      fundamentals: bool = True):
+                      fundamentals: bool = True, check_news: bool = True,
+                      news_hours: int = 24):
     """Run a scan now. `daily=true` also refreshes the cached equity bars
     (~200 historical calls — slow, once a day is plenty)."""
     from kite_auth import get_kite_from_cache
@@ -602,6 +603,13 @@ async def csp_refresh(background: BackgroundTasks,
                         min_drop=min_drop, only_dropped=only_dropped)
         if res.get("ok") and fundamentals:
             out["fundamentals"] = _csp.enrich_with_fundamentals(conn, res["rows"])
+        if res.get("ok") and check_news:
+            try:
+                import news as _news
+                out["news"] = _news.attach(res["rows"], window_h=news_hours,
+                                           names=_equity_names(instruments))
+            except Exception as e:
+                out["news"] = {"ok": False, "error": f"{type(e).__name__}: {e}"}
         out["stored"] = _csp.store_snapshot(conn, res)
         out["scanned"] = res.get("scanned")
         out["ideas"] = len(res.get("rows") or [])
@@ -609,6 +617,22 @@ async def csp_refresh(background: BackgroundTasks,
         if not res.get("ok"):
             out["reason"] = res.get("reason")
     return JSONResponse(out)
+
+
+@app.get("/csp/news")
+async def csp_news(symbol: str, hours: int = 24):
+    """Filings + headlines for ONE symbol, fetched live. Read-only and needs no
+    Kite session — it is all public exchange/news data."""
+    import news as _news
+    ann = _news.fetch_announcements()
+    if not ann.get("ok"):
+        return JSONResponse({"ok": False, "error": ann.get("error")})
+    sym = symbol.upper()
+    filings = [x for x in (ann["by_symbol"].get(sym) or []) if x["age_h"] <= hours]
+    company = (ann.get("names") or {}).get(sym) or sym
+    return JSONResponse({"ok": True, "symbol": sym, "company": company,
+                         "window_h": hours, "filings": filings,
+                         "headlines": _news.google_news(f'"{company}" share', hours=hours)})
 
 
 @app.get("/login")
@@ -710,6 +734,14 @@ async def _run_compute_subprocess() -> dict:
 _csp_daily_done_on = None
 
 
+def _equity_names(instruments) -> dict:
+    """symbol -> company name, for precise news queries. A bare ticker pulls
+    sector SEO spam; the full name does not."""
+    return {i["tradingsymbol"]: i.get("name")
+            for i in instruments
+            if i.get("segment") == "NSE" and i.get("name")}
+
+
 def _csp_tick():
     """30-minute CSP scan. No-ops outside market hours or without a session."""
     global _csp_daily_done_on
@@ -730,6 +762,12 @@ def _csp_tick():
             res = _csp.scan(kite, instruments, conn)
             if res.get("ok"):
                 _csp.enrich_with_fundamentals(conn, res["rows"])
+                try:
+                    import news as _news
+                    nm = _news.attach(res["rows"], names=_equity_names(instruments))
+                    print(f"[csp] news: {nm.get('hard')} hard / {nm.get('watch')} watch")
+                except Exception as e:
+                    print(f"[csp] news check failed: {type(e).__name__}: {e}")
                 n = _csp.store_snapshot(conn, res)
                 print(f"[csp] {n} ideas from {res['scanned']} names")
     except Exception as e:
