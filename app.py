@@ -53,7 +53,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
 )
@@ -510,17 +510,61 @@ async def logout():
     return JSONResponse({"ok": True, "logged_in": False})
 
 
+# Bootstrap state. The daily equity bars are ~200 Kite historical calls at
+# 3 req/s (~90s), far too slow to hold an HTTP request open, so the first
+# fetch runs in the background and the UI polls this.
+_csp_boot = {"running": False, "done": 0, "total": 0, "started": None,
+             "finished": None, "error": None}
+
+
+def _csp_bootstrap_bars(target_p: float = 0.80, min_drop: float = 5.0,
+                        only_dropped: bool = True):
+    """Populate csp_daily, then run a scan so the tab has something to show."""
+    import csp as _csp
+    from kite_auth import get_kite_from_cache
+    global _csp_boot
+    try:
+        kite = get_kite_from_cache()
+        if kite is None:
+            _csp_boot.update(running=False, error="no Kite session")
+            return
+        instruments = kite.instruments("NFO") + kite.instruments("NSE")
+        uni = _csp.fno_equity_symbols(instruments)
+        _csp_boot.update(total=len(uni), done=0)
+        with db.get_conn() as conn:
+            # chunked so progress is visible and a mid-way failure keeps what
+            # it already fetched
+            syms = sorted(uni)
+            for i in range(0, len(syms), 20):
+                _csp.refresh_daily_bars(kite, instruments, conn, symbols=syms[i:i + 20])
+                _csp_boot["done"] = min(i + 20, len(syms))
+            res = _csp.scan(kite, instruments, conn, target_p=target_p,
+                            min_drop=min_drop, only_dropped=only_dropped)
+            if res.get("ok"):
+                _csp.enrich_with_fundamentals(conn, res["rows"])
+                _csp.store_snapshot(conn, res)
+        _csp_boot.update(running=False, finished=_dt.datetime.now(recorder.IST).isoformat())
+    except Exception as e:
+        _csp_boot.update(running=False, error=f"{type(e).__name__}: {e}")
+
+
 @app.get("/csp/ideas")
 async def csp_ideas():
     """Latest cached CSP snapshot (written by the 30-minute job). Read-only —
-    never fetches, so the page is instant and works logged out."""
+    never fetches, so the page is instant and works logged out. Carries the
+    bootstrap status so a first-run user sees progress, not an empty table."""
     import csp as _csp
     with db.get_conn() as conn:
-        return JSONResponse(_csp.latest_snapshot(conn))
+        out = _csp.latest_snapshot(conn)
+        n = conn.execute("SELECT COUNT(DISTINCT symbol) FROM csp_daily").fetchone()[0]
+    out["bars_cached_for"] = n
+    out["bootstrap"] = dict(_csp_boot)
+    return JSONResponse(out)
 
 
 @app.post("/csp/refresh")
-async def csp_refresh(target_p: float = 0.80, min_drop: float = 5.0,
+async def csp_refresh(background: BackgroundTasks,
+                      target_p: float = 0.80, min_drop: float = 5.0,
                       only_dropped: bool = True, daily: bool = False,
                       fundamentals: bool = True):
     """Run a scan now. `daily=true` also refreshes the cached equity bars
@@ -534,10 +578,26 @@ async def csp_refresh(target_p: float = 0.80, min_drop: float = 5.0,
         instruments = kite.instruments("NFO") + kite.instruments("NSE")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"instruments: {e}")
+    # Self-heal the chicken-and-egg: a scan needs cached daily bars, and until
+    # #80 nothing but the market-hours scheduler ever fetched them — so the
+    # button could never produce data on a fresh install.
+    with db.get_conn() as conn:
+        have = conn.execute("SELECT COUNT(DISTINCT symbol) FROM csp_daily").fetchone()[0]
+    if daily or have < 20:
+        if _csp_boot.get("running"):
+            return JSONResponse({"ok": False, "bootstrapping": True,
+                                 "bootstrap": dict(_csp_boot),
+                                 "reason": "already fetching daily bars"})
+        _csp_boot.update(running=True, done=0, total=0, error=None,
+                         started=_dt.datetime.now(recorder.IST).isoformat(),
+                         finished=None)
+        background.add_task(_csp_bootstrap_bars, target_p, min_drop, only_dropped)
+        return JSONResponse({"ok": False, "bootstrapping": True,
+                             "bootstrap": dict(_csp_boot),
+                             "reason": "fetching daily equity bars in the background "
+                                       "(~200 calls, about 2 minutes) — reload after"})
     out = {}
     with db.get_conn() as conn:
-        if daily:
-            out["daily"] = _csp.refresh_daily_bars(kite, instruments, conn)
         res = _csp.scan(kite, instruments, conn, target_p=target_p,
                         min_drop=min_drop, only_dropped=only_dropped)
         if res.get("ok") and fundamentals:

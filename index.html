@@ -1746,7 +1746,7 @@
   }
 
   // ---------- Cash Puts tab (#79) ----------
-  let _cspInited = false, _cspData = null;
+  let _cspInited = false, _cspData = null, _cspPoll = null;
   function initCspTab(){
     if (_cspInited){ loadCsp(); return; }
     _cspInited = true;
@@ -1783,7 +1783,13 @@
       if (r.status === 401){ st.textContent = "Needs a Kite session — use the ⚡ login, top right.";
                              st.className = "oi-status warn"; return; }
       const j = await r.json();
-      st.textContent = j.ok ? `Scanned ${j.scanned} names → ${j.ideas} ideas` + 
+      if (j.bootstrapping){
+        st.textContent = j.reason || "Fetching daily bars…";
+        st.className = "oi-status";
+        await loadCsp();                       // renderCsp starts the poll
+        return;
+      }
+      st.textContent = j.ok ? `Scanned ${j.scanned} names → ${j.ideas} ideas` +
         (j.fundamentals ? ` · fundamentals ${j.fundamentals.enriched} ok / ${j.fundamentals.unavailable} unavailable` : "")
         : `Scan returned nothing: ${j.reason || "unknown"}`;
       await loadCsp();
@@ -1793,11 +1799,30 @@
   function renderCsp(d){
     const body = document.getElementById("cspBody"), st = document.getElementById("cspStatus");
     if (!d || !d.ok){
-      body.innerHTML = `<div class="note">${(d && d.reason) || "No scan yet"} — press
+      const b = (d && d.bootstrap) || {};
+      const bars = (d && d.bars_cached_for) || 0;
+      if (b.running){
+        const pct = b.total ? Math.round(b.done / b.total * 100) : 0;
+        st.textContent = `Fetching daily equity bars — ${b.done}/${b.total || "?"} (${pct}%)`;
+        st.className = "oi-status";
+        body.innerHTML = `<div class="note"><b>First run: building the price history.</b>
+          Roughly 200 Kite calls, about two minutes. This happens once — after that the
+          half-hourly scans reuse it. Progress updates automatically.</div>`;
+        if (!_cspPoll) _cspPoll = setInterval(loadCsp, 5000);
+        return;
+      }
+      if (_cspPoll){ clearInterval(_cspPoll); _cspPoll = null; }
+      if (b.error){
+        st.textContent = "Bootstrap failed: " + b.error;
+        st.className = "oi-status error";
+      }
+      body.innerHTML = `<div class="note">${(d && d.reason) || "No scan yet"}${
+        bars ? ` · daily bars cached for ${bars} names` : ""} — press
         <b>Re-scan now</b> (needs a Kite session), or wait for the next
         half-hourly run during market hours.</div>`;
-      st.textContent = ""; return;
+      return;
     }
+    if (_cspPoll){ clearInterval(_cspPoll); _cspPoll = null; }
     const minDrop = parseFloat(document.getElementById("cspMinDrop").value);
     const onlyDropped = document.getElementById("cspOnlyDropped").value === "1";
     const hideRisky = document.getElementById("cspHideRisky").value === "1";
