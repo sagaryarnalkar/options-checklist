@@ -103,6 +103,13 @@ async def _startup():
     )
     # Daily auto-refresh at 15:16 IST (09:46 UTC) — runs compute.py so the
     # paper ledger opens/marks/exits on schedule days without a manual Refresh.
+    # CSP scan every 30 minutes during market hours. Quotes only — the daily
+    # equity bars are refreshed once, on the first tick of the day.
+    _scheduler.add_job(
+        _csp_tick,
+        trigger=CronTrigger(minute="0,30", hour="3-10", day_of_week="mon-fri", timezone="UTC"),
+        id="csp_scan", replace_existing=True, max_instances=1, coalesce=True,
+    )
     _scheduler.add_job(
         _scheduled_refresh,
         trigger=CronTrigger(hour=9, minute=46, day_of_week="mon-fri", timezone="UTC"),
@@ -503,6 +510,47 @@ async def logout():
     return JSONResponse({"ok": True, "logged_in": False})
 
 
+@app.get("/csp/ideas")
+async def csp_ideas():
+    """Latest cached CSP snapshot (written by the 30-minute job). Read-only —
+    never fetches, so the page is instant and works logged out."""
+    import csp as _csp
+    with db.get_conn() as conn:
+        return JSONResponse(_csp.latest_snapshot(conn))
+
+
+@app.post("/csp/refresh")
+async def csp_refresh(target_p: float = 0.80, min_drop: float = 5.0,
+                      only_dropped: bool = True, daily: bool = False,
+                      fundamentals: bool = True):
+    """Run a scan now. `daily=true` also refreshes the cached equity bars
+    (~200 historical calls — slow, once a day is plenty)."""
+    from kite_auth import get_kite_from_cache
+    import csp as _csp
+    kite = get_kite_from_cache()
+    if kite is None:
+        raise HTTPException(status_code=401, detail="no Kite session")
+    try:
+        instruments = kite.instruments("NFO") + kite.instruments("NSE")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"instruments: {e}")
+    out = {}
+    with db.get_conn() as conn:
+        if daily:
+            out["daily"] = _csp.refresh_daily_bars(kite, instruments, conn)
+        res = _csp.scan(kite, instruments, conn, target_p=target_p,
+                        min_drop=min_drop, only_dropped=only_dropped)
+        if res.get("ok") and fundamentals:
+            out["fundamentals"] = _csp.enrich_with_fundamentals(conn, res["rows"])
+        out["stored"] = _csp.store_snapshot(conn, res)
+        out["scanned"] = res.get("scanned")
+        out["ideas"] = len(res.get("rows") or [])
+        out["ok"] = res.get("ok", False)
+        if not res.get("ok"):
+            out["reason"] = res.get("reason")
+    return JSONResponse(out)
+
+
 @app.get("/login")
 async def login():
     return RedirectResponse(login_url())
@@ -597,6 +645,35 @@ async def _run_compute_subprocess() -> dict:
     )
     out, _ = await proc.communicate()
     return {"exit_code": proc.returncode, "log": out.decode(errors="replace")}
+
+
+_csp_daily_done_on = None
+
+
+def _csp_tick():
+    """30-minute CSP scan. No-ops outside market hours or without a session."""
+    global _csp_daily_done_on
+    import csp as _csp
+    from kite_auth import get_kite_from_cache
+    if not recorder.is_market_hours():
+        return
+    kite = get_kite_from_cache()
+    if kite is None:
+        return
+    today = _dt.datetime.now(recorder.IST).date()
+    try:
+        instruments = kite.instruments("NFO") + kite.instruments("NSE")
+        with db.get_conn() as conn:
+            if _csp_daily_done_on != today:      # expensive: once per day
+                _csp.refresh_daily_bars(kite, instruments, conn)
+                _csp_daily_done_on = today
+            res = _csp.scan(kite, instruments, conn)
+            if res.get("ok"):
+                _csp.enrich_with_fundamentals(conn, res["rows"])
+                n = _csp.store_snapshot(conn, res)
+                print(f"[csp] {n} ideas from {res['scanned']} names")
+    except Exception as e:
+        print(f"[csp] tick failed: {type(e).__name__}: {e}")
 
 
 async def _scheduled_refresh():
