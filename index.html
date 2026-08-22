@@ -515,6 +515,40 @@
     background:color-mix(in srgb,var(--amber) 10%,transparent); }
   .csp-news.hard{ color:var(--neg); border-color:var(--neg); font-weight:700;
     background:color-mix(in srgb,var(--neg) 12%,transparent); }
+
+  /* ---- Build follow-through ---- */
+  .hold-grid{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+    gap:14px; padding:10px 12px 12px; }
+  @media (max-width:900px){ .hold-grid{ grid-template-columns:minmax(0,1fr); } }
+  .hold-col{ font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    font-weight:700; padding:4px 0 8px; }
+  .hold-col.ok{ color:var(--pos); }
+  .hold-col.bad{ color:var(--neg); }
+  .hold-card{ border:1px solid var(--border); border-left-width:3px;
+    border-radius:var(--radius-sm,6px); padding:7px 9px; margin-bottom:7px;
+    font-family:var(--mono); font-size:11px; }
+  .hold-card.ok{ border-left-color:var(--pos);
+    background:color-mix(in srgb,var(--pos) 4%,transparent); }
+  .hold-card.bad{ border-left-color:var(--neg);
+    background:color-mix(in srgb,var(--neg) 5%,transparent); }
+  .hold-head{ display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .hold-tag{ font-size:9px; text-transform:uppercase; letter-spacing:.05em;
+    color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:0 5px; }
+  .hold-hits{ font-size:9px; font-weight:700; cursor:help; color:var(--amber);
+    border:1px solid var(--amber); border-radius:8px; padding:0 5px;
+    background:color-mix(in srgb,var(--amber) 10%,transparent); }
+  .hold-oi{ margin-top:3px; font-size:10px; color:var(--muted); }
+  .hold-note{ font-size:10.5px; color:var(--muted); padding:8px 12px; line-height:1.5; }
+
+  /* ---- Pulse rail ---- */
+  .pulse-row{ padding:7px 0; border-bottom:1px solid var(--border); cursor:help; }
+  .pulse-row:last-child{ border-bottom:0; }
+  .pulse-lbl{ font-size:10px; text-transform:uppercase; letter-spacing:.06em;
+    color:var(--muted); }
+  .pulse-val{ float:right; font-family:var(--mono); font-weight:700; font-size:13px; }
+  .part-tbl td{ font-family:var(--mono); font-size:11px; text-align:right; padding:5px 4px; }
+  .part-tbl td:first-child{ text-align:left; }
+  .part-tbl th{ cursor:help; }
   .csp-tiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
     gap:10px; margin-bottom:12px; }
   :root[data-skin="fintech"] .csp-flag,:root[data-skin="fintech"] .csp-score{ border-radius:999px; }
@@ -1037,8 +1071,24 @@
           </div>
           <div id="oiLadder"><div class="note">no data yet</div></div>
         </div>
+
+        <div class="oi-chart-card" id="holdCard">
+          <div class="oi-chart-title">
+            <span>Build follow-through — was the flagged open-interest build still on at the close?</span>
+            <span id="holdBase" class="csp-sub"></span>
+          </div>
+          <div id="holdBody"><div class="note">no graded builds yet</div></div>
+        </div>
       </div>
       <aside class="oi-side">
+        <div class="oi-side-panel">
+        <div class="oi-side-title">Expected move · max pain · skew</div>
+        <div class="oi-side-body" id="pulseBody"><div class="note">no data yet</div></div>
+        </div>
+        <div class="oi-side-panel">
+        <div class="oi-side-title">Participant positioning <span class="csp-sub" id="partDate"></span></div>
+        <div class="oi-side-body" id="partBody"><div class="note">no data yet</div></div>
+        </div>
         <div class="oi-side-panel">
         <div class="oi-side-title">ATM fund flow (₹cr)</div>
         <table class="oi-ff" id="oiFundFlow">
@@ -2038,7 +2088,9 @@
     } catch(e) {
       setOiStatus(e.message, "error"); return;
     }
-    document.getElementById("oiUnderlying").addEventListener("change", () => { loadOiDays(); });
+    document.getElementById("oiUnderlying").addEventListener("change", () => {
+      loadOiDays(); loadHolds(); loadPulse();
+    });
     document.getElementById("oiReload").addEventListener("click", oiReload);
     document.getElementById("oiDays").addEventListener("change", oiReload);
     document.getElementById("oiMode").addEventListener("change", oiReload);
@@ -2271,6 +2323,151 @@
     } catch(e){ /* rail/secondary panel — never block the main chart */ }
   }
 
+  const oiUnderlying = () => document.getElementById("oiUnderlying")?.value || "NIFTY";
+
+  // ---------- Build follow-through (did it hold?) ----------
+  // Measured on our own 16 recorded sessions: a contract-day carrying at least
+  // one flagged build closed above its prior close 67.8% of the time versus
+  // 54.9% for one that did not (+12.9pp, z=4.14). But a SINGLE build is 56.9%
+  // — barely off the 54.9% baseline — while 5+ builds on the same contract run
+  // 71.5%. So the hit count is the signal and a lone flag is close to noise;
+  // the table sorts by it and says so.
+  function renderHolds(d){
+    const body = document.getElementById("holdBody");
+    const base = document.getElementById("holdBase");
+    if (!d || !d.ok){
+      body.innerHTML = `<div class="note">${(d && d.reason) || "no graded builds yet"} —
+        run <code>POST /oi/grade_holds</code> once to grade the recorded history.</div>`;
+      base.textContent = ""; return;
+    }
+    const st = d.stats || {}, o = st.overall || {}, m = st.matched;
+    // Headline is the MATCHED contract-day lift, not the per-event rate: a
+    // contract with 20 builds counts 20 times in the event tally.
+    base.innerHTML = m
+      ? `<b>${m.with_build.pct}%</b> of flagged contract-days held vs
+         <b>${m.no_build.pct}%</b> unflagged · <b class="${m.lift_pp>0?"profit":"loss"}">${
+         m.lift_pp>0?"+":""}${m.lift_pp}pp</b>${m.z!=null?` · z=${m.z}${m.significant?"":" (not significant)"}`:""}`
+      : (o.n ? `${o.held}/${o.n} builds held (${o.pct}%) across ${st.sessions} sessions` : "");
+    const held = d.held || [], miss = d.did_not_hold || [], unj = d.unjudged || [];
+    const n0 = v => v == null ? "—" : Number(v).toLocaleString("en-IN");
+    const card = b => {
+      const trip = b.oi_peak != null && b.oi_close != null && b.oi_peak > b.oi_close * 1.15;
+      return `<div class="hold-card ${b.held === 1 ? "ok" : "bad"}">
+        <div class="hold-head"><b>${Math.round(b.strike)} ${b.opt_type}</b>
+          <span class="csp-sub">${String(b.ts).slice(11,16)}</span>
+          <span class="hold-tag">${b.side.replace("_"," ")}</span>
+          ${b.hits > 1 ? `<span class="hold-hits" title="builds on this contract today — 5+ hold 71.5% of the time, a single build only 56.9%">${b.hits} hits</span>` : ""}
+        </div>
+        <div class="csp-sub">₹${b.value_cr} Cr traded in the build minute</div>
+        <div class="hold-oi">OI ${n0(b.oi_at_fire)} → peak ${n0(b.oi_peak)} → low ${n0(b.oi_low)} → close ${n0(b.oi_close)}
+          ${b.day_delta != null ? `· <b class="${b.day_delta >= 0 ? "profit" : "loss"}">${b.day_delta >= 0 ? "+" : ""}${n0(b.day_delta)} on the day</b>` : ""}
+          ${trip ? ` · <span class="loss">round trip</span>` : ""}</div>
+      </div>`;
+    };
+    const byHits = (a,b) => (b.hits||0) - (a.hits||0) || (b.value_cr||0) - (a.value_cr||0);
+    // One card per CONTRACT, not per build event — a strike hit 21 times was
+    // filling the panel with 21 copies of itself. The hit count is on the card.
+    const byContract = list => {
+      const seen = new Map();
+      for (const b of list.slice().sort(byHits)){
+        const k = `${b.expiry}|${b.strike}|${b.opt_type}`;
+        if (!seen.has(k)) seen.set(k, b);
+      }
+      return [...seen.values()];
+    };
+    body.innerHTML = `
+      <div class="hold-note">The build STAYED ON if open interest closed above the prior
+        session's close. <b>This is not a profit or loss figure</b> — a build that holds can
+        still be a losing position, and one that unwinds may have been closed at a gain.
+        One row per contract, ranked by hit count, because repeat builds are what actually
+        predict holding: a single build runs at roughly the unflagged baseline.</div>
+      <div class="hold-grid">
+        <div><div class="hold-col ok">Held · ${byContract(held).length} contracts</div>
+          ${byContract(held).slice(0,8).map(card).join("") || '<div class="note">none</div>'}</div>
+        <div><div class="hold-col bad">Did not hold · ${byContract(miss).length} contracts</div>
+          ${byContract(miss).slice(0,8).map(card).join("") || '<div class="note">none</div>'}</div>
+      </div>
+      ${unj.length ? `<div class="hold-note">${unj.length} build${unj.length>1?"s":""} not graded —
+        no prior session recorded for that contract (a fresh weekly), or the session was only
+        partly captured. Excluded from the base rate rather than counted as failures.</div>` : ""}
+      ${(st.by_hits) ? `<div class="hold-note">Hold rate by hit count:
+        ${Object.entries(st.by_hits).filter(([,v])=>v.n).map(([k,v]) =>
+          `<b>${k}</b> ${v.pct}% (n=${v.n})`).join(" · ")}</div>` : ""}`;
+  }
+
+  async function loadHolds(){
+    try {
+      const r = await fetch("/oi/holds?underlying=" + encodeURIComponent(oiUnderlying()) + "&_=" + Date.now(),
+                            { cache: "no-store" });
+      renderHolds(r.ok ? await r.json() : null);
+    } catch(e){ /* secondary panel */ }
+  }
+
+  // ---------- Expected move / max pain / skew ----------
+  function renderPulse(d){
+    const el = document.getElementById("pulseBody");
+    const u = oiUnderlying();
+    const p = d && d[u];
+    if (!p){ el.innerHTML = `<div class="note">no data yet</div>`; return; }
+    const em = p.expected_move || {}, mp = p.max_pain || {}, sk = p.iv_skew || {};
+    const rows = [];
+    if (em.ok) rows.push(`<div class="pulse-row" title="1 sigma backed out of the ATM options by Black-Scholes inversion — not the 'straddle x 0.68' rule of thumb, which cannot be derived. Validated on our history: BANKNIFTY closed inside this band on 69% of sessions against a 68% target; NIFTY on 81%, i.e. implied vol ran richer than realised — the premium a seller is collecting.">
+        <span class="pulse-lbl">Expected move (${em.dte}d)</span>
+        <span class="pulse-val">±${em.one_sigma} <span class="csp-sub">(${em.one_sigma_pct}%)</span></span>
+        <div class="csp-sub">${em.lower} – ${em.upper} · ATM ${em.atm_strike} straddle ₹${em.straddle} · IV ${em.iv}%</div></div>`);
+    if (mp.ok) rows.push(`<div class="pulse-row" title="Strike at which writers in aggregate pay out least. POSITIONING, NOT A FORECAST: we tested whether spot drifts toward it and got 21/32 sessions (p=0.055) — suggestive, not significant, and underpowered. Do not trade it as a target.${mp.on_band_edge ? " WARNING: max pain sits on the edge of the strikes we record, so the true minimum is probably outside the band." : ""}">
+        <span class="pulse-lbl">Max pain</span>
+        <span class="pulse-val">${mp.max_pain}${mp.on_band_edge ? ' <span class="loss">⚠</span>' : ""}</span>
+        <div class="csp-sub">spot ${mp.distance >= 0 ? "+" : ""}${mp.distance} away · not a forecast (21/32, p=0.06)</div></div>`);
+    if (sk.ok) rows.push(`<div class="pulse-row" title="Implied vol on an equidistant OTM call vs OTM put. Put skew means the market charges more for downside protection than upside — normal for an index, and it steepens exactly when a short-vol book is hurting.">
+        <span class="pulse-lbl">IV skew</span>
+        <span class="pulse-val ${sk.skew < 0 ? "loss" : "profit"}">${sk.skew > 0 ? "+" : ""}${sk.skew}</span>
+        <div class="csp-sub">${sk.lean} · CE ${sk.iv_call}% @${sk.call_strike} vs PE ${sk.iv_put}% @${sk.put_strike}</div></div>`);
+    el.innerHTML = rows.join("") || `<div class="note">no data yet</div>`;
+  }
+
+  async function loadPulse(){
+    try {
+      const r = await fetch("/pulse?_=" + Date.now(), { cache: "no-store" });
+      renderPulse(r.ok ? await r.json() : null);
+    } catch(e){ /* secondary panel */ }
+  }
+
+  // ---------- Participant positioning ----------
+  function renderParticipants(d){
+    const el = document.getElementById("partBody"), dt = document.getElementById("partDate");
+    if (!d || !d.ok){
+      el.innerHTML = `<div class="note">${(d && d.reason) || "no data"} — <code>POST /participants/refresh</code></div>`;
+      dt.textContent = ""; return;
+    }
+    dt.textContent = d.date;
+    const n0 = v => v == null ? "—" : (v >= 0 ? "+" : "") + Number(v).toLocaleString("en-IN");
+    const cls = v => v == null ? "" : (v > 0 ? "profit" : v < 0 ? "loss" : "");
+    const order = ["FII","DII","Pro","Client"];
+    const rows = order.filter(k => d.participants[k]).map(k => {
+      const r = d.participants[k];
+      return `<tr><td><b>${k}</b></td>
+        <td class="${cls(r.fut_idx_net)}">${n0(r.fut_idx_net)}<div class="csp-sub">${n0(r.fut_idx_net_chg)}</div></td>
+        <td class="${cls(r.opt_idx_net)}">${n0(r.opt_idx_net)}<div class="csp-sub">${n0(r.opt_idx_net_chg)}</div></td></tr>`;
+    }).join("");
+    el.innerHTML = `<table class="oi-ff part-tbl">
+      <thead><tr><th></th>
+        <th title="Index futures: long minus short, in contracts.">Idx fut</th>
+        <th title="Index options stance: (long calls + short puts) minus (short calls + long puts), in contracts. Positive = bullish lean.">Idx opt</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+      ${d.fii_dii_opposed ? `<div class="hold-note">FII and DII are on opposite sides in index futures.</div>` : ""}
+      <div class="hold-note">Contract counts, published after the close — a slow positioning
+        gauge, never a signal. Small numbers under each figure are the change since ${d.prev_date || "the prior session"}.
+        No rupee values: NSE publishes a value report for FII only, so every DII rupee figure you see elsewhere is an estimate.</div>`;
+  }
+
+  async function loadParticipants(){
+    try {
+      const r = await fetch("/participants?_=" + Date.now(), { cache: "no-store" });
+      renderParticipants(r.ok ? await r.json() : null);
+    } catch(e){ /* secondary panel */ }
+  }
+
   function chartTheme(){
     const text = cssv("--color-text");
     return {
@@ -2416,6 +2613,9 @@
       renderOiData(d, { keepView: silent });
       loadLLT(days);
       loadLadder();
+      loadHolds();
+      loadPulse();
+      loadParticipants();
     } catch(e) {
       setOiStatus("Failed to load aggregate: " + e.message, "error");
     }
