@@ -119,6 +119,96 @@ CREATE TABLE IF NOT EXISTS score_marker_outcomes (
 
 CREATE INDEX IF NOT EXISTS idx_smo_underlying_ts ON score_marker_outcomes(underlying, ts);
 
+-- Per-strike OI builds and whether they were still on at the closing bell.
+-- `held` is NULLABLE on purpose: a build we cannot honestly judge (no prior
+-- session recorded, or the session was only partly captured) must be excluded
+-- from the base rate, never counted as a failure.
+CREATE TABLE IF NOT EXISTS oi_builds (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT    NOT NULL,
+    underlying      TEXT    NOT NULL,
+    expiry          TEXT    NOT NULL,
+    strike          REAL    NOT NULL,
+    opt_type        TEXT    NOT NULL,
+    oi_at_fire      INTEGER,
+    doi_at_fire     INTEGER,
+    vol_units       INTEGER,
+    value_cr        REAL,
+    ltp_at_fire     REAL,
+    spot_at_fire    REAL,
+    side            TEXT,               -- call_buy | call_write | put_buy | put_write
+    bias            TEXT,               -- bullish | bearish
+    gate_units      REAL,
+    oi_prior_close  INTEGER,
+    oi_peak         INTEGER,
+    oi_low          INTEGER,
+    oi_close        INTEGER,
+    day_delta       INTEGER,
+    held            INTEGER,            -- 1 held · 0 did not · NULL unjudgeable
+    hits            INTEGER,            -- builds on this contract that session
+    session_complete INTEGER,
+    UNIQUE(ts, underlying, expiry, strike, opt_type)
+);
+CREATE INDEX IF NOT EXISTS idx_oi_builds_day ON oi_builds(underlying, ts);
+
+-- The control for oi_builds: one row per session giving the hold rate of
+-- contract-days WITH a flagged build against those WITHOUT. Open interest
+-- drifts up through an expiry cycle, so an unconditioned hold rate proves
+-- nothing; only this gap is evidence.
+CREATE TABLE IF NOT EXISTS hold_baseline (
+    d                TEXT NOT NULL,
+    underlying       TEXT NOT NULL,
+    with_build_held  INTEGER, with_build_n INTEGER,
+    no_build_held    INTEGER, no_build_n   INTEGER,
+    UNIQUE(d, underlying)
+);
+
+-- NSE participant-wise derivatives OI, one row per (session, participant
+-- class). Contract counts only: NSE publishes a rupee value report for FII
+-- alone, so any DII rupee figure is an estimate and we decline to store one.
+CREATE TABLE IF NOT EXISTS participant_oi (
+    d                TEXT NOT NULL,
+    client_type      TEXT NOT NULL,     -- FII | DII | Pro | Client
+    fut_idx_long INTEGER, fut_idx_short INTEGER,
+    fut_stk_long INTEGER, fut_stk_short INTEGER,
+    opt_idx_ce_long INTEGER, opt_idx_pe_long INTEGER,
+    opt_idx_ce_short INTEGER, opt_idx_pe_short INTEGER,
+    opt_stk_ce_long INTEGER, opt_stk_pe_long INTEGER,
+    opt_stk_ce_short INTEGER, opt_stk_pe_short INTEGER,
+    total_long INTEGER, total_short INTEGER,
+    fut_idx_net INTEGER, fut_stk_net INTEGER,
+    opt_idx_net INTEGER, opt_stk_net INTEGER,
+    UNIQUE(d, client_type)
+);
+
+-- Tick-level aggressor totals per contract-minute (aggressor.py daemon).
+-- `unknown_units` is first-class: prints inside the spread are unreadable and
+-- must stay visible, so a 60% buy share on 100 readable of 900 traded cannot
+-- be mistaken for conviction.
+CREATE TABLE IF NOT EXISTS aggressor_minute (
+    ts               TEXT    NOT NULL,
+    instrument_token INTEGER NOT NULL,
+    buy_units        INTEGER,
+    sell_units       INTEGER,
+    unknown_units    INTEGER,
+    readable_units   INTEGER,
+    buy_pct          REAL,
+    ticks            INTEGER,
+    last_price       REAL,
+    UNIQUE(ts, instrument_token)
+);
+CREATE INDEX IF NOT EXISTS idx_aggr_ts ON aggressor_minute(ts);
+
+-- Token -> contract, so aggressor rows can be read back as strikes.
+CREATE TABLE IF NOT EXISTS aggressor_meta (
+    instrument_token INTEGER PRIMARY KEY,
+    tradingsymbol    TEXT,
+    name             TEXT,
+    strike           REAL,
+    opt_type         TEXT,
+    expiry           TEXT
+);
+
 -- Paper-trading ledger: every actionable dashboard recommendation is assumed
 -- executed at PAPER_LOTS lots. Opened/marked/closed by paper.sync() on each
 -- compute.py refresh. entry/exit/mark values are net cash PER UNIT with the
@@ -327,6 +417,18 @@ def insert_candles(conn: sqlite3.Connection, rows: list) -> int:
     cur = conn.executemany(sql, data)
     conn.commit()
     return cur.rowcount
+
+
+def store_aggressor_meta(conn: sqlite3.Connection, tokens: dict) -> int:
+    """Remember which contract each subscribed token is."""
+    conn.executemany(
+        "INSERT OR REPLACE INTO aggressor_meta "
+        "(instrument_token,tradingsymbol,name,strike,opt_type,expiry) "
+        "VALUES (?,?,?,?,?,?)",
+        [(t, m.get("tradingsymbol"), m.get("name"), m.get("strike"),
+          m.get("opt_type"), m.get("expiry")) for t, m in tokens.items()])
+    conn.commit()
+    return len(tokens)
 
 
 def upsert_marker_outcomes(conn: sqlite3.Connection, rows: list) -> int:

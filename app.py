@@ -111,6 +111,11 @@ async def _startup():
         id="csp_scan", replace_existing=True, max_instances=1, coalesce=True,
     )
     _scheduler.add_job(
+        _eod_tick,
+        trigger=CronTrigger(hour=12, minute=15, day_of_week="mon-fri", timezone="UTC"),
+        id="eod_grade", replace_existing=True, max_instances=1, coalesce=True,
+    )
+    _scheduler.add_job(
         _scheduled_refresh,
         trigger=CronTrigger(hour=9, minute=46, day_of_week="mon-fri", timezone="UTC"),
         id="daily_compute",
@@ -619,6 +624,76 @@ async def csp_refresh(background: BackgroundTasks,
     return JSONResponse(out)
 
 
+@app.get("/oi/holds")
+async def oi_holds(underlying: str = "NIFTY", date: str | None = None):
+    """One session's OI builds, split into the ones that were still on at the
+    closing bell and the ones that round-tripped."""
+    import hold as _hold
+    with db.get_conn() as conn:
+        d = date or (conn.execute(
+            "SELECT substr(MAX(ts),1,10) FROM oi_builds WHERE underlying=?",
+            (underlying,)).fetchone()[0])
+        if not d:
+            return JSONResponse({"ok": False, "reason": "no graded builds yet"})
+        out = _hold.recent_builds(conn, underlying, d, limit=400)
+        out.update(ok=True, date=d, underlying=underlying,
+                   stats=_hold.hold_stats(conn, underlying))
+    return JSONResponse(out)
+
+
+@app.get("/oi/hold_stats")
+async def oi_hold_stats(underlying: str | None = None):
+    """Base rate: how often a flagged build was still on at the close."""
+    import hold as _hold
+    with db.get_conn() as conn:
+        return JSONResponse(_hold.hold_stats(conn, underlying))
+
+
+@app.post("/oi/grade_holds")
+async def oi_grade_holds(days: int = 30):
+    """Detect and grade builds for every recorded session (idempotent)."""
+    import hold as _hold
+    done = []
+    with db.get_conn() as conn:
+        dates = [r[0] for r in conn.execute(
+            "SELECT DISTINCT substr(ts,1,10) FROM chain_snapshot "
+            "ORDER BY 1 DESC LIMIT ?", (days,))][::-1]
+        for u in ("NIFTY", "BANKNIFTY"):
+            for d in dates:
+                try:
+                    done.append(_hold.run_session(conn, u, d))
+                except Exception as e:
+                    done.append({"date": d, "underlying": u,
+                                 "error": f"{type(e).__name__}: {e}"})
+        stats = _hold.hold_stats(conn)
+    return JSONResponse({"ok": True, "sessions": len(done), "stats": stats})
+
+
+@app.get("/pulse")
+async def pulse_read():
+    """Expected move, max pain and IV skew from the recorded chain."""
+    import pulse as _pulse
+    with db.get_conn() as conn:
+        return JSONResponse(_pulse.pulse_block(conn))
+
+
+@app.get("/participants")
+async def participants_read():
+    """FII / DII / Pro / Client derivatives positioning, latest session."""
+    import participants as _p
+    with db.get_conn() as conn:
+        return JSONResponse(_p.latest(conn))
+
+
+@app.post("/participants/refresh")
+async def participants_refresh(days: int = 10):
+    import participants as _p
+    with db.get_conn() as conn:
+        out = _p.backfill(conn, days=days)
+        out["latest"] = _p.latest(conn).get("date")
+    return JSONResponse(out)
+
+
 @app.get("/csp/news")
 async def csp_news(symbol: str, hours: int = 24):
     """Filings + headlines for ONE symbol, fetched live. Read-only and needs no
@@ -732,6 +807,29 @@ async def _run_compute_subprocess() -> dict:
 
 
 _csp_daily_done_on = None
+
+
+def _eod_tick():
+    """After the close (17:45 IST): grade today's OI builds and pull the
+    participant file. Both are end-of-day by nature — the participant CSV is
+    not published until the evening, and a build cannot be graded until there
+    is a closing bell to grade it against."""
+    import hold as _hold
+    import participants as _p
+    today = _dt.datetime.now(recorder.IST).date().isoformat()
+    try:
+        with db.get_conn() as conn:
+            for u in ("NIFTY", "BANKNIFTY"):
+                r = _hold.run_session(conn, u, today)
+                print(f"[eod] {u} {today}: {r['builds']} builds, "
+                      f"{r['held']}/{r['judgeable']} held")
+    except Exception as e:
+        print(f"[eod] hold grading failed: {type(e).__name__}: {e}")
+    try:
+        with db.get_conn() as conn:
+            print(f"[eod] participants: {_p.backfill(conn, days=5)}")
+    except Exception as e:
+        print(f"[eod] participants failed: {type(e).__name__}: {e}")
 
 
 def _equity_names(instruments) -> dict:
