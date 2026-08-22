@@ -123,6 +123,15 @@ async def _startup():
         coalesce=True,
         misfire_grace_time=600,
     )
+    # Self-heal on deploy. The eod job only grades TODAY and only runs Mon-Fri
+    # at 17:45 IST, so a fresh install showed empty panels until the next
+    # weekday close — the same chicken-and-egg that shipped broken in #79/#80.
+    from apscheduler.triggers.date import DateTrigger
+    _scheduler.add_job(
+        _backfill_missing,
+        trigger=DateTrigger(run_date=_dt.datetime.now() + _dt.timedelta(seconds=25)),
+        id="bootstrap_backfill", replace_existing=True, max_instances=1,
+    )
     _scheduler.start()
 
 
@@ -625,7 +634,7 @@ async def csp_refresh(background: BackgroundTasks,
 
 
 @app.get("/oi/holds")
-async def oi_holds(underlying: str = "NIFTY", date: str | None = None):
+async def oi_holds(underlying: str = "NIFTY", date: Optional[str] = None):
     """One session's OI builds, split into the ones that were still on at the
     closing bell and the ones that round-tripped."""
     import hold as _hold
@@ -642,7 +651,7 @@ async def oi_holds(underlying: str = "NIFTY", date: str | None = None):
 
 
 @app.get("/oi/hold_stats")
-async def oi_hold_stats(underlying: str | None = None):
+async def oi_hold_stats(underlying: Optional[str] = None):
     """Base rate: how often a flagged build was still on at the close."""
     import hold as _hold
     with db.get_conn() as conn:
@@ -809,6 +818,48 @@ async def _run_compute_subprocess() -> dict:
 _csp_daily_done_on = None
 
 
+def _backfill_missing():
+    """Populate anything a fresh deploy is missing, in the background.
+
+    Idempotent and cheap when there is nothing to do: both checks are a single
+    COUNT. Runs once, shortly after startup, so the panels are never empty
+    waiting on a cron that only fires on weekday evenings.
+    """
+    import hold as _hold
+    import participants as _p
+    try:
+        with db.get_conn() as conn:
+            have = conn.execute("SELECT COUNT(*) FROM participant_oi").fetchone()[0]
+        if not have:
+            with db.get_conn() as conn:
+                print(f"[bootstrap] participants: {_p.backfill(conn, days=25)}")
+    except Exception as e:
+        print(f"[bootstrap] participants failed: {type(e).__name__}: {e}")
+    try:
+        with db.get_conn() as conn:
+            graded = {r[0] for r in conn.execute(
+                "SELECT DISTINCT substr(ts,1,10) FROM oi_builds")}
+            dates = [r[0] for r in conn.execute(
+                "SELECT DISTINCT substr(ts,1,10) FROM chain_snapshot ORDER BY 1")]
+        todo = [d for d in dates if d not in graded]
+        if todo:
+            print(f"[bootstrap] grading {len(todo)} ungraded sessions")
+            with db.get_conn() as conn:
+                for d in todo:
+                    for u in ("NIFTY", "BANKNIFTY"):
+                        try:
+                            _hold.run_session(conn, u, d)
+                        except Exception as e:
+                            print(f"[bootstrap] {u} {d}: {type(e).__name__}: {e}")
+            with db.get_conn() as conn:
+                m = (_hold.hold_stats(conn) or {}).get("matched")
+            if m:
+                print(f"[bootstrap] holds: flagged {m['with_build']['pct']}% vs "
+                      f"unflagged {m['no_build']['pct']}% (z={m['z']})")
+    except Exception as e:
+        print(f"[bootstrap] hold grading failed: {type(e).__name__}: {e}")
+
+
 def _eod_tick():
     """After the close (17:45 IST): grade today's OI builds and pull the
     participant file. Both are end-of-day by nature — the participant CSV is
@@ -818,11 +869,21 @@ def _eod_tick():
     import participants as _p
     today = _dt.datetime.now(recorder.IST).date().isoformat()
     try:
+        # today, plus anything earlier that never got graded (a missed evening,
+        # a restart, a session backfilled after the fact)
         with db.get_conn() as conn:
-            for u in ("NIFTY", "BANKNIFTY"):
-                r = _hold.run_session(conn, u, today)
-                print(f"[eod] {u} {today}: {r['builds']} builds, "
-                      f"{r['held']}/{r['judgeable']} held")
+            graded = {r[0] for r in conn.execute(
+                "SELECT DISTINCT substr(ts,1,10) FROM oi_builds")}
+            recent = [r[0] for r in conn.execute(
+                "SELECT DISTINCT substr(ts,1,10) FROM chain_snapshot "
+                "ORDER BY 1 DESC LIMIT 10")]
+        for d in sorted(set(recent) - graded | {today}):
+            with db.get_conn() as conn:
+                for u in ("NIFTY", "BANKNIFTY"):
+                    r = _hold.run_session(conn, u, d)
+                    if r["builds"]:
+                        print(f"[eod] {u} {d}: {r['builds']} builds, "
+                              f"{r['held']}/{r['judgeable']} held")
     except Exception as e:
         print(f"[eod] hold grading failed: {type(e).__name__}: {e}")
     try:

@@ -2326,18 +2326,20 @@
   const oiUnderlying = () => document.getElementById("oiUnderlying")?.value || "NIFTY";
 
   // ---------- Build follow-through (did it hold?) ----------
-  // Measured on our own 16 recorded sessions: a contract-day carrying at least
-  // one flagged build closed above its prior close 67.8% of the time versus
-  // 54.9% for one that did not (+12.9pp, z=4.14). But a SINGLE build is 56.9%
-  // — barely off the 54.9% baseline — while 5+ builds on the same contract run
-  // 71.5%. So the hit count is the signal and a lone flag is close to noise;
-  // the table sorts by it and says so.
+  // Measured across the full recorded history (38 sessions, production): a
+  // contract-day carrying at least one flagged build closed above its prior
+  // close 72.0% of the time against 51.1% for one that did not — +20.9pp,
+  // z=11.18. The hit count is what grades it: 1 build 61.8%, 2-4 62.0%, 5+
+  // 80.7%. So a lone flag beats the 51.1% baseline but only modestly, while
+  // repeated builds on one contract are decisive. The table sorts by hits.
   function renderHolds(d){
     const body = document.getElementById("holdBody");
     const base = document.getElementById("holdBase");
     if (!d || !d.ok){
-      body.innerHTML = `<div class="note">${(d && d.reason) || "no graded builds yet"} —
-        run <code>POST /oi/grade_holds</code> once to grade the recorded history.</div>`;
+      body.innerHTML = `<div class="note">${(d && d.reason) || "No graded builds yet"} —
+        the recorded history is graded automatically shortly after the app starts, and
+        every weekday evening after the close. If this persists, the app may not have
+        recorded a full session yet.</div>`;
       base.textContent = ""; return;
     }
     const st = d.stats || {}, o = st.overall || {}, m = st.matched;
@@ -2356,7 +2358,7 @@
         <div class="hold-head"><b>${Math.round(b.strike)} ${b.opt_type}</b>
           <span class="csp-sub">${String(b.ts).slice(11,16)}</span>
           <span class="hold-tag">${b.side.replace("_"," ")}</span>
-          ${b.hits > 1 ? `<span class="hold-hits" title="builds on this contract today — 5+ hold 71.5% of the time, a single build only 56.9%">${b.hits} hits</span>` : ""}
+          ${b.hits > 1 ? `<span class="hold-hits" title="builds on this contract today — 5+ hold 80.7% of the time, 2-4 hold 62.0%, a single build 61.8%, against a 51.1% baseline for contracts with no build at all">${b.hits} hits</span>` : ""}
         </div>
         <div class="csp-sub">₹${b.value_cr} Cr traded in the build minute</div>
         <div class="hold-oi">OI ${n0(b.oi_at_fire)} → peak ${n0(b.oi_peak)} → low ${n0(b.oi_low)} → close ${n0(b.oi_close)}
@@ -2380,7 +2382,8 @@
         session's close. <b>This is not a profit or loss figure</b> — a build that holds can
         still be a losing position, and one that unwinds may have been closed at a gain.
         One row per contract, ranked by hit count, because repeat builds are what actually
-        predict holding: a single build runs at roughly the unflagged baseline.</div>
+        predict holding: 5+ builds on one contract hold 80.7% of the time against 61.8%
+        for a single build and a 51.1% baseline.</div>
       <div class="hold-grid">
         <div><div class="hold-col ok">Held · ${byContract(held).length} contracts</div>
           ${byContract(held).slice(0,8).map(card).join("") || '<div class="note">none</div>'}</div>
@@ -2437,7 +2440,9 @@
   function renderParticipants(d){
     const el = document.getElementById("partBody"), dt = document.getElementById("partDate");
     if (!d || !d.ok){
-      el.innerHTML = `<div class="note">${(d && d.reason) || "no data"} — <code>POST /participants/refresh</code></div>`;
+      el.innerHTML = `<div class="note">${(d && d.reason) || "No data"} — NSE publishes the
+        participant file after the close; it is fetched automatically on start-up and each
+        weekday evening.</div>`;
       dt.textContent = ""; return;
     }
     dt.textContent = d.date;
