@@ -155,6 +155,15 @@ CREATE INDEX IF NOT EXISTS idx_oi_builds_day ON oi_builds(underlying, ts);
 -- contract-days WITH a flagged build against those WITHOUT. Open interest
 -- drifts up through an expiry cycle, so an unconditioned hold rate proves
 -- nothing; only this gap is evidence.
+-- Days the exchange did not trade. A mid-week holiday is indistinguishable
+-- from a missed login in our own data, so it is confirmed once against Kite
+-- (no index bars = no session) and remembered, otherwise the gap sweep would
+-- re-probe every holiday on every login forever.
+CREATE TABLE IF NOT EXISTS non_trading_day (
+    d          TEXT PRIMARY KEY,
+    checked_ts TEXT
+);
+
 CREATE TABLE IF NOT EXISTS hold_baseline (
     d                TEXT NOT NULL,
     underlying       TEXT NOT NULL,
