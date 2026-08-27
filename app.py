@@ -678,6 +678,28 @@ async def oi_grade_holds(days: int = 30):
     return JSONResponse({"ok": True, "sessions": len(done), "stats": stats})
 
 
+@app.get("/oi/gaps")
+async def oi_gaps(lookback_days: int = 10, fill: bool = False):
+    """Recent sessions that were never recorded or only partly captured.
+
+    `fill=true` starts a background sweep. Read-only otherwise, so the UI can
+    surface a hole without a Kite session."""
+    with db.get_conn() as conn:
+        gaps = recorder.missing_sessions(conn, lookback_days)
+        detail = []
+        for g in gaps:
+            want = recorder._true_expiry_for_day(conn, "NIFTY", g["date"])
+            detail.append({**g, "needed_expiry": (want or "")[:10] or None})
+    started = False
+    if fill:
+        from kite_auth import get_kite_from_cache as _gk
+        k = _gk()
+        if k is None:
+            raise HTTPException(status_code=401, detail="no Kite session")
+        started = recorder.backfill_gaps_async(k, lookback_days)
+    return JSONResponse({"ok": True, "gaps": detail, "sweep_started": started})
+
+
 @app.get("/pulse")
 async def pulse_read():
     """Expected move, max pain and IV skew from the recorded chain."""
@@ -740,6 +762,17 @@ async def callback(
         return PlainTextResponse(f"Token exchange failed: {e}", status_code=400)
     write_cached_session(session["access_token"], session.get("user_id", ""))
     user_id = session.get("user_id", "")
+    # A fresh session is exactly when a missed day can still be recovered:
+    # option tokens vanish when the weekly lapses, so a Monday skipped by a
+    # forgotten login must be fetched within a day or two. Backgrounded so the
+    # callback still renders instantly.
+    try:
+        from kite_auth import get_kite_from_cache as _gk
+        _k = _gk()
+        if _k is not None:
+            recorder.backfill_gaps_async(_k)
+    except Exception as e:
+        print(f"[login] gap sweep could not start: {type(e).__name__}: {e}")
     # Show a nice landing page; auto-refresh the dashboard via meta-refresh.
     return HTMLResponse(f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Logged in</title>

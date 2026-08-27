@@ -525,6 +525,164 @@ def backfill_underlyings(kite, day=None, upto: Optional[datetime] = None) -> dic
     return out
 
 
+# Minutes a full session should contain (09:15-15:30 inclusive). A day holding
+# materially fewer is a partial capture worth re-filling, not a complete one.
+FULL_SESSION_MINUTES = 376
+PARTIAL_SESSION_FLOOR = 370
+
+
+def _true_expiry_for_day(conn, name: str, day_iso: str):
+    """The expiry the recorder WOULD have tracked on `day` — the nearest option
+    expiry on or after it, taken from OUR OWN recorded history rather than the
+    live instruments dump.
+
+    This distinction is the whole point. For a past day, `_nearest_expiry_for`
+    consults the live dump, where an expiry that has since lapsed is simply
+    gone — so it silently returns the NEXT live expiry and the backfill writes
+    a different contract series into that day. Our history still remembers that
+    2026-08-21 was tracking the 2026-08-25 weekly, so we can tell that a
+    2026-08-24 gap needs 2026-08-25 and refuse if that is no longer fetchable.
+    """
+    row = conn.execute(
+        "SELECT MIN(expiry) FROM chain_snapshot WHERE underlying=? AND expiry>=?",
+        (name, day_iso)).fetchone()
+    return row[0] if row and row[0] else None
+
+
+def missing_sessions(conn, lookback_days: int = 10) -> list:
+    """Recent weekdays that were never recorded, or only partly captured.
+
+    Only days sitting BETWEEN two recorded sessions count, so the future and
+    the period before recording began are never reported.
+
+    Exchange holidays DO fall in that window — a mid-week holiday looks exactly
+    like a missed login from the database alone. They are separated by asking
+    Kite: a day on which the index itself returned no bars had no session, and
+    is recorded in `non_trading_day` so the sweep stops re-checking it. Without
+    that the sweep would retry every holiday forever.
+    """
+    known_closed = {r[0] for r in conn.execute("SELECT d FROM non_trading_day")}
+    days = [r[0] for r in conn.execute(
+        "SELECT DISTINCT substr(ts,1,10) d FROM chain_snapshot ORDER BY d DESC "
+        "LIMIT ?", (lookback_days * 2,))]
+    if len(days) < 2:
+        return []
+    newest, oldest = days[0], days[-1]
+    have = set(days)
+    counts = {r[0]: r[1] for r in conn.execute(
+        "SELECT substr(ts,1,10) d, COUNT(DISTINCT ts) FROM chain_snapshot "
+        "WHERE underlying='NIFTY' GROUP BY d")}
+    out = []
+    d = datetime.fromisoformat(oldest).date()
+    end = datetime.fromisoformat(newest).date()
+    while d < end:
+        iso = d.isoformat()
+        if d.weekday() < 5 and iso not in known_closed:
+            if iso not in have:
+                out.append({"date": iso, "reason": "no data", "minutes": 0})
+            elif counts.get(iso, 0) < PARTIAL_SESSION_FLOOR:
+                out.append({"date": iso, "reason": "partial",
+                            "minutes": counts.get(iso, 0)})
+        d += timedelta(days=1)
+    return out
+
+
+def backfill_gaps(kite, lookback_days: int = 10) -> dict:
+    """Fill every recoverable gap in the recent past — the thing that was
+    missing: `_maybe_backfill_today` only ever looked at TODAY, so a wholly
+    missed session was never revisited and quietly stayed missing forever.
+
+    A gap is only recoverable while its weekly expiry is still listed; option
+    tokens vanish when the contract lapses. Where the true series is gone we
+    say so and skip, rather than substituting a different expiry and calling
+    it recovered.
+    """
+    with db.get_conn() as conn:
+        gaps = missing_sessions(conn, lookback_days)
+    if not gaps:
+        return {"gaps": 0, "filled": [], "unrecoverable": []}
+    instruments = _get_instruments(kite)
+    live_expiries = {str(i["expiry"]) for i in instruments
+                     if i.get("expiry") and i.get("instrument_type") in ("CE", "PE")}
+    filled, lost, closed = [], [], []
+    for g in gaps:
+        day_iso = g["date"]
+        # One cheap index-only call decides whether there was a session at all.
+        # A holiday is indistinguishable from a missed login in our own data,
+        # and re-probing it every login would be a permanent background retry.
+        if g["reason"] == "no data" and not _session_existed(kite, day_iso):
+            with db.get_conn() as conn:
+                conn.execute("INSERT OR REPLACE INTO non_trading_day (d, checked_ts) "
+                             "VALUES (?,?)", (day_iso, datetime.now(IST).isoformat()))
+                conn.commit()
+            closed.append(day_iso)
+            continue
+        for name, conf in UNDERLYINGS.items():
+            with db.get_conn() as conn:
+                want = _true_expiry_for_day(conn, conf["nfo_name"], day_iso)
+            if want and want[:10] not in {e[:10] for e in live_expiries}:
+                lost.append({"date": day_iso, "underlying": name,
+                             "needed_expiry": want[:10],
+                             "reason": "contracts lapsed — tokens no longer listed"})
+                continue
+            try:
+                res = backfill_day(kite, name, conf, day_iso)
+                filled.append({"date": day_iso, "underlying": name,
+                               "ok": res.get("ok"), "rows": res.get("rows"),
+                               "error": res.get("error")})
+            except Exception as e:
+                filled.append({"date": day_iso, "underlying": name,
+                               "ok": False, "error": f"{type(e).__name__}: {e}"})
+    return {"gaps": len(gaps), "detail": gaps, "filled": filled,
+            "unrecoverable": lost, "non_trading": closed}
+
+
+def _session_existed(kite, day_iso: str) -> bool:
+    """Did the exchange trade on this day? Index minute bars are the cheapest
+    authority — no session, no bars. Errs on the side of True: if the check
+    itself fails we must not mark a real trading day as a holiday."""
+    try:
+        d = datetime.fromisoformat(day_iso).date()
+        bars = kite.historical_data(
+            UNDERLYINGS["NIFTY"]["instrument_token"],
+            datetime(d.year, d.month, d.day, 9, 15, tzinfo=IST).strftime("%Y-%m-%d %H:%M:%S"),
+            datetime(d.year, d.month, d.day, 15, 30, tzinfo=IST).strftime("%Y-%m-%d %H:%M:%S"),
+            "minute")
+        return bool(bars)
+    except Exception as e:
+        print(f"[recorder] session probe {day_iso}: {type(e).__name__}: {e}")
+        return True
+
+
+_gap_lock = threading.Lock()
+_gap_running = {"on": False}
+
+
+def backfill_gaps_async(kite, lookback_days: int = 10) -> bool:
+    """Kick a gap sweep on a background thread. Returns False if one is already
+    running. Called on login and on the first market-hours tick, because the
+    recovery window is short — a missed Monday must be fetched before that
+    week's option series expires."""
+    with _gap_lock:
+        if _gap_running["on"]:
+            return False
+        _gap_running["on"] = True
+
+    def _work():
+        try:
+            res = backfill_gaps(kite, lookback_days)
+            if res.get("gaps"):
+                print(f"[recorder] gap sweep: {res}")
+        except Exception as e:
+            print(f"[recorder] gap sweep failed: {type(e).__name__}: {e}")
+        finally:
+            with _gap_lock:
+                _gap_running["on"] = False
+
+    threading.Thread(target=_work, name="oi-gap-sweep", daemon=True).start()
+    return True
+
+
 def _maybe_backfill_today(kite) -> None:
     """Once per (process, day), fill today's morning gap in a background thread
     so the per-minute snapshot loop is never blocked by the (slow) history
@@ -551,6 +709,9 @@ def _maybe_backfill_today(kite) -> None:
                     _backfilled.discard((today, name))  # allow a retry next tick
 
     threading.Thread(target=_work, name="oi-backfill", daemon=True).start()
+    # ...and sweep any EARLIER session that is missing entirely. Without this a
+    # skipped login is never recovered (the bug: today-only backfill).
+    backfill_gaps_async(kite)
 
 
 def run_snapshot(force: bool = False) -> dict:

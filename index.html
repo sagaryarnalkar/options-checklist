@@ -541,6 +541,12 @@
   .hold-note{ font-size:10.5px; color:var(--muted); padding:8px 12px; line-height:1.5; }
 
   /* ---- Pulse rail ---- */
+  .gap-list{ display:flex; flex-wrap:wrap; gap:7px; padding:0 12px 4px; }
+  .gap-chip{ font-family:var(--mono); font-size:11px; padding:3px 8px; border-radius:10px;
+    border:1px solid var(--amber); color:var(--amber);
+    background:color-mix(in srgb,var(--amber) 10%,transparent); }
+  .gap-chip .csp-sub{ margin-left:5px; }
+  #gapCard[hidden]{ display:none; }
   .pulse-row{ padding:7px 0; border-bottom:1px solid var(--border); cursor:help; }
   .pulse-row:last-child{ border-bottom:0; }
   .pulse-lbl{ font-size:10px; text-transform:uppercase; letter-spacing:.06em;
@@ -1072,7 +1078,12 @@
           <div id="oiLadder"><div class="note">no data yet</div></div>
         </div>
 
-        <div class="oi-chart-card" id="holdCard">
+        <div class="oi-chart-card" id="gapCard" hidden>
+        <div class="oi-chart-title"><span>Recording gaps</span></div>
+        <div id="gapBody"></div>
+      </div>
+
+      <div class="oi-chart-card" id="holdCard">
           <div class="oi-chart-title">
             <span>Build follow-through — was the flagged open-interest build still on at the close?</span>
             <span id="holdBase" class="csp-sub"></span>
@@ -2325,6 +2336,31 @@
 
   const oiUnderlying = () => document.getElementById("oiUnderlying")?.value || "NIFTY";
 
+  // A missing session used to be invisible — you only found out by noticing a
+  // date was absent. Option tokens vanish when the weekly expires, so a gap is
+  // only recoverable for a day or two; it has to be visible while it still is.
+  async function loadGaps(){
+    const card = document.getElementById("gapCard"), body = document.getElementById("gapBody");
+    try {
+      const r = await fetch("/oi/gaps?_=" + Date.now(), { cache: "no-store" });
+      if (!r.ok) return;
+      const d = await r.json();
+      const gaps = (d.gaps || []).filter(g => g.reason === "no data" || g.minutes < 340);
+      if (!gaps.length){ card.hidden = true; return; }
+      card.hidden = false;
+      body.innerHTML = `<div class="hold-note">These sessions are missing or only partly
+        captured — usually a morning where the Kite login was skipped. A gap can only be
+        refetched while that week's option contracts are still listed; once the weekly
+        expires the tokens are gone and the session cannot be reconstructed.</div>
+        <div class="gap-list">${gaps.map(g => `<span class="gap-chip">
+          <b>${g.date}</b> ${g.reason === "no data" ? "no data" : g.minutes + "/376 min"}
+          ${g.needed_expiry ? `<span class="csp-sub">needs ${g.needed_expiry}</span>` : ""}
+        </span>`).join("")}</div>
+        <div class="hold-note">A sweep runs automatically on every login. To force one now:
+          <code>POST /oi/gaps?fill=true</code></div>`;
+    } catch(e){ /* secondary panel */ }
+  }
+
   // ---------- Build follow-through (did it hold?) ----------
   // Measured across the full recorded history (38 sessions, production): a
   // contract-day carrying at least one flagged build closed above its prior
@@ -2621,6 +2657,7 @@
       loadHolds();
       loadPulse();
       loadParticipants();
+      loadGaps();
     } catch(e) {
       setOiStatus("Failed to load aggregate: " + e.message, "error");
     }
