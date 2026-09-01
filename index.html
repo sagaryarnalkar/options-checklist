@@ -541,6 +541,17 @@
   .hold-note{ font-size:10.5px; color:var(--muted); padding:8px 12px; line-height:1.5; }
 
   /* ---- Pulse rail ---- */
+  .rv-tbl{ margin:0 12px 12px; width:calc(100% - 24px); }
+  .rv-tbl td{ text-align:right; } .rv-tbl td:first-child{ text-align:left; }
+  .rv-tag{ font-size:9.5px; text-transform:uppercase; letter-spacing:.04em;
+    padding:1px 6px; border-radius:9px; border:1px solid var(--border); white-space:nowrap; }
+  .rv-tag.ok{ color:var(--pos); border-color:var(--pos);
+    background:color-mix(in srgb,var(--pos) 10%,transparent); font-weight:700; }
+  .rv-tag.bad{ color:var(--neg); border-color:var(--neg);
+    background:color-mix(in srgb,var(--neg) 12%,transparent); font-weight:700; }
+  .rv-tag.flat, .rv-tag.thin{ color:var(--muted); }
+  tr.rv-ok td{ background:color-mix(in srgb,var(--pos) 4%,transparent); }
+  tr.rv-bad td{ background:color-mix(in srgb,var(--neg) 5%,transparent); }
   .gap-list{ display:flex; flex-wrap:wrap; gap:7px; padding:0 12px 4px; }
   .gap-chip{ font-family:var(--mono); font-size:11px; padding:3px 8px; border-radius:10px;
     border:1px solid var(--amber); color:var(--amber);
@@ -1078,7 +1089,15 @@
           <div id="oiLadder"><div class="note">no data yet</div></div>
         </div>
 
-        <div class="oi-chart-card" id="gapCard" hidden>
+        <div class="oi-chart-card" id="reviewCard">
+        <div class="oi-chart-title">
+          <span>Signal scorecard — where our own signals were wrong</span>
+          <span id="reviewMeta" class="csp-sub"></span>
+        </div>
+        <div id="reviewBody"><div class="note">loading…</div></div>
+      </div>
+
+      <div class="oi-chart-card" id="gapCard" hidden>
         <div class="oi-chart-title"><span>Recording gaps</span></div>
         <div id="gapBody"></div>
       </div>
@@ -2336,6 +2355,60 @@
 
   const oiUnderlying = () => document.getElementById("oiUnderlying")?.value || "NIFTY";
 
+  // Every rate here is shown against its own baseline. A hit rate alone is not
+  // evidence — three ideas in this project (GEX, HHI, the raw hold rate) looked
+  // strong until the control was computed, and only one survived.
+  function renderReview(d){
+    const body = document.getElementById("reviewBody");
+    const meta = document.getElementById("reviewMeta");
+    if (!d || !d.ok || !(d.summary || []).length){
+      body.innerHTML = `<div class="note">Not enough graded history yet. The scorecard
+        needs recorded markers, LLT prints and at least a few complete sessions.</div>`;
+      meta.textContent = ""; return;
+    }
+    const m = d.markers || {}, l = d.llt || {};
+    meta.textContent = [
+      m.n_markers ? `${m.n_markers} markers / ${m.sessions} sessions` : null,
+      l.n_prints ? `${l.n_prints} LLT prints` : null,
+    ].filter(Boolean).join(" · ");
+    const cls = v => v === "beats baseline" ? "ok"
+                   : v === "WORSE than baseline" ? "bad"
+                   : v === "insufficient sample" ? "thin" : "flat";
+    const rows = d.summary.map(r => {
+      const edge = (r.pct != null && r.baseline != null) ? (r.pct - r.baseline) : null;
+      return `<tr class="rv-${cls(r.verdict)}">
+        <td>${r.signal}</td>
+        <td>${r.n == null ? "—" : r.n.toLocaleString("en-IN")}</td>
+        <td><b>${r.pct == null ? "—" : r.pct + "%"}</b></td>
+        <td class="csp-sub">${r.baseline == null ? "—" : r.baseline + "%"}</td>
+        <td class="${edge == null ? "" : edge > 0 ? "profit" : "loss"}">${
+          edge == null ? "—" : (edge > 0 ? "+" : "") + edge.toFixed(1) + "pp"}</td>
+        <td><span class="rv-tag ${cls(r.verdict)}">${r.verdict}</span></td></tr>`;
+    }).join("");
+    body.innerHTML = `<div class="hold-note">Each signal against a
+      <b>time-of-day matched baseline</b> — what the same minutes did anyway. The
+      matched baseline matters because these signals do not fire uniformly: the score
+      spikes in the first minutes of the session, when the market is most directional,
+      and an all-day average would quietly credit the signal with the opening drift.
+      <b>"no evidence" is the normal answer</b> and is not a bug.</div>
+      <table class="csp rv-tbl"><thead><tr>
+        <th title="The signal and horizon being graded.">Signal</th>
+        <th title="How many firings were graded. Fewer than 20 is never judged.">n</th>
+        <th title="Share of firings where the move went the way the signal claimed.">Hit</th>
+        <th title="What the same minutes did anyway, matched on time of day. This is the number the hit rate has to beat.">Baseline</th>
+        <th title="Hit rate minus baseline. This, not the hit rate, is the edge.">Edge</th>
+        <th title="Beats baseline = clears it at 95% confidence. WORSE = significantly below it, which is real information. no evidence = indistinguishable from chance.">Verdict</th>
+      </tr></thead><tbody>${rows}</tbody></table>`;
+  }
+
+  async function loadReview(){
+    try {
+      const r = await fetch("/review?underlying=" + encodeURIComponent(oiUnderlying()) +
+                            "&_=" + Date.now(), { cache: "no-store" });
+      renderReview(r.ok ? await r.json() : null);
+    } catch(e){ /* secondary panel */ }
+  }
+
   // A missing session used to be invisible — you only found out by noticing a
   // date was absent. Option tokens vanish when the weekly expires, so a gap is
   // only recoverable for a day or two; it has to be visible while it still is.
@@ -2658,6 +2731,7 @@
       loadPulse();
       loadParticipants();
       loadGaps();
+      loadReview();
     } catch(e) {
       setOiStatus("Failed to load aggregate: " + e.message, "error");
     }

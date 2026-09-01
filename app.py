@@ -116,6 +116,11 @@ async def _startup():
         id="eod_grade", replace_existing=True, max_instances=1, coalesce=True,
     )
     _scheduler.add_job(
+        _weekly_review,
+        trigger=CronTrigger(day_of_week="sat", hour=4, minute=30, timezone="UTC"),
+        id="weekly_review", replace_existing=True, max_instances=1, coalesce=True,
+    )
+    _scheduler.add_job(
         _scheduled_refresh,
         trigger=CronTrigger(hour=9, minute=46, day_of_week="mon-fri", timezone="UTC"),
         id="daily_compute",
@@ -678,6 +683,15 @@ async def oi_grade_holds(days: int = 30):
     return JSONResponse({"ok": True, "sessions": len(done), "stats": stats})
 
 
+@app.get("/review")
+async def review_scorecard(underlying: str = "NIFTY"):
+    """Signal scorecard: every directional signal we emit, graded against a
+    matched control. Read-only, no Kite session needed."""
+    import review as _review
+    with db.get_conn() as conn:
+        return JSONResponse(_review.scorecard(conn, underlying))
+
+
 @app.get("/oi/gaps")
 async def oi_gaps(lookback_days: int = 10, fill: bool = False):
     """Recent sessions that were never recorded or only partly captured.
@@ -849,6 +863,27 @@ async def _run_compute_subprocess() -> dict:
 
 
 _csp_daily_done_on = None
+
+
+def _weekly_review():
+    """Saturday 10:00 IST: print the signal scorecard to the log.
+
+    Signals decay. A rule that worked in a low-VIX June can quietly stop
+    working, and nothing in this app would have noticed — the scorecard is the
+    only thing that would. Printed rather than alerted because the right
+    response is a read, not a reflex.
+    """
+    import review as _review
+    try:
+        with db.get_conn() as conn:
+            sc = _review.scorecard(conn)
+        print("[review] ---- weekly signal scorecard ----")
+        for row in sc.get("summary", []):
+            print(f"[review] {row['signal']:38s} n={row['n']:5d} "
+                  f"{row['pct']:5.1f}% vs {row['baseline']:5.1f}% baseline "
+                  f"-> {row['verdict']}")
+    except Exception as e:
+        print(f"[review] failed: {type(e).__name__}: {e}")
 
 
 def _backfill_missing():
