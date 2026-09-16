@@ -110,6 +110,15 @@ def backfill(conn, days: int = 10) -> dict:
         if conn.execute("SELECT 1 FROM participant_oi WHERE d=? LIMIT 1",
                         (d.isoformat(),)).fetchone():
             continue
+        # Skip days the exchange did not trade (confirmed in #85 by an
+        # index-bar probe). Without this a holiday like 2026-09-14 is re-fetched
+        # on every run forever, since NSE never publishes a file for it.
+        try:
+            if conn.execute("SELECT 1 FROM non_trading_day WHERE d=? LIMIT 1",
+                            (d.isoformat(),)).fetchone():
+                continue
+        except Exception:
+            pass                       # table may not exist on an older DB
         res = fetch(d)
         if res["ok"]:
             store(conn, res["rows"])

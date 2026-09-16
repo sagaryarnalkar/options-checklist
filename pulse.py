@@ -78,13 +78,33 @@ def expected_move(conn, underlying: str, day: str | None = None) -> dict:
     if ce <= 0 or pe <= 0:
         return {"ok": False, "reason": "no ATM quotes"}
     dte = _dte(expiry, ts)
+    # At the close on expiry day the ATM options are worth their INTRINSIC
+    # value and nothing more — there is no implied volatility to extract, so
+    # the inversion correctly returns None and every downstream field is null.
+    # Say that, rather than reporting ok:true with a payload of nulls that the
+    # UI then prints as the literal string "null" (same family as the
+    # `undefined` bug in #82). Every Tuesday close hit this.
+    intrinsic = abs(spot - atm)
+    time_value = (ce + pe) - intrinsic
+    if time_value <= max(0.05, spot * 0.00002):
+        return {"ok": False, "reason": "expired — ATM options at intrinsic, no "
+                                       "time value left to imply a vol from",
+                "expired": True, "ts": ts, "underlying": underlying,
+                "spot": round(spot, 2), "expiry": expiry[:10], "dte": dte,
+                "atm_strike": atm, "straddle": round(ce + pe, 2),
+                "time_value": round(time_value, 2)}
     T = max(dte, 0.5) / TRADING_DAYS          # intraday expiry -> half a day
     iv_c = _implied_vol(ce, spot, atm, T, "CE")
     iv_p = _implied_vol(pe, spot, atm, T, "PE")
     ivs = [v for v in (iv_c, iv_p) if v]
     sigma = sum(ivs) / len(ivs) if ivs else None
+    if not sigma:
+        return {"ok": False, "reason": "could not imply a vol from the ATM quotes",
+                "ts": ts, "underlying": underlying, "spot": round(spot, 2),
+                "expiry": expiry[:10], "dte": dte, "atm_strike": atm,
+                "straddle": round(ce + pe, 2)}
     straddle = ce + pe
-    one_sd = spot * sigma * math.sqrt(T) if sigma else None
+    one_sd = spot * sigma * math.sqrt(T)
     return {
         "ok": True, "ts": ts, "underlying": underlying, "spot": round(spot, 2),
         "expiry": expiry[:10], "dte": dte, "atm_strike": atm,

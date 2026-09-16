@@ -2523,6 +2523,13 @@
     if (!p){ el.innerHTML = `<div class="note">no data yet</div>`; return; }
     const em = p.expected_move || {}, mp = p.max_pain || {}, sk = p.iv_skew || {};
     const rows = [];
+    // An expired / un-invertible reading says so instead of printing nulls.
+    if (!em.ok && em.reason) rows.push(`<div class="pulse-row" title="${esc(em.reason)}">
+        <span class="pulse-lbl">Expected move</span>
+        <span class="pulse-val csp-sub">—</span>
+        <div class="csp-sub">${em.expired ? "expired" : "unavailable"}${
+          em.atm_strike ? ` · ATM ${em.atm_strike} straddle ₹${em.straddle}` : ""}${
+          em.time_value != null ? ` · time value ₹${em.time_value}` : ""}</div></div>`);
     if (em.ok) rows.push(`<div class="pulse-row" title="1 sigma backed out of the ATM options by Black-Scholes inversion — not the 'straddle x 0.68' rule of thumb, which cannot be derived. Validated on our history: BANKNIFTY closed inside this band on 69% of sessions against a 68% target; NIFTY on 81%, i.e. implied vol ran richer than realised — the premium a seller is collecting.">
         <span class="pulse-lbl">Expected move (${em.dte}d)</span>
         <span class="pulse-val">±${em.one_sigma} <span class="csp-sub">(${em.one_sigma_pct}%)</span></span>

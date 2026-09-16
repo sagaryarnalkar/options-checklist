@@ -116,6 +116,11 @@ async def _startup():
         id="eod_grade", replace_existing=True, max_instances=1, coalesce=True,
     )
     _scheduler.add_job(
+        _participants_tick,
+        trigger=CronTrigger(hour=14, minute=30, day_of_week="mon-fri", timezone="UTC"),
+        id="participants_pull", replace_existing=True, max_instances=1, coalesce=True,
+    )
+    _scheduler.add_job(
         _weekly_review,
         trigger=CronTrigger(day_of_week="sat", hour=4, minute=30, timezone="UTC"),
         id="weekly_review", replace_existing=True, max_instances=1, coalesce=True,
@@ -865,6 +870,34 @@ async def _run_compute_subprocess() -> dict:
 _csp_daily_done_on = None
 
 
+# Wide enough to span a long weekend plus a holiday — the exact combination
+# (Fri 11th, weekend, holiday Mon 14th) that left the panel three sessions
+# stale. Cheap: already-stored days are skipped with one indexed lookup.
+PARTICIPANT_LOOKBACK_DAYS = 14
+
+
+def _participants_tick():
+    """20:00 IST pull of the NSE participant file.
+
+    The eod job at 17:45 IST was running BEFORE NSE publishes this file, so
+    every session's data was only ever collected by the NEXT day's run — a
+    permanent one-session lag (observed: 15 Sep's file was live on NSE while
+    we were still serving 11 Sep). This runs late enough to catch the same
+    evening's publication; the eod call stays as a harmless idempotent retry.
+
+    The lookback is deliberately wide: five days does not survive a long
+    weekend plus a holiday, which is exactly the run that just failed.
+    """
+    import participants as _p
+    try:
+        with db.get_conn() as conn:
+            res = _p.backfill(conn, days=PARTICIPANT_LOOKBACK_DAYS)
+            res["latest"] = (_p.latest(conn) or {}).get("date")
+        print(f"[participants] {res}")
+    except Exception as e:
+        print(f"[participants] failed: {type(e).__name__}: {e}")
+
+
 def _weekly_review():
     """Saturday 10:00 IST: print the signal scorecard to the log.
 
@@ -956,7 +989,7 @@ def _eod_tick():
         print(f"[eod] hold grading failed: {type(e).__name__}: {e}")
     try:
         with db.get_conn() as conn:
-            print(f"[eod] participants: {_p.backfill(conn, days=5)}")
+            print(f"[eod] participants: {_p.backfill(conn, days=PARTICIPANT_LOOKBACK_DAYS)}")
     except Exception as e:
         print(f"[eod] participants failed: {type(e).__name__}: {e}")
 
