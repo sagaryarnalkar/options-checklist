@@ -760,6 +760,164 @@ async def csp_news(symbol: str, hours: int = 24):
                          "headlines": _news.google_news(f'"{company}" share', hours=hours)})
 
 
+# ---------------- Fyers: expired-F&O archive (fyers_auth.py / fyers_hist.py) ----
+# Fyers is used for ONE thing: 1-minute candles with open interest for EXPIRED
+# NSE contracts back to 2022, which Kite cannot serve. Kite stays the live
+# broker. The archive is a separate file (data/fyers_hist.db); the live
+# oi_chain.db is never touched by any of this.
+#
+# Quota abuse is bounded by the crawler's own limiter (150/min, stop at two
+# breaches, daily cap) and by allowing only one Fyers job at a time — those
+# guard the account's daily allowance whoever presses the button.
+_fyers_job = {"running": False, "kind": None, "started": None,
+              "finished": None, "result": None, "error": None}
+_fyers_stop = None
+
+
+def _fyers_start(kind: str, fn) -> bool:
+    import threading
+    global _fyers_stop
+    if _fyers_job["running"]:
+        return False
+    _fyers_stop = threading.Event()
+    _fyers_job.update(running=True, kind=kind, finished=None, result=None, error=None,
+                      started=_dt.datetime.now(recorder.IST).isoformat(timespec="seconds"))
+
+    def work():
+        try:
+            _fyers_job["result"] = fn(_fyers_stop)
+        except Exception as e:
+            _fyers_job["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            _fyers_job.update(running=False,
+                              finished=_dt.datetime.now(recorder.IST).isoformat(timespec="seconds"))
+            print(f"[fyers] {kind} finished: {_fyers_job.get('error') or _fyers_job.get('result')}")
+
+    threading.Thread(target=work, name=f"fyers-{kind}", daemon=True).start()
+    return True
+
+
+@app.get("/fyers/login")
+async def fyers_login():
+    import fyers_auth as _fa
+    url = _fa.login_url()
+    if not url:
+        return PlainTextResponse(
+            "Fyers is not configured. Add FYERS_APP_ID, FYERS_SECRET_KEY and "
+            "FYERS_REDIRECT_URI to .env on the server, then restart.", status_code=400)
+    return RedirectResponse(url)
+
+
+@app.get("/fyers/callback")
+async def fyers_callback(auth_code: Optional[str] = None, state: Optional[str] = None):
+    """Fyers redirects here with ?s=ok&code=200&auth_code=...&state=... — note
+    `code` is a status number; the credential is `auth_code`."""
+    import fyers_auth as _fa
+    if not auth_code:
+        return PlainTextResponse("Missing auth_code in the Fyers redirect.", status_code=400)
+    if not _fa.check_state(state):
+        return PlainTextResponse("This Fyers login was not started here, or the link expired "
+                                 "(15 min). Open /fyers/login again.", status_code=400)
+    try:
+        res = _fa.exchange(auth_code)
+    except Exception as e:
+        return PlainTextResponse(f"Fyers token exchange failed: {e}", status_code=400)
+    return HTMLResponse(f"""<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="refresh" content="3;url=/"><title>Fyers connected</title>
+<style>body{{font-family:-apple-system,system-ui,sans-serif;padding:60px;text-align:center}}</style>
+</head><body><h2>&check; Fyers connected</h2>
+<p>Valid until {res['expires'][:16].replace('T', ' ')} IST. Used only for the historical archive.</p>
+<p><a href="/">Back to the dashboard</a></p></body></html>""")
+
+
+@app.get("/fyers/status")
+def fyers_status():
+    """Login state, archive progress and the current job. Exposes no token,
+    secret or app id."""
+    import fyers_auth as _fa
+    import fyers_hist as _fh
+    conn = _fh.connect()
+    try:
+        arch = _fh.status(conn)
+    finally:
+        conn.close()
+    job = {k: v for k, v in _fyers_job.items() if k != "result"}
+    job["result"] = _fyers_job.get("result") if not _fyers_job["running"] else None
+    return JSONResponse({"auth": _fa.status(), "archive": arch, "job": job})
+
+
+@app.post("/fyers/probe")
+def fyers_probe(underlying: str = "NIFTY"):
+    """~8 calls that confirm the API behaves as documented before anything is
+    built on it. Synchronous — it is quick, and its answer is the point."""
+    import fyers_hist as _fh
+    conn = _fh.connect()
+    try:
+        return JSONResponse(_fh.probe(_fh.Client(_fh.RateLimiter(conn)), conn, underlying))
+    except _fh.AuthExpired as e:
+        raise HTTPException(status_code=401, detail=f"{e}")
+    finally:
+        conn.close()
+
+
+@app.post("/fyers/plan")
+def fyers_plan(underlying: str = "NIFTY", strikes: int = 10, since: Optional[str] = None):
+    """Queue every contract worth fetching (~one call per expiry, ~250 for NIFTY
+    since 2022). Background; idempotent."""
+    import fyers_hist as _fh
+    if underlying not in _fh.UNDERLYINGS:
+        raise HTTPException(status_code=400, detail=f"underlying must be one of {sorted(_fh.UNDERLYINGS)}")
+
+    def fn(stop):
+        conn = _fh.connect()
+        try:
+            return _fh.plan(_fh.Client(_fh.RateLimiter(conn)), conn, underlying,
+                            since=_dt.date.fromisoformat(since) if since else None,
+                            n_strikes=strikes)
+        finally:
+            conn.close()
+    if not _fyers_start("plan", fn):
+        return JSONResponse({"ok": False, "reason": f"a {_fyers_job['kind']} job is already running"})
+    return JSONResponse({"ok": True, "started": "plan", "watch": "/fyers/status"})
+
+
+@app.post("/fyers/crawl")
+def fyers_crawl(max_calls: Optional[int] = None):
+    """Work the queue in the background. Stops cleanly at token expiry, the
+    daily budget, rate-limit trouble or `max_calls`; resume by calling again."""
+    import fyers_hist as _fh
+
+    def fn(stop):
+        conn = _fh.connect()
+        try:
+            return _fh.crawl(_fh.Client(_fh.RateLimiter(conn)), conn,
+                             max_calls=max_calls, stop=stop)
+        finally:
+            conn.close()
+    if not _fyers_start("crawl", fn):
+        return JSONResponse({"ok": False, "reason": f"a {_fyers_job['kind']} job is already running"})
+    return JSONResponse({"ok": True, "started": "crawl", "watch": "/fyers/status"})
+
+
+@app.post("/fyers/stop")
+def fyers_stop():
+    if _fyers_stop is not None:
+        _fyers_stop.set()
+    return JSONResponse({"ok": True, "running": _fyers_job["running"]})
+
+
+@app.get("/fyers/validate")
+def fyers_validate(day: Optional[str] = None, underlying: str = "NIFTY"):
+    """Fyers bars vs the minutes our own Kite recorder captured. Run this
+    before trusting the archive for anything."""
+    import fyers_hist as _fh
+    conn = _fh.connect()
+    try:
+        return JSONResponse(_fh.validate(conn, db.DB_PATH, underlying=underlying, day=day))
+    finally:
+        conn.close()
+
+
 @app.get("/login")
 async def login():
     return RedirectResponse(login_url())
