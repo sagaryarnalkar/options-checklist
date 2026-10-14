@@ -556,15 +556,26 @@ def crawl(cli: Client, conn, max_calls: Optional[int] = None,
 # ------------------------------------------------------------------ status --
 
 def status(conn) -> dict:
+    """Cheap by construction: every query here touches crawl_task (~23k rows),
+    never `bar` (~180M).
+
+    The first version ran COUNT(*) over `bar` plus an EXISTS lookup from each
+    contract into crawl_task on an unindexed column. Both grew with the
+    archive: at ~2 GB the endpoint passed a 20s client timeout and at 10 GB it
+    took 100s — and a client giving up does not cancel the server-side scan.
+    The bar count is already recorded per task, so it is summed from there.
+    """
     by = dict(conn.execute("SELECT status, COUNT(*) FROM crawl_task GROUP BY status").fetchall())
-    bars = conn.execute("SELECT COUNT(*) FROM bar").fetchone()[0]
+    bars = conn.execute("SELECT COALESCE(SUM(rows),0) FROM crawl_task "
+                        "WHERE kind='bar' AND status='done'").fetchone()[0]
     calls, breaches = conn.execute(
         "SELECT calls, breaches FROM api_day WHERE day=?",
         (datetime.now(IST).date().isoformat(),)).fetchone() or (0, 0)
-    rng = conn.execute("SELECT MIN(expiry), MAX(expiry) FROM contract c WHERE EXISTS "
-                       "(SELECT 1 FROM crawl_task t WHERE t.symbol=c.symbol AND t.status='done')"
-                       ).fetchone()
-    size = ARCHIVE.stat().st_size if ARCHIVE.exists() else 0
+    # a bar task's range_to IS its contract's expiry
+    rng = conn.execute("SELECT MIN(range_to), MAX(range_to) FROM crawl_task "
+                       "WHERE kind='bar' AND status='done'").fetchone()
+    size = sum(p.stat().st_size for p in (ARCHIVE, Path(str(ARCHIVE) + "-wal"))
+               if p.exists())
     return {"tasks": by, "bars": bars,
             "contracts": conn.execute("SELECT COUNT(*) FROM contract").fetchone()[0],
             "expiries_planned": conn.execute("SELECT COUNT(*) FROM planned_expiry").fetchone()[0],
