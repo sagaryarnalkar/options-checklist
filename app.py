@@ -797,6 +797,142 @@ def _fyers_start(kind: str, fn) -> bool:
     return True
 
 
+# ---------------- Repair from the Fyers archive (rebuild.py) ----------------
+# Its own job slot, separate from the Fyers crawl: the rebuild writes the LIVE
+# db and reads the archive, the crawl writes the archive — they can overlap.
+_rebuild_job = {"running": False, "started": None, "finished": None,
+                "result": None, "error": None}
+_rebuild_stop = None
+
+
+def _nifty_lot_size():
+    """The lot size the live LLT path uses (Kite's current NIFTY future), with
+    oi_flow's constant as the fallback. Returned with its source so a
+    rebuild's LLT prints can be audited."""
+    try:
+        from kite_auth import get_kite_from_cache
+        k = get_kite_from_cache()
+        if k is not None:
+            f = recorder._current_nifty_future(recorder._get_instruments(k),
+                                               _dt.datetime.now(recorder.IST).date())
+            if f and f.get("lot_size"):
+                return int(f["lot_size"]), "kite instruments"
+    except Exception:
+        pass
+    import oi_flow
+    return oi_flow.KNOWN_LOT_SIZES.get("NIFTY", 75), "oi_flow.KNOWN_LOT_SIZES fallback"
+
+
+@app.get("/oi/recorder_log")
+def oi_recorder_log(day: str, underlying: Optional[str] = None):
+    """What the recorder logged on a day — the trail that explains a gap.
+    Counts runs, rows and each distinct error, per underlying."""
+    with db.get_conn() as conn:
+        q = ("SELECT underlying, COUNT(*), SUM(rows_inserted>0), SUM(rows_inserted), "
+             "MIN(ts), MAX(ts) FROM recorder_log WHERE ts>=? AND ts<?")
+        args = [day, day + "~"]
+        if underlying:
+            q += " AND underlying=?"
+            args.append(underlying)
+        runs = [{"underlying": r[0], "runs": r[1], "runs_with_rows": r[2], "rows": r[3],
+                 "first": r[4], "last": r[5]}
+                for r in conn.execute(q + " GROUP BY underlying", args)]
+        errs = [{"underlying": r[0], "error": r[1], "count": r[2], "first": r[3], "last": r[4]}
+                for r in conn.execute(
+                    "SELECT underlying, error, COUNT(*), MIN(ts), MAX(ts) FROM recorder_log "
+                    "WHERE ts>=? AND ts<? AND error IS NOT NULL" +
+                    (" AND underlying=?" if underlying else "") +
+                    " GROUP BY underlying, error ORDER BY 3 DESC LIMIT 30", args)]
+    return JSONResponse({"day": day, "runs": runs, "errors": errs,
+                         "note": "an underlying absent from `runs` logged nothing at all that day"})
+
+
+@app.get("/oi/rebuild/compare")
+def oi_rebuild_compare(day: str, underlying: str = "NIFTY"):
+    """Rebuild minutes we DID record live and measure against the real rows —
+    the gate before any repair is written."""
+    import fyers_hist as _fh
+    import rebuild as _rb
+    arch = _fh.connect()
+    try:
+        with db.get_conn() as conn:
+            return JSONResponse(_rb.compare(conn, arch, underlying, _dt.date.fromisoformat(day)))
+    finally:
+        arch.close()
+
+
+@app.post("/oi/rebuild")
+def oi_rebuild_day(day: str, underlying: str = "NIFTY", dry_run: bool = True):
+    """Repair ONE day: every non-live minute rebuilt from Fyers in live format.
+    dry_run (default) reports the plan and writes nothing."""
+    import fyers_hist as _fh
+    import rebuild as _rb
+    arch = _fh.connect()
+    try:
+        with db.get_conn() as conn:
+            r = _rb.rebuild_day(conn, arch, underlying, _dt.date.fromisoformat(day), dry_run=dry_run)
+            if r.get("ok") and not dry_run and r.get("futures_rows"):
+                lot, src = _nifty_lot_size()
+                r["llt"] = {**_rb.redo_llt(conn, _dt.date.fromisoformat(day), lot),
+                            "lot_size": lot, "lot_source": src}
+            return JSONResponse(r)
+    finally:
+        arch.close()
+
+
+@app.post("/oi/rebuild/range")
+def oi_rebuild_range(underlying: str = "NIFTY", since: str = "2026-06-08",
+                     until: Optional[str] = None, dry_run: bool = True):
+    """Repair every trading day in a range, in the background. Watch
+    /oi/rebuild/status. dry_run (default) writes nothing."""
+    import threading
+    import fyers_hist as _fh
+    import rebuild as _rb
+    global _rebuild_stop
+    if _rebuild_job["running"]:
+        return JSONResponse({"ok": False, "reason": "a rebuild is already running"})
+    end = _dt.date.fromisoformat(until) if until else \
+        _dt.datetime.now(recorder.IST).date() - _dt.timedelta(days=1)
+    lot, src = _nifty_lot_size()
+    _rebuild_stop = threading.Event()
+    _rebuild_job.update(running=True, result=None, error=None, finished=None,
+                        started=_dt.datetime.now(recorder.IST).isoformat(timespec="seconds"))
+
+    def work():
+        arch = _fh.connect()
+        try:
+            with db.get_conn() as conn:
+                res = _rb.rebuild_range(conn, arch, underlying, _dt.date.fromisoformat(since),
+                                        end, dry_run=dry_run,
+                                        lot_size=lot if underlying == "NIFTY" else None,
+                                        stop=_rebuild_stop)
+            res.update(lot_size=lot, lot_source=src)
+            _rebuild_job["result"] = res
+        except Exception as e:
+            _rebuild_job["error"] = f"{type(e).__name__}: {e}"
+        finally:
+            arch.close()
+            _rebuild_job.update(running=False,
+                                finished=_dt.datetime.now(recorder.IST).isoformat(timespec="seconds"))
+    threading.Thread(target=work, name="oi-rebuild", daemon=True).start()
+    return JSONResponse({"ok": True, "dry_run": dry_run, "watch": "/oi/rebuild/status"})
+
+
+@app.get("/oi/rebuild/status")
+def oi_rebuild_status(detail: bool = False):
+    j = dict(_rebuild_job)
+    if j.get("result") and not detail:
+        j["result"] = {k: v for k, v in j["result"].items() if k != "days"}
+    return JSONResponse(j)
+
+
+@app.post("/oi/rebuild/stop")
+def oi_rebuild_stop():
+    if _rebuild_stop is not None:
+        _rebuild_stop.set()
+    return JSONResponse({"ok": True, "running": _rebuild_job["running"]})
+
+
 @app.get("/fyers/login")
 async def fyers_login():
     import fyers_auth as _fa
