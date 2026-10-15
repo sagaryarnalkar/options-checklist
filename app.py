@@ -933,7 +933,7 @@ def oi_rebuild_stop():
     return JSONResponse({"ok": True, "running": _rebuild_job["running"]})
 
 
-def _spawn_history(args: list) -> int:
+def _spawn_history(args: list, script: str = "history.py") -> int:
     """history.py as its own low-priority process: hours of CPU must not run
     in the web worker. An app restart still kills it (systemd stops the
     unit's whole cgroup), but the run is resumable — POST /history/run again
@@ -942,7 +942,7 @@ def _spawn_history(args: list) -> int:
     import history as _hi
     python_bin = os.environ.get("PYTHON_BIN") or sys.executable or "python3"
     log = open(_hi.LOG_FILE, "a")
-    p = subprocess.Popen([python_bin, str(ROOT / "history.py"), *args], cwd=str(ROOT),
+    p = subprocess.Popen([python_bin, str(ROOT / script), *args], cwd=str(ROOT),
                          stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                          start_new_session=True)
     log.close()
@@ -1018,6 +1018,29 @@ def history_scorecard_refresh(underlying: str = "NIFTY"):
     return JSONResponse({"ok": True, "pid": _spawn_history(
         ["scorecard", "--underlying", underlying, "--save"]),
         "then": f"/history/scorecard?underlying={underlying}"})
+
+
+@app.post("/history/direction/run")
+def history_direction_run(underlying: str = "NIFTY", fetch: bool = True):
+    """Walk Hilega Milega + SRT forward over 20 years of daily candles through
+    the production functions and grade each claim (direction_history.py).
+    ~1 minute; fetching the daily history needs a Fyers login (one call/year)."""
+    if underlying not in ("NIFTY", "BANKNIFTY"):
+        return JSONResponse({"ok": False, "reason": "underlying must be NIFTY or BANKNIFTY"},
+                            status_code=400)
+    args = ["--underlying", underlying] + ([] if fetch else ["--no-fetch"])
+    return JSONResponse({"ok": True, "pid": _spawn_history(args, "direction_history.py"),
+                         "then": f"/history/direction?underlying={underlying}"})
+
+
+@app.get("/history/direction")
+def history_direction(underlying: str = "NIFTY"):
+    import direction_history as _dh
+    p = _dh.result_path(underlying)
+    if underlying not in ("NIFTY", "BANKNIFTY") or not p.exists():
+        return JSONResponse({"ok": False, "reason": f"no {underlying} direction backtest yet — "
+                                                    "POST /history/direction/run"})
+    return JSONResponse(json.loads(p.read_text()))
 
 
 @app.get("/fyers/login")
