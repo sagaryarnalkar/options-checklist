@@ -315,7 +315,21 @@ def rebuild_day(conn, arch, underlying: str, day: date, dry_run: bool = True) ->
     fut_rows, fut_target = [], []
     if b["futures"]:
         ticks = tick_minutes(conn, day)
-        fut_target = [m for m in session_minutes(day) if m[:16] not in ticks]
+        d = day.isoformat()
+        have_fut = {r[0][:16] for r in conn.execute(
+            "SELECT ts FROM futures_minute WHERE ts>=? AND ts<? AND symbol LIKE 'NIFTY%FUT'",
+            (d, d + "~"))}
+        if have_fut & ticks:
+            # futures were recorded live that day: only fill what the ticks missed
+            fut_target = [m for m in session_minutes(day) if m[:16] not in ticks]
+        else:
+            # NO live futures that day — before LLT tracking began (#53,
+            # 2026-07-15) the recorder never wrote them. "A tick ran" does not
+            # mean "futures were recorded" here, so rebuild the WHOLE session:
+            # a fragment (the canary wrote 13 minutes for 2026-07-01) would
+            # feed llt.detect_day a partial day and seed a print from it.
+            fut_target = list(session_minutes(day))
+        out["futures_scope"] = "fill" if (have_fut & ticks) else "full_session"
         fut_rows = [(m, b["futures"]["symbol"], *b["futures"]["rows"][m])
                     for m in fut_target if m in b["futures"]["rows"]]
         out.update(future=b["futures"]["symbol"], futures_rows=len(fut_rows))
