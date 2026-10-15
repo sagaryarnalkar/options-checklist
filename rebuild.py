@@ -301,8 +301,19 @@ def rebuild_day(conn, arch, underlying: str, day: date, dry_run: bool = True) ->
     p = plan_day(conn, arch, underlying, day)
     target = p.pop("_target")
     out = dict(p)
-    if not target or not p["expiry"]:
-        out.update(ok=True, note="nothing to rebuild" if not target else "no tracked expiry")
+    # A NIFTY day with no live futures needs its futures rebuilt even when the
+    # chain is complete — otherwise pre-LLT history (before 2026-07-15) would
+    # only gain futures on the days a login happened to be late.
+    fut_missing = False
+    if underlying == "NIFTY":
+        ticks = tick_minutes(conn, day)
+        d0 = day.isoformat()
+        have = {r[0][:16] for r in conn.execute(
+            "SELECT ts FROM futures_minute WHERE ts>=? AND ts<? AND symbol LIKE 'NIFTY%FUT'",
+            (d0, d0 + "~"))}
+        fut_missing = not (have & ticks)
+    if (not target and not fut_missing) or not p["expiry"]:
+        out.update(ok=True, note="nothing to rebuild" if p["expiry"] else "no tracked expiry")
         return out
     b = build(arch, underlying, day, p["expiry"])
     if not b.get("ok"):
@@ -424,15 +435,19 @@ def rebuild_range(conn, arch, underlying: str, since: date, until: date,
             r = rebuild_day(conn, arch, underlying, d, dry_run=dry_run)
         except Exception as e:
             r = {"day": d.isoformat(), "ok": False, "reason": f"{type(e).__name__}: {e}"}
-        if r.get("to_rebuild"):
-            results.append({k: v for k, v in r.items() if k != "underlying"})
-            log(f"[rebuild] {underlying} {d}: {r.get('to_rebuild')} min "
-                f"({r.get('of_which_missing')} missing, {r.get('of_which_backfilled')} backfilled)"
-                f" -> {'DRY' if dry_run else 'written'} ok={r.get('ok')} {r.get('reason') or ''}")
-            if r.get("ok") and not dry_run and r.get("chain_rows"):
+        if r.get("to_rebuild") or r.get("futures_rows"):
+            if r.get("ok") and not dry_run and (r.get("chain_rows") or r.get("futures_rows")):
                 changed.append(d)
                 if r.get("futures_rows") and lot_size:
                     r["llt"] = redo_llt(conn, d, lot_size)
+            # recorded AFTER the LLT step: the first version copied the result
+            # before it, so the report said "LLT redone on 0 days" while the
+            # table had gone from 166 prints to 303
+            results.append({k: v for k, v in r.items() if k != "underlying"})
+            log(f"[rebuild] {underlying} {d}: {r.get('to_rebuild')} min "
+                f"({r.get('of_which_missing')} missing, {r.get('of_which_backfilled')} backfilled)"
+                f" futures={r.get('futures_scope')} -> {'DRY' if dry_run else 'written'} "
+                f"ok={r.get('ok')} {r.get('reason') or ''}")
     regraded = set()
     if not dry_run:
         for d in changed:
@@ -447,6 +462,9 @@ def rebuild_range(conn, arch, underlying: str, since: date, until: date,
     return {"underlying": underlying, "since": since.isoformat(), "until": until.isoformat(),
             "dry_run": dry_run, "trading_days": len(days),
             "days_needing_work": len(results), "days_written": len(changed),
+            "llt_redone_days": sum(1 for r in results if r.get("llt")),
+            "llt_prints_deleted": sum(r["llt"]["deleted"] for r in results if r.get("llt")),
+            "llt_prints_detected": sum(r["llt"]["detected"] for r in results if r.get("llt")),
             "missing_minutes": sum(r.get("of_which_missing") or 0 for r in results),
             "backfilled_minutes": sum(r.get("of_which_backfilled") or 0 for r in results),
             "failed": [r for r in results if not r.get("ok")],

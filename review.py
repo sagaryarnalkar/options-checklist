@@ -193,15 +193,23 @@ def grade_llt(conn, symbol_like: str = "NIFTY") -> dict:
     rows = [r for r in rows if r[2] in LLT_DIRECTION]
     if not rows:
         return {"ok": False, "reason": "no classified LLT prints"}
-    sym = Counter(r[1] for r in rows).most_common(1)[0][0]
-    fut = _series(conn, "futures_minute", "ltp", sym)
-    if not fut:
-        return {"ok": False, "reason": f"no futures_minute series for {sym}"}
-    out = {"ok": True, "symbol": sym, "n_prints": len(rows),
+    # Each print is graded against ITS OWN contract. The first version used
+    # only the most common symbol, so every print made on another monthly
+    # (after each roll) had no forward prices: 166 prints, 56 graded.
+    syms = sorted({r[1] for r in rows})
+    series = {s: _series(conn, "futures_minute", "ltp", s) for s in syms}
+    series = {s: v for s, v in series.items() if v}
+    if not series:
+        return {"ok": False, "reason": "no futures_minute series for any print's contract"}
+    out = {"ok": True, "symbols": sorted(series), "n_prints": len(rows),
            "sessions": len({r[0][:10] for r in rows}), "horizons": {}}
     for horizon in HORIZONS:
-        fwd = _forward(fut, horizon)
-        graded = [(r, fwd.get(r[0][:16])) for r in rows]
+        fwd_by = {s: _forward(v, horizon) for s, v in series.items()}
+        # the baseline pools every contract's minutes over the same sessions
+        fwd = {}
+        for f in fwd_by.values():
+            fwd.update(f)
+        graded = [(r, fwd_by.get(r[1], {}).get(r[0][:16])) for r in rows]
         graded = [(r, v) for r, v in graded if v is not None]
         if not graded:
             out["horizons"][f"{horizon}min"] = {"n": 0,
