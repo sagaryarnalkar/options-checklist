@@ -115,6 +115,31 @@ def _bar_minute_iso(bar_date) -> str:
     return bd.replace(second=0, microsecond=0).isoformat()
 
 
+def _session_upto(day, end: datetime) -> list:
+    """Session minutes 09:15..min(15:30, end), in the recorder's ts format."""
+    import rebuild
+    cut = end.astimezone(IST).replace(second=0, microsecond=0).isoformat()
+    return [m for m in rebuild.session_minutes(day) if m <= cut]
+
+
+def _bars_to_live(kite_bars: list, minutes: list) -> dict:
+    """Kite historical minute bars -> what the LIVE recorder would have written.
+
+    THE #90 BUG. The live recorder stores kite.quote's LTP at minute T (= close
+    of bar T-1) and its CUMULATIVE day volume. This backfill used to store bar
+    T's close at T and bar T's OWN volume — so oi_flow and llt.py, which take
+    `volume - previous volume`, turned the seam between a backfilled morning
+    and the first live minute into the biggest print of the day. One converter
+    (rebuild.to_live) now serves this backfill and the Fyers rebuild alike.
+    """
+    import rebuild
+    bars = {}
+    for b in kite_bars or []:
+        bars[_bar_minute_iso(b["date"])] = (b.get("open"), b.get("close"),
+                                            b.get("volume") or 0, b.get("oi"))
+    return rebuild.to_live(bars, minutes)
+
+
 def _current_nifty_future(instruments, today) -> Optional[dict]:
     """Current-month NIFTY futures contract, auto-rolled to next month within
     2 days of expiry (LLT spec rule 1). Returns token/symbol/lot/expiry."""
@@ -164,13 +189,27 @@ def is_market_hours(now: Optional[datetime] = None) -> bool:
     return (9 * 60 + 15) <= minutes <= (15 * 60 + 30)
 
 
+def _soft_fail(name: str, error: str, expiry=None) -> dict:
+    """Log a skipped snapshot. These paths used to `return` silently: an
+    underlying could record nothing all day and leave no trace in
+    recorder_log (NIFTY did exactly that on 2026-09-21/22 while BANKNIFTY
+    recorded full sessions)."""
+    try:
+        with db.get_conn() as conn:
+            db.log_recorder_run(conn, name, str(expiry) if expiry else None, 0,
+                                error=f"skipped: {error}")
+    except Exception:
+        pass
+    return {"ok": False, "error": error, **({"expiry": str(expiry)} if expiry else {})}
+
+
 def snapshot_one(kite, name: str, conf: dict) -> dict:
     """Take one snapshot for one underlying. Returns a stats dict (also written
     to recorder_log). Raises on hard failure — callers should catch."""
     instruments = _get_instruments(kite)
     expiry = _nearest_expiry(instruments, conf["nfo_name"])
     if expiry is None:
-        return {"ok": False, "error": "no upcoming expiry found"}
+        return _soft_fail(name, "no upcoming expiry found")
 
     # Spot via LTP
     ltp_key = f"{conf['exchange']}:{conf['tradingsymbol']}"
@@ -186,7 +225,7 @@ def snapshot_one(kite, name: str, conf: dict) -> dict:
     ]
     strikes = sorted({int(ins["strike"]) for ins in chain})
     if not strikes:
-        return {"ok": False, "error": "no strikes in chain", "expiry": str(expiry)}
+        return _soft_fail(name, "no strikes in chain", expiry)
 
     # ATM ± atm_n strikes (spec: detect strike step, don't hardcode lot size)
     atm = min(strikes, key=lambda s: abs(s - spot))
@@ -202,7 +241,7 @@ def snapshot_one(kite, name: str, conf: dict) -> dict:
         if int(ins["strike"]) in target_strikes
     ]
     if not targets:
-        return {"ok": False, "error": "no target instruments", "expiry": str(expiry)}
+        return _soft_fail(name, "no target instruments", expiry)
 
     # Kite quote() returns LTP, volume, OI in one call. Up to 500 syms per call;
     # we have ~42, so a single call.
@@ -361,15 +400,18 @@ def _backfill_futures(kite, instruments, day, start, end) -> dict:
         bars = kite.historical_data(
             fut["token"], start.strftime("%Y-%m-%d %H:%M:%S"),
             end.strftime("%Y-%m-%d %H:%M:%S"), "minute", oi=True)
+        # Written in LIVE semantics (row T = bar T-1, CUMULATIVE volume) via the
+        # same converter rebuild.py uses. Writing each bar's own volume made
+        # llt.py's `volume - previous` dump the whole morning into the first
+        # live minute: a fake LLT print at login time, every late-login day.
+        live = _bars_to_live(bars, _session_upto(day, end))
         with db.get_conn() as conn:
-            for b in bars:
-                conn.execute(
-                    "INSERT OR IGNORE INTO futures_minute (ts, symbol, ltp, volume, oi)"
-                    " VALUES (?,?,?,?,?)",
-                    (_bar_minute_iso(b["date"]), fut["symbol"], b.get("close"),
-                     b.get("volume"), b.get("oi")))
+            conn.executemany(
+                "INSERT OR IGNORE INTO futures_minute (ts, symbol, ltp, volume, oi)"
+                " VALUES (?,?,?,?,?)",
+                [(m, fut["symbol"], v[0], v[1], v[2]) for m, v in live.items()])
             conn.commit()
-            out["futures_minutes"] = len(bars)
+            out["futures_minutes"] = len(live)
             out["llt_prints_found"] = llt.detect_day(conn, day.isoformat(), fut["lot_size"])
     except Exception as e:
         out["futures_error"] = f"{type(e).__name__}: {e}"
@@ -423,13 +465,16 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
     if not idx_bars:
         return {"ok": False, **fut, "underlying": name, "date": str(day), "error": "no index history"}
 
-    spot_by_min: dict = {}
+    # Candles stay bar-START stamped: the live recorder stores completed bars
+    # the same way, so candles were never inconsistent. Chain rows are what
+    # changed — see _bars_to_live.
+    minutes = _session_upto(day, end)
+    spot_by_min: dict = {m: v[0] for m, v in _bars_to_live(idx_bars, minutes).items()}
     candle_rows = []
     for b in idx_bars:
         miso = _bar_minute_iso(b["date"])
         if b.get("close") is None:
             continue
-        spot_by_min[miso] = b["close"]
         candle_rows.append({
             "ts": miso, "underlying": name,
             "open": b.get("open"), "high": b.get("high"),
@@ -470,10 +515,7 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
             fetched += 1
         except Exception:
             bars = []
-        d = {}
-        for b in bars:
-            d[_bar_minute_iso(b["date"])] = (b.get("close"), b.get("volume"), b.get("oi"))
-        opt_by_min[(strike, opt_type)] = d
+        opt_by_min[(strike, opt_type)] = _bars_to_live(bars, minutes)
         time.sleep(_HIST_THROTTLE_S)
 
     # 4) Build chain rows per minute, restricted to that minute's ATM ± atm_n
@@ -488,14 +530,14 @@ def backfill_day(kite, name: str, conf: dict, day, upto: Optional[datetime] = No
         for (strike, opt_type), d in opt_by_min.items():
             if strike not in minute_band:
                 continue
-            bar = d.get(miso)
-            if bar is None:
+            v = d.get(miso)
+            if v is None:
                 continue
-            close, vol, oi = bar
+            ltp, cum_vol, oi = v
             rows.append({
                 "ts": miso, "underlying": name, "spot": float(spot),
                 "expiry": expiry, "strike": int(strike), "opt_type": opt_type,
-                "ltp": close, "volume": vol, "oi": oi,
+                "ltp": ltp, "volume": cum_vol, "oi": oi,
             })
 
     with db.get_conn() as conn:
