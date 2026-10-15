@@ -933,6 +933,93 @@ def oi_rebuild_stop():
     return JSONResponse({"ok": True, "running": _rebuild_job["running"]})
 
 
+def _spawn_history(args: list) -> int:
+    """history.py as its own low-priority process: hours of CPU must not run
+    in the web worker. An app restart still kills it (systemd stops the
+    unit's whole cgroup), but the run is resumable — POST /history/run again
+    and finished sessions are skipped."""
+    import subprocess
+    import history as _hi
+    python_bin = os.environ.get("PYTHON_BIN") or sys.executable or "python3"
+    log = open(_hi.LOG_FILE, "a")
+    p = subprocess.Popen([python_bin, str(ROOT / "history.py"), *args], cwd=str(ROOT),
+                         stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         start_new_session=True)
+    log.close()
+    if args and args[0] == "run":
+        _hi.mark_starting(p.pid, args)
+    return p.pid
+
+
+@app.post("/history/run")
+def history_run(underlying: str = "NIFTY", since: Optional[str] = None,
+                until: Optional[str] = None, redo: bool = False):
+    """Replay the Fyers archive through the production signal code (see
+    history.py). Resumable; watch /history/status."""
+    import history as _hi
+    if underlying not in ("NIFTY", "BANKNIFTY"):
+        return JSONResponse({"ok": False, "reason": "underlying must be NIFTY or BANKNIFTY"},
+                            status_code=400)
+    try:
+        for d in (since, until):
+            if d:
+                _dt.date.fromisoformat(d)
+    except ValueError:
+        return JSONResponse({"ok": False, "reason": "dates are YYYY-MM-DD"}, status_code=400)
+    st = _hi.read_status()
+    if st.get("running"):
+        return JSONResponse({"ok": False, "reason": "a replay is already running", "status": st})
+    args = ["run", "--underlying", underlying]
+    if since:
+        args += ["--since", since]
+    if until:
+        args += ["--until", until]
+    if redo:
+        args.append("--redo")
+    return JSONResponse({"ok": True, "pid": _spawn_history(args), "watch": "/history/status"})
+
+
+@app.get("/history/status")
+def history_status(log_lines: int = 15):
+    import history as _hi
+    st = _hi.read_status()
+    try:
+        st["log_tail"] = _hi.LOG_FILE.read_text(errors="replace").splitlines()[-log_lines:]
+    except Exception:
+        st["log_tail"] = []
+    return JSONResponse(st)
+
+
+@app.post("/history/stop")
+def history_stop():
+    """Ask the replay to stop after the session it is on (done ones are kept)."""
+    import history as _hi
+    _hi.STOP_FILE.touch()
+    return JSONResponse({"ok": True, "status": _hi.read_status()})
+
+
+@app.get("/history/scorecard")
+def history_scorecard(underlying: str = "NIFTY"):
+    """The cached grade of the replay, written when a run finishes (or by
+    POST /history/scorecard/refresh)."""
+    import history as _hi
+    p = _hi.scorecard_path(underlying)
+    if underlying not in ("NIFTY", "BANKNIFTY") or not p.exists():
+        return JSONResponse({"ok": False, "reason": f"no graded {underlying} replay yet — "
+                                                    "POST /history/run first"})
+    return JSONResponse(json.loads(p.read_text()))
+
+
+@app.post("/history/scorecard/refresh")
+def history_scorecard_refresh(underlying: str = "NIFTY"):
+    if underlying not in ("NIFTY", "BANKNIFTY"):
+        return JSONResponse({"ok": False, "reason": "underlying must be NIFTY or BANKNIFTY"},
+                            status_code=400)
+    return JSONResponse({"ok": True, "pid": _spawn_history(
+        ["scorecard", "--underlying", underlying, "--save"]),
+        "then": f"/history/scorecard?underlying={underlying}"})
+
+
 @app.get("/fyers/login")
 async def fyers_login():
     import fyers_auth as _fa
