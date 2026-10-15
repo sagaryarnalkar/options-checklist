@@ -280,7 +280,10 @@ def scorecard(conn, underlying: str = "NIFTY") -> dict:
     import hold as _hold
     out = {"ok": True, "underlying": underlying,
            "markers": _safe(grade_markers, conn, underlying),
-           "llt": _safe(grade_llt, conn),
+           # LLT tracks NIFTY futures only; grading it under BANKNIFTY would
+           # quietly re-print NIFTY's prints with the wrong label
+           "llt": (_safe(grade_llt, conn) if underlying == "NIFTY" else
+                   {"ok": False, "reason": "LLT tracks NIFTY futures only"}),
            "oi_builds": _safe(_hold.hold_stats, conn, underlying)}
     # a flat list of the honest headlines, for the UI and for a quick read
     lines = []

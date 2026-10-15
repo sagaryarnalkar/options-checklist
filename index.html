@@ -2255,9 +2255,9 @@
   // Two axes, because one number can't separate them:
   //   SKEW     = PE change - CE change  -> which side is richening
   //   STRADDLE = ATM CE + ATM PE change -> pure vol/time (delta-neutral)
-  // The skew axis is COINCIDENT (measured on the WCash split: +0.77 vs the
-  // day's realised move, but -0.29 against the afternoon from 11:00), so the
-  // copy says "pressure now" and never forecasts.
+  // The skew axis is COINCIDENT: on 4.7 years of replay it runs -0.79 with the
+  // day's realised move (PE-CE, so negative = agrees), but -0.02 against the
+  // afternoon from 11:00 — so the copy says "pressure now" and never forecasts.
   function renderLadder(d){
     const el = document.getElementById("oiLadder");
     const badge = document.getElementById("ladderVerdict");
@@ -2435,12 +2435,12 @@
   }
 
   // ---------- Build follow-through (did it hold?) ----------
-  // Measured across the full recorded history (38 sessions, production): a
-  // contract-day carrying at least one flagged build closed above its prior
-  // close 72.0% of the time against 51.1% for one that did not — +20.9pp,
-  // z=11.18. The hit count is what grades it: 1 build 61.8%, 2-4 62.0%, 5+
-  // 80.7%. So a lone flag beats the 51.1% baseline but only modestly, while
-  // repeated builds on one contract are decisive. The table sorts by hits.
+  // Measured on 4.7 years of replay (history.py, NIFTY 2022-2026, 1,182
+  // sessions): a contract-day carrying at least one flagged build closed above
+  // its prior close 68.9% of the time against 35.6% for one that did not —
+  // +33.4pp, z=66, and every single year 65-75% vs 30-39% (BANKNIFTY 74.2% vs
+  // 50.5%). The hit count grades it: 1 build 54.1%, 2-4 59.2%, 5+ 78.2%. The
+  // table sorts by hits. (The 38-session figures it replaced: 72.0 vs 51.1.)
   function renderHolds(d){
     const body = document.getElementById("holdBody");
     const base = document.getElementById("holdBase");
@@ -2467,7 +2467,7 @@
         <div class="hold-head"><b>${Math.round(b.strike)} ${b.opt_type}</b>
           <span class="csp-sub">${String(b.ts).slice(11,16)}</span>
           <span class="hold-tag">${b.side.replace("_"," ")}</span>
-          ${b.hits > 1 ? `<span class="hold-hits" title="builds on this contract today — 5+ hold 80.7% of the time, 2-4 hold 62.0%, a single build 61.8%, against a 51.1% baseline for contracts with no build at all">${b.hits} hits</span>` : ""}
+          ${b.hits > 1 ? `<span class="hold-hits" title="builds on this contract today — over 4.7 years, 5+ held 78.2% of the time, 2-4 held 59.2%, a single build 54.1%, against a 35.6% baseline for contracts with no build at all">${b.hits} hits</span>` : ""}
         </div>
         <div class="csp-sub">₹${b.value_cr} Cr traded in the build minute</div>
         <div class="hold-oi">OI ${n0(b.oi_at_fire)} → peak ${n0(b.oi_peak)} → low ${n0(b.oi_low)} → close ${n0(b.oi_close)}
@@ -2491,8 +2491,9 @@
         session's close. <b>This is not a profit or loss figure</b> — a build that holds can
         still be a losing position, and one that unwinds may have been closed at a gain.
         One row per contract, ranked by hit count, because repeat builds are what actually
-        predict holding: 5+ builds on one contract hold 80.7% of the time against 61.8%
-        for a single build and a 51.1% baseline.</div>
+        predict holding: over 4.7 years of NIFTY history, 5+ builds on one contract held
+        78.2% of the time against 54.1% for a single build and a 35.6% baseline. It shows
+        positions STAYED, not that price will respect the strike — that is untested.</div>
       <div class="hold-grid">
         <div><div class="hold-col ok">Held · ${byContract(held).length} contracts</div>
           ${byContract(held).slice(0,8).map(card).join("") || '<div class="note">none</div>'}</div>
@@ -2530,14 +2531,14 @@
         <div class="csp-sub">${em.expired ? "expired" : "unavailable"}${
           em.atm_strike ? ` · ATM ${em.atm_strike} straddle ₹${em.straddle}` : ""}${
           em.time_value != null ? ` · time value ₹${em.time_value}` : ""}</div></div>`);
-    if (em.ok) rows.push(`<div class="pulse-row" title="1 sigma backed out of the ATM options by Black-Scholes inversion — not the 'straddle x 0.68' rule of thumb, which cannot be derived. Validated on our history: BANKNIFTY closed inside this band on 69% of sessions against a 68% target; NIFTY on 81%, i.e. implied vol ran richer than realised — the premium a seller is collecting.">
+    if (em.ok) rows.push(`<div class="pulse-row" title="1 sigma backed out of the ATM options by Black-Scholes inversion — not the 'straddle x 0.68' rule of thumb, which cannot be derived. Checked on 4.7 years of replay (2022-2026): the expiry close landed inside this band 72% of the time on NIFTY and 71% on BANKNIFTY against a 68% target — implied ran slightly rich, a modest premium for the seller. Over a single weekday the band held 67% (NIFTY) / 71% (BANKNIFTY): implied roughly equal to realised. (An earlier 40-session reading of 81% was small-sample.)">
         <span class="pulse-lbl">Expected move (${em.dte}d)</span>
         <span class="pulse-val">±${em.one_sigma} <span class="csp-sub">(${em.one_sigma_pct}%)</span></span>
         <div class="csp-sub">${em.lower} – ${em.upper} · ATM ${em.atm_strike} straddle ₹${em.straddle} · IV ${em.iv}%</div></div>`);
-    if (mp.ok) rows.push(`<div class="pulse-row" title="Strike at which writers in aggregate pay out least. POSITIONING, NOT A FORECAST: we tested whether spot drifts toward it and got 21/32 sessions (p=0.055) — suggestive, not significant, and underpowered. Do not trade it as a target.${mp.on_band_edge ? " WARNING: max pain sits on the edge of the strikes we record, so the true minimum is probably outside the band." : ""}">
+    if (mp.ok) rows.push(`<div class="pulse-row" title="Strike at which writers in aggregate pay out least. POSITIONING, NOT A FORECAST: on 4.7 years of replay, price moved toward it from 11:00 to the close on 48% of NIFTY sessions and 52% of BANKNIFTY sessions against a 50% chance level, and toward it into expiry no more often than chance — there is no magnet. Do not trade it as a target.${mp.on_band_edge ? " WARNING: max pain sits on the edge of the strikes we record, so the true minimum is probably outside the band." : ""}">
         <span class="pulse-lbl">Max pain</span>
         <span class="pulse-val">${mp.max_pain}${mp.on_band_edge ? ' <span class="loss">⚠</span>' : ""}</span>
-        <div class="csp-sub">spot ${mp.distance >= 0 ? "+" : ""}${mp.distance} away · not a forecast (21/32, p=0.06)</div></div>`);
+        <div class="csp-sub">spot ${mp.distance >= 0 ? "+" : ""}${mp.distance} away · not a forecast — no magnet in 4.7 yrs</div></div>`);
     if (sk.ok) rows.push(`<div class="pulse-row" title="Implied vol on an equidistant OTM call vs OTM put. Put skew means the market charges more for downside protection than upside — normal for an index, and it steepens exactly when a short-vol book is hurting.">
         <span class="pulse-lbl">IV skew</span>
         <span class="pulse-val ${sk.skew < 0 ? "loss" : "profit"}">${sk.skew > 0 ? "+" : ""}${sk.skew}</span>
@@ -3046,12 +3047,12 @@
   }
 
   // ---------- WCash: option-writer mark-to-market (#73) ----------
-  // VALIDATED as a STATE gauge on 40 recorded sessions: corr -0.62 with the
-  // day's |move| and -0.70 with range, correct sign, and ~0 against SIGNED
-  // move (writers are hurt both ways, exactly as the maths requires).
-  // NOT a forecast: writer stress at 11:00 vs the afternoon's range came out
-  // -0.008 (-0.045 controlling for morning activity). The copy below says so
-  // deliberately — this must not drift into being read as a direction call.
+  // A STATE gauge, and a looser one than the 40-session test said: on 4.7
+  // years of replay (NIFTY, 1,178 sessions) corr -0.28 with the day's |move|
+  // (-0.35 excluding expiry days) and -0.31 with range — right sign, modest
+  // size; ~0 against SIGNED move (writers are hurt both ways). NOT a forecast:
+  // writer stress at 11:00 vs the afternoon's range is -0.09 holding the
+  // morning's range fixed. The copy below says so deliberately.
   const WC_STATE = {
     comfortable:        ["COMFORTABLE",  "--pos",   "writers in profit and holding it"],
     comfortable_fading: ["FADING",       "--amber", "in profit but giving it back late"],
@@ -3080,11 +3081,12 @@
     </svg>`;
   }
   // Bear/bull pressure gauge. The HEADLINE WCash number is deliberately
-  // non-directional (writers bleed both ways, +0.20 vs signed move) — but the
-  // CALL-vs-PUT split is: +0.765 vs the day's signed move, sign agrees 98% of
-  // sessions. It is COINCIDENT though: at 11:00 it calls the afternoon right
-  // only 43% of the time (worse than chance), so the copy says "right now",
-  // never "next".
+  // non-directional (writers bleed both ways, -0.07 vs signed move) — but the
+  // CALL-vs-PUT split is: +0.76 vs the day's signed move, sign agrees 92% of
+  // sessions (4.7 years). It is COINCIDENT though: at 11:00 it calls the
+  // afternoon right 53% of the time against a 50% chance level (BANKNIFTY 51%),
+  // an edge not separated from plain morning momentum — so the copy says
+  // "right now", never "next".
   function _wcTilt(w){
     if (w.tilt_pct == null) return "";
     const t = Math.max(-100, Math.min(100, w.tilt_pct));
@@ -3128,11 +3130,12 @@
       </div>
       <div class="wc-foot">Mark-to-market of everyone short options in NIFTY (ATM±10), the cohort
         your book sits in — every open contract has exactly one writer, so this needs no assumption
-        about who holds what. <b>A state gauge, not a forecast:</b> on our 40 recorded sessions the
-        total tracks the day's realised move (−0.62) but shows no predictive power over the rest of
-        the day (−0.01). The bull/bear % is the call-vs-put split — it does track direction
-        (+0.77, sign right on 98% of sessions) but <b>coincidently</b>: at 11:00 it called the
-        afternoon right only 43% of the time, worse than a coin flip. Read both as "where the
+        about who holds what. <b>A state gauge, not a forecast:</b> over 4.7 years (1,178 sessions)
+        the total tracks the day's realised move only loosely (−0.28; −0.35 excluding expiry
+        days) and has no predictive power over the rest of the day (−0.09 holding the morning's
+        range fixed). The bull/bear % is the call-vs-put split — it does track direction
+        (+0.76, sign right on 92% of sessions) but <b>coincidently</b>: at 11:00 it called the
+        afternoon right 53% of the time against 50% chance. Read both as "where the
         stress is right now", never as "what happens next".</div>`;
   }
 
