@@ -463,26 +463,71 @@ def _spearman(xs, ys):
 
 
 def _sign_agree(xs, ys):
+    """How often the signs agree, against what INDEPENDENT signs with the
+    same up/down shares would give — not against 50%. If tilt leans bullish
+    on most days and afternoons drift up, a coin-flip baseline credits the
+    indicator with the drift."""
     p = [(x, y) for x, y in zip(xs, ys) if x and y]
     if len(p) < 10:
         return None
+    n = len(p)
     k = sum(1 for x, y in p if (x > 0) == (y > 0))
-    return {"n": len(p), "agree": k, "pct": round(k / len(p) * 100, 1),
-            "z_vs_coin": round((k - len(p) / 2) / math.sqrt(len(p) / 4), 2)}
+    px = sum(1 for x, _ in p if x > 0) / n
+    py = sum(1 for _, y in p if y > 0) / n
+    e = px * py + (1 - px) * (1 - py)
+    return {"n": n, "agree": k, "pct": round(k / n * 100, 1),
+            "chance_pct": round(e * 100, 1),
+            "z": round((k - n * e) / math.sqrt(n * e * (1 - e)), 2) if 0 < e < 1 else None}
 
 
-def _binom_z(k: int, n: int):
-    return round((k - n / 2) / math.sqrt(n / 4), 2) if n else None
+def _partial(xs, ys, zs):
+    """corr(x, y) holding z fixed — e.g. WCash@11 vs the afternoon range,
+    controlling for how active the morning already was (vol clusters, so the
+    morning alone predicts the afternoon)."""
+    t = [(x, y, z) for x, y, z in zip(xs, ys, zs) if None not in (x, y, z)]
+    if len(t) < 20:
+        return None
+    a, b, c = zip(*t)
+    rxy, rxz, ryz = _corr(a, b), _corr(a, c), _corr(b, c)
+    if None in (rxy, rxz, ryz) or rxz ** 2 >= 1 or ryz ** 2 >= 1:
+        return None
+    return round((rxy - rxz * ryz) / math.sqrt((1 - rxz ** 2) * (1 - ryz ** 2)), 3)
 
 
-def day_level(rows: list) -> dict:
+def _magnet(events: list) -> dict:
+    """Did price move TOWARD max pain? events = (spot_then, max_pain, later).
+
+    The obvious test — "did it end nearer max pain than it started?" — has no
+    50% chance level: when max pain sits close to spot, almost any move
+    overshoots it, so even a random level 'fails' most of the time (the first
+    version of this grader reported a z of -17 from exactly that). Direction
+    has a fair baseline: independent signs with the same shares of 'max pain
+    above spot' and 'price rose'."""
+    ev = [(s, m, c) for s, m, c in events if abs(m - s) >= 1 and c != s]
+    if not ev:
+        return {"n": 0}
+    n = len(ev)
+    k = sum(1 for s, m, c in ev if (c > s) == (m > s))
+    above = sum(1 for s, m, c in ev if m > s) / n
+    up = sum(1 for s, m, c in ev if c > s) / n
+    e = above * up + (1 - above) * (1 - up)
+    nearer = sum(1 for s, m, c in ev if abs(c - m) < abs(s - m))
+    return {"n": n, "toward": k, "pct": round(k / n * 100, 1), "chance_pct": round(e * 100, 1),
+            "z": round((k - n * e) / math.sqrt(n * e * (1 - e)), 2) if 0 < e < 1 else None,
+            "ended_nearer_pct": round(nearer / n * 100, 1),
+            "ended_nearer_note": "NOT a magnet test — no 50% chance level (see docstring)"}
+
+
+def day_level(rows: list, am_range: Optional[dict] = None) -> dict:
     """Every day-level claim in CLAUDE.md, re-measured. `rows` is hist_day in
-    date order for one underlying (any slice of it)."""
+    date order for one underlying (any slice of it); `am_range` maps day ->
+    09:15-11:00 range in points, the control for the 11:00 range test."""
     if not rows:
         return {"sessions": 0}
     g = lambda k, rs=rows: [r[k] for r in rs]
     absmove = [abs(m) if m is not None else None for m in g("move_pct")]
     w = [r for r in rows if r["wcash_cr"] is not None]
+    nx = [r for r in rows if r["dte"] not in (0, None)]       # expiry days excluded
     out = {"sessions": len(rows)}
     out["wcash"] = {
         "n": len(w),
@@ -491,6 +536,11 @@ def day_level(rows: list) -> dict:
         "corr_vs_signed_move": _corr(g("wcash_cr"), g("move_pct")),
         "writers_profitable_pct": round(sum(1 for r in w if r["wcash_cr"] > 0) / len(w) * 100, 1)
         if w else None,
+        "ex_expiry_day": {"n": len(nx),
+                          "corr_vs_abs_move": _corr(g("wcash_cr", nx),
+                                                    [abs(r["move_pct"]) if r["move_pct"] is not None
+                                                     else None for r in nx]),
+                          "corr_vs_range": _corr(g("wcash_cr", nx), g("range_pct", nx))},
         "claimed": "corr -0.62 |move|, -0.70 range, +0.20 signed, writers profitable 75%",
     }
     out["wcash_tilt"] = {
@@ -499,8 +549,12 @@ def day_level(rows: list) -> dict:
         "sign": _sign_agree(g("wcash_tilt"), g("move_pct")),
         "claimed": "+0.765 (Spearman +0.887), sign right 98% — COINCIDENT",
     }
+    am = [((am_range or {}).get(r["d"]) / r["open"] * 100)
+          if (am_range or {}).get(r["d"]) is not None and r["open"] else None for r in rows]
     out["predictive_from_11"] = {
         "wcash_vs_pm_range": _corr(g("cp_wcash_cr"), g("pm_range_pct")),
+        "wcash_vs_pm_range_partial_am_range": _partial(g("cp_wcash_cr"), g("pm_range_pct"), am),
+        "am_range_vs_pm_range": _corr(am, g("pm_range_pct")),
         "tilt_vs_pm_move": _corr(g("cp_tilt"), g("pm_move_pct")),
         "tilt_sign_vs_pm_move": _sign_agree(g("cp_tilt"), g("pm_move_pct")),
         # ladder skew is PE-minus-CE: positive = puts richening = BEARISH, so
@@ -508,7 +562,8 @@ def day_level(rows: list) -> dict:
         "skew_vs_pm_move": _corr(g("cp_skew"), g("pm_move_pct")),
         "skew_sign_vs_pm_move": _sign_agree([-x if x is not None else None for x in g("cp_skew")],
                                             g("pm_move_pct")),
-        "claimed": "WCash@11 vs afternoon range -0.008; tilt@11 -0.285, sign 43% — NOT predictive",
+        "claimed": "WCash@11 vs afternoon range -0.008 (-0.045 partial); tilt@11 -0.285, "
+                   "sign 43% — NOT predictive",
     }
     out["ladder"] = {
         "skew_vs_signed_move": _corr(g("ladder_skew"), g("move_pct")),
@@ -519,8 +574,7 @@ def day_level(rows: list) -> dict:
     by_d = {r["d"]: r for r in rows}
     days = [r["d"] for r in rows]
     nxt = {a: b for a, b in zip(days, days[1:])}
-    one_day = []
-    to_exp = []
+    one_day, one_day_wkend, to_exp = [], [], []
     for r in rows:
         if not (r["em_iv"] and r["em_spot"]):
             continue
@@ -528,43 +582,46 @@ def day_level(rows: list) -> dict:
         if nd and by_d[nd]["close"]:
             gap = (date.fromisoformat(nd) - date.fromisoformat(r["d"])).days
             sd = r["em_spot"] * r["em_iv"] / 100 * math.sqrt(gap / 365.0)
-            one_day.append(abs(by_d[nd]["close"] - r["em_spot"]) <= sd)
+            (one_day if gap == 1 else one_day_wkend).append(
+                abs(by_d[nd]["close"] - r["em_spot"]) <= sd)
         e = (r["expiry"] or "")[:10]
         if e in by_d and e != r["d"] and by_d[e]["close"] and r["em_one_sigma"]:
             to_exp.append(abs(by_d[e]["close"] - r["em_spot"]) <= r["em_one_sigma"])
+    pct = lambda xs: round(sum(xs) / len(xs) * 100, 1) if xs else None
     out["expected_move"] = {
-        "one_day": {"n": len(one_day),
-                    "inside_pct": round(sum(one_day) / len(one_day) * 100, 1) if one_day else None},
-        "to_expiry": {"n": len(to_exp),
-                      "inside_pct": round(sum(to_exp) / len(to_exp) * 100, 1) if to_exp else None},
+        "next_session_1_cal_day": {"n": len(one_day), "inside_pct": pct(one_day)},
+        "next_session_over_weekend": {"n": len(one_day_wkend), "inside_pct": pct(one_day_wkend),
+                                      "note": "calendar-day time over-counts non-trading days, "
+                                              "so the band is wide here"},
+        "to_expiry": {"n": len(to_exp), "inside_pct": pct(to_exp)},
         "target": "68% if implied = realised; above 68% = implied rich (seller's edge)",
         "claimed": "1-day: NIFTY 81%, BANKNIFTY 69%",
     }
-    # max pain as a magnet: (a) 11:00 reading -> does the close end nearer it
-    # than the 11:00 spot? (b) close reading -> does the EXPIRY close end nearer?
-    intraday = [(abs(r["close"] - r["cp_mp_strike"]) < abs(r["cp_spot"] - r["cp_mp_strike"]))
-                for r in rows if r["cp_mp_strike"] and not r["cp_mp_edge"] and r["close"]
-                and abs(r["cp_spot"] - r["cp_mp_strike"]) >= 1]
-    expiry_mag = []
+    intraday = [(r["cp_spot"], r["cp_mp_strike"], r["close"]) for r in rows
+                if r["cp_mp_strike"] and not r["cp_mp_edge"] and r["close"] and r["cp_spot"]]
+    to_expiry = []
     for r in rows:
         e = (r["expiry"] or "")[:10]
         if (r["mp_strike"] and not r["mp_edge"] and e in by_d and e != r["d"]
-                and by_d[e]["close"] and r["em_spot"] and abs(r["em_spot"] - r["mp_strike"]) >= 1):
-            expiry_mag.append(abs(by_d[e]["close"] - r["mp_strike"])
-                              < abs(r["em_spot"] - r["mp_strike"]))
+                and by_d[e]["close"] and r["em_spot"]):
+            to_expiry.append((r["em_spot"], r["mp_strike"], by_d[e]["close"]))
     out["max_pain"] = {
-        "from_11_to_close": {"n": len(intraday), "toward": sum(intraday),
-                             "pct": round(sum(intraday) / len(intraday) * 100, 1) if intraday else None,
-                             "z_vs_coin": _binom_z(sum(intraday), len(intraday))},
-        "close_to_expiry": {"n": len(expiry_mag), "toward": sum(expiry_mag),
-                            "pct": round(sum(expiry_mag) / len(expiry_mag) * 100, 1)
-                            if expiry_mag else None,
-                            "z_vs_coin": _binom_z(sum(expiry_mag), len(expiry_mag))},
-        "note": "band-edge readings excluded; chance = 50%; overlapping windows in "
-                "close_to_expiry are not independent, so its z is optimistic",
+        "from_11_to_close": _magnet(intraday),
+        "close_to_expiry": _magnet(to_expiry),
+        "note": "band-edge readings excluded; close_to_expiry windows overlap (several "
+                "sessions share one expiry), so its z is optimistic",
         "claimed": "magnet 21/32, p=0.055 — suggestive, not significant",
     }
     return out
+
+
+def _am_ranges(hist, underlying: str) -> dict:
+    """09:15-11:00 high-low range in points, per session (as % of the open
+    inside day_level, where the open is at hand)."""
+    return {d: h - l for d, h, l in hist.execute(
+        "SELECT substr(ts,1,10), MAX(high), MIN(low) FROM underlying_candle "
+        "WHERE underlying=? AND substr(ts,12,5) <= ? GROUP BY substr(ts,1,10)",
+        (underlying, CHECKPOINT)) if h is not None and l is not None}
 
 
 def _slice(hist, years: Optional[tuple]):
@@ -611,18 +668,19 @@ def scorecard(underlying: str = "NIFTY", hist_path: Optional[str] = None,
         return {"ok": False, "reason": f"no replayed {underlying} sessions yet"}
     runs = hist.execute("SELECT SUM(ok), SUM(1-ok), SUM(error IS NOT NULL AND ok=1) "
                         "FROM hist_run WHERE underlying=?", (underlying,)).fetchone()
+    am = _am_ranges(hist, underlying)
     out = {"ok": True, "underlying": underlying, "range": [rows[0]["d"], rows[-1]["d"]],
            "sessions": len(rows),
            "runs": {"ok": runs[0], "failed": runs[1], "ok_with_module_errors": runs[2]},
            "signals": _signals(hist, underlying),
-           "day_level": day_level(rows)}
+           "day_level": day_level(rows, am)}
     if per_year:
         out["by_year"] = {}
         for y in sorted({r["d"][:4] for r in rows}):
             yr = [r for r in rows if r["d"][:4] == y]
             m = _slice(hist, (f"{y}-01-01", f"{int(y) + 1}-01-01"))
             out["by_year"][y] = {"signals": _signals(m, underlying)["summary"],
-                                 "day_level": day_level(yr)}
+                                 "day_level": day_level(yr, am)}
             m.close()
     return out
 

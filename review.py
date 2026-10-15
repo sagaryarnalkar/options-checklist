@@ -159,6 +159,11 @@ def grade_markers(conn, underlying: str = "NIFTY") -> dict:
             # for a bearish signal the baseline is the chance of a DOWN move
             bh = b_all["hits"] if side == "put_writing" else b_all["n"] - b_all["hits"]
             bm = b_match["pct"] if side == "put_writing" else round(100 - b_match["pct"], 1)
+            # the VERDICT is judged on the time-matched baseline (see the module
+            # docstring); it used to use the all-day one, which on 4.7 years of
+            # replay called call_writing@30min a win at 52.3% vs 49.7% when the
+            # minutes it actually fires in run at 50.7%
+            bmh = round(bm / 100 * b_all["n"])
             per_side[side] = {
                 "n": len(sel), "hits": hits,
                 "pct": round(hits / len(sel) * 100, 1),
@@ -167,7 +172,8 @@ def grade_markers(conn, underlying: str = "NIFTY") -> dict:
                 "baseline_matched_pct": bm,
                 "baseline_n": b_all["n"],
                 "z_vs_all": _two_prop_z(hits, len(sel), bh, b_all["n"]),
-                "verdict": _verdict(hits, len(sel), bh, b_all["n"]),
+                "z_vs_matched": _two_prop_z(hits, len(sel), bmh, b_all["n"]),
+                "verdict": _verdict(hits, len(sel), bmh, b_all["n"]),
             }
         # does a HIGHER score do better? the score is sold as a strength ladder
         ladder = {}
@@ -226,14 +232,19 @@ def grade_llt(conn, symbol_like: str = "NIFTY") -> dict:
                 return None
             n_bull = sum(1 for r, _ in sel if LLT_DIRECTION[r[2]] == "bullish")
             # blended baseline: each print judged against the chance of a move
-            # in ITS OWN claimed direction
-            up = b_all["hits"] / b_all["n"]
-            base_rate = (n_bull * up + (len(sel) - n_bull) * (1 - up)) / len(sel)
+            # in ITS OWN claimed direction, at the times of day prints happen
+            # (closing-window prints are common; the close is not a random
+            # minute). The all-day blend is still reported.
+            def blend(up):
+                return (n_bull * up + (len(sel) - n_bull) * (1 - up)) / len(sel)
+            base_all = blend(b_all["hits"] / b_all["n"])
+            base_rate = blend(b_match["pct"] / 100)
             bh = round(base_rate * b_all["n"])
             return {"label": label, "n": len(sel), "hits": hits,
                     "pct": round(hits / len(sel) * 100, 1),
                     "mean_bps": round(sum(v for _, v in sel) / len(sel), 2),
                     "baseline_pct": round(base_rate * 100, 1),
+                    "baseline_all_pct": round(base_all * 100, 1),
                     "baseline_n": b_all["n"],
                     "z": _two_prop_z(hits, len(sel), bh, b_all["n"]),
                     "verdict": _verdict(hits, len(sel), bh, b_all["n"])}
