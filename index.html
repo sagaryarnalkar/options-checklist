@@ -2065,8 +2065,26 @@
       ? list.map(q => `<button type="button">${esc(q)}</button>`).join("") : "";
   }
 
+  // Footer says which credential the server's Claude Code will use — an API
+  // key in .env silently outranks the subscription token, so make it visible.
+  let _aiStatusShown = false;
+  async function aiShowStatus(){
+    if (_aiStatusShown) return;
+    try {
+      const st = await (await posFetch("/assistant/status")).json();
+      const foot = document.getElementById("aiFoot");
+      const who = { subscription_token: "your Claude subscription (setup-token)", claude_login: "your Claude subscription (login)",
+                    api_key: "an Anthropic API key — remove ANTHROPIC_API_KEY from .env to use your subscription", none: null }[st.auth];
+      foot.textContent = !st.sdk_installed ? "Server: claude-agent-sdk not installed — run pip install -r requirements.txt."
+        : !who ? "Server: no Claude credentials — run `claude setup-token` and set CLAUDE_CODE_OAUTH_TOKEN in .env."
+        : `Runs on ${who} · model: ${st.model}${st.project_notes ? " · project notes loaded" : ""} · read-only: it never places orders.`;
+      _aiStatusShown = true;
+    } catch (e) {}
+  }
+
   async function aiOpen(scope, focus){
     if (!posKey()){ posShowGate(); return; }
+    aiShowStatus();
     _aiScope = scope; _aiFocus = focus;
     document.getElementById("aiScope").textContent = scope === "overall" ? "whole book" : scope + (focus ? ` · ${focus}` : "");
     document.getElementById("aiInput").placeholder = focus ? `Ask about ${focus}…` : (scope === "overall" ? "Ask about your whole book…" : `Ask about your ${scope} position…`);
