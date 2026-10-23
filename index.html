@@ -118,6 +118,7 @@
     .rec-summary{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
     .rec-strategy{overflow-x:auto}
     .inline-rec{overflow-x:auto}
+    #paperBook{overflow-x:auto}   /* its legs tables have the same 480px floor */
     table.rec-legs{min-width:480px}
     summary{padding:11px 10px}
     .section-body{padding:4px 10px 12px}
@@ -951,7 +952,35 @@
   .ai-form{ display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); }
   .ai-form textarea{ flex:1; resize:none; font-family:var(--sans); font-size:13.5px; padding:8px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); }
   .ai-foot{ font-size:11px; color:var(--muted); padding:0 14px 10px; }
-  @media (max-width:640px){ .ai-drawer{ width:100vw; } .hz-tabbar .in{ grid-template-columns:repeat(3,1fr); } }
+  /* ---------- Header on phones ----------
+     The brand row is one flex line (logo · ticker · LIVE · account chip ·
+     theme · skin) that measures ~750px. With nowrap children it can't shrink,
+     so on a phone it set the page's layout width to ~950px: every tab needed
+     zooming and no max-width media query ever fired. Below 760px the row
+     wraps — logo, then the quote/account line, then compact settings.
+     `.hz-header > .in` (direct child), NOT `.hz-header .in`: the tab bar's
+     own .in sits inside the header too and must not pick up the wrap. */
+  @media (max-width:760px){
+    .hz-header > .in{ flex-wrap:wrap; gap:6px 12px; padding:8px 16px; }
+    .hz-logo{ margin-right:0; flex:1 1 auto; min-width:0; }
+    .hz-logo svg{ width:30px; height:30px; }
+    .hz-word .wm{ font-size:17px; }
+    .hz-word .sub{ display:none; }
+    .hz-quote{ flex:1 1 100%; min-width:0; flex-wrap:wrap; gap:6px 10px; font-size:11.5px; }
+    .hz-acct{ gap:8px; padding:3px 8px; font-size:11.5px; }
+    .hz-set{ font-size:0; letter-spacing:0; gap:0; }      /* drop the words, keep the selects */
+    .hz-set select{ font-size:11.5px; padding:2px 4px; }
+    .hz-tabbar .tab{ padding:10px 6px; font-size:13px; }
+  }
+  @media (max-width:640px){
+    .ai-drawer{ width:100vw; }
+    /* one swipeable row of tabs instead of a 2-row grid: the sticky header
+       would otherwise take a quarter of a phone screen */
+    .hz-tabbar .in{ display:flex; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+    .hz-tabbar .in::-webkit-scrollbar{ display:none; }
+    .hz-tabbar .tab{ flex:0 0 auto; white-space:nowrap; padding:10px 14px; }
+  }
+
 </style>
 </head>
 <body>
@@ -1727,6 +1756,12 @@
       tabs.forEach(x=>x.classList.toggle("active", x.dataset.tab === key));
       Object.entries(panels).forEach(([k,p])=>p.classList.toggle("active", k === key));
       if (key === "positions") initPositionsTab(); else posStopTimer();
+      // phones: the tab bar scrolls sideways — keep the active tab in view
+      const bar = document.querySelector(".hz-tabbar .in"), cur = document.querySelector(`.tab[data-tab="${key}"]`);
+      if (bar && cur && bar.scrollWidth > bar.clientWidth){
+        const r = cur.getBoundingClientRect(), b = bar.getBoundingClientRect();
+        if (r.left < b.left || r.right > b.right) bar.scrollLeft += r.left - b.left - 24;
+      }
       if (key === "oiflow") initOiFlowTab();
       if (key === "paper") initPaperTab();
       if (key === "csp") initCspTab();
