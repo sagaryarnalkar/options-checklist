@@ -53,9 +53,10 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
+    StreamingResponse,
 )
 
 from kite_auth import (
@@ -523,6 +524,131 @@ async def account():
     except Exception as e:
         out["pnl_error"] = type(e).__name__
     return JSONResponse(out)
+
+
+# ---------- Positions tab + assistant ----------
+# Gated by ASSISTANT_KEY, unlike the rest of the (public) dashboard: these
+# serve the live book strike by strike, fire Kite margin calls, and spend
+# Anthropic API credit on every question — none of which a stranger who
+# finds the URL should be able to do. The browser sends the key as X-App-Key.
+
+def _require_app_key(x_app_key: Optional[str]) -> None:
+    import hmac
+    expected = os.environ.get("ASSISTANT_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="ASSISTANT_KEY is not set in .env on the "
+                                                    "server — add it and restart the app")
+    if not x_app_key or not hmac.compare_digest(x_app_key.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="app key required")
+
+
+@app.get("/positions")
+def positions_read(margins: bool = True, x_app_key: Optional[str] = Header(default=None)):
+    """Live Kite positions with greeks, payoff curves and margins (positions.py).
+    Sync on purpose: several blocking Kite calls run in the threadpool."""
+    _require_app_key(x_app_key)
+    from kite_auth import get_kite_from_cache
+    import positions as _pos
+    kite = get_kite_from_cache()
+    if kite is None:
+        return JSONResponse({"ok": False, "logged_in": False,
+                             "reason": "no Kite session — log in to see live positions"})
+    try:
+        return JSONResponse(_pos.public(_pos.fetch_book(kite, with_margins=margins)))
+    except Exception as e:
+        return JSONResponse({"ok": False, "reason": f"{type(e).__name__}: {e}"}, status_code=502)
+
+
+@app.post("/positions/scenario")
+def positions_scenario(payload: dict = Body(default={}),
+                       x_app_key: Optional[str] = Header(default=None)):
+    """What-if repricing of the live book (spot %, IV points, days forward)."""
+    _require_app_key(x_app_key)
+    from kite_auth import get_kite_from_cache
+    import positions as _pos
+    kite = get_kite_from_cache()
+    if kite is None:
+        return JSONResponse({"ok": False, "reason": "no Kite session"})
+    def num(k, lo, hi):
+        v = payload.get(k)
+        if v is None or v == "":
+            return None
+        v = float(v)
+        if not (lo <= v <= hi):
+            raise HTTPException(status_code=400, detail=f"{k} must be within {lo}..{hi}")
+        return v
+    try:
+        res = _pos.scenario(_pos.fetch_book(kite), payload.get("underlying") or None,
+                            spot_change_pct=num("spot_change_pct", -30, 30),
+                            spot_level=num("spot_level", 1, 10_000_000),
+                            iv_change_pts=num("iv_change_pts", -50, 100) or 0.0,
+                            days_forward=num("days_forward", 0, 120) or 0.0)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse(res)
+
+
+@app.get("/assistant/status")
+async def assistant_status(x_app_key: Optional[str] = Header(default=None)):
+    import assistant as _as
+    import hmac
+    out = _as.configured()
+    exp = os.environ.get("ASSISTANT_KEY", "")
+    out["key_ok"] = bool(exp and x_app_key and hmac.compare_digest(x_app_key.encode(), exp.encode()))
+    return JSONResponse(out)
+
+
+@app.post("/assistant/chat")
+async def assistant_chat(payload: dict = Body(...),
+                         x_app_key: Optional[str] = Header(default=None)):
+    """One question, answered by Claude with read-only tools; streamed as
+    server-sent events: meta, status, text (deltas), done | error."""
+    _require_app_key(x_app_key)
+    import assistant as _as
+    msg = str(payload.get("message") or "").strip()
+    if not msg or len(msg) > 4000:
+        raise HTTPException(status_code=400, detail="message must be 1-4000 characters")
+    scope = str(payload.get("scope") or "overall")
+    focus = payload.get("focus")
+    focus = str(focus)[:40] if focus else None
+    conv_id = payload.get("conversation_id")
+    conv_id = str(conv_id) if conv_id else None
+
+    async def sse():
+        try:
+            async for ev in _as.chat_turn(conv_id, scope, msg, focus):
+                yield f"event: {ev['type']}\ndata: {json.dumps(ev, default=str)}\n\n"
+        except Exception as e:
+            err = {"type": "error", "message": f"{type(e).__name__}: {e}"}
+            yield f"event: error\ndata: {json.dumps(err)}\n\n"
+
+    # no-transform keeps the gzip layer in front of the app from buffering
+    # the stream into one late chunk
+    return StreamingResponse(sse(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache, no-transform",
+                                      "X-Accel-Buffering": "no"})
+
+
+@app.get("/assistant/conversation")
+async def assistant_conversation(id: str, x_app_key: Optional[str] = Header(default=None)):
+    _require_app_key(x_app_key)
+    import assistant as _as
+    with db.get_conn() as conn:
+        c = _as.load_conv(conn, id)
+    if not c:
+        return JSONResponse({"ok": False, "reason": "no such conversation"}, status_code=404)
+    return JSONResponse({"ok": True, "id": c["id"], "scope": c["scope"], "created": c["created"],
+                         "updated": c["updated"], "usage": c["usage"],
+                         "turns": _as.transcript(c)})
+
+
+@app.get("/assistant/conversations")
+async def assistant_conversations(scope: Optional[str] = None,
+                                  x_app_key: Optional[str] = Header(default=None)):
+    _require_app_key(x_app_key)
+    import assistant as _as
+    with db.get_conn() as conn:
+        return JSONResponse({"ok": True, "conversations": _as.list_convs(conn, scope)})
 
 
 @app.post("/logout")

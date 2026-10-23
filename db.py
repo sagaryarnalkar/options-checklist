@@ -164,6 +164,21 @@ CREATE TABLE IF NOT EXISTS non_trading_day (
     checked_ts TEXT
 );
 
+-- Positions-tab assistant conversations (assistant.py). APPEND-ONLY: every
+-- content block the API returned is kept verbatim, because thinking blocks
+-- are bound to the exact conversation that produced them.
+CREATE TABLE IF NOT EXISTS assistant_conv (
+    id            TEXT PRIMARY KEY,
+    scope         TEXT NOT NULL,
+    created       TEXT NOT NULL,
+    updated       TEXT NOT NULL,
+    model         TEXT,
+    system_text   TEXT NOT NULL,
+    messages_json TEXT NOT NULL,
+    usage_json    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_assistant_conv_scope ON assistant_conv(scope, updated);
+
 CREATE TABLE IF NOT EXISTS hold_baseline (
     d                TEXT NOT NULL,
     underlying       TEXT NOT NULL,

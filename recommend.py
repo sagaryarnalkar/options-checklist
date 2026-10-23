@@ -863,6 +863,32 @@ def _bs_delta(price, S, K, T, cp, r=0.065, q=0.012):
     return abs(delta if cp == "CE" else delta - math.exp(-q * T))
 
 
+def bs_greeks(S, K, T, sig, cp, r=0.065, q=0.012) -> dict:
+    """Per-UNIT greeks on the same model as _bs_price: delta, gamma (delta
+    change per 1 point), theta (premium change per CALENDAR day — T is in
+    calendar years throughout), vega (premium change per 1 vol point).
+    At or past expiry an option is pure intrinsic: delta 0/±1, nothing else."""
+    if T <= 0 or not sig or sig <= 0 or S <= 0 or K <= 0:
+        itm = (S > K) if cp == "CE" else (S < K)
+        return {"delta": ((1.0 if cp == "CE" else -1.0) if itm else 0.0),
+                "gamma": 0.0, "theta": 0.0, "vega": 0.0}
+    sq = math.sqrt(T)
+    d1 = (math.log(S / K) + (r - q + 0.5 * sig * sig) * T) / (sig * sq)
+    d2 = d1 - sig * sq
+    pdf = math.exp(-0.5 * d1 * d1) / math.sqrt(2 * math.pi)
+    eq, er = math.exp(-q * T), math.exp(-r * T)
+    gamma = eq * pdf / (S * sig * sq)
+    vega = S * eq * pdf * sq / 100.0
+    decay = -S * eq * pdf * sig / (2 * sq)
+    if cp == "CE":
+        delta = eq * _norm_cdf(d1)
+        theta = decay - r * K * er * _norm_cdf(d2) + q * S * eq * _norm_cdf(d1)
+    else:
+        delta = eq * (_norm_cdf(d1) - 1.0)
+        theta = decay + r * K * er * _norm_cdf(-d2) - q * S * eq * _norm_cdf(-d1)
+    return {"delta": delta, "gamma": gamma, "theta": theta / 365.0, "vega": vega}
+
+
 def _nearest_strike_in_chain(strikes: list, target: float) -> int:
     return min(strikes, key=lambda s: abs(s - target))
 

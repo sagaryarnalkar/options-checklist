@@ -753,7 +753,7 @@
   .hz-header{ border-bottom:0; }
   .hz-tabbar{ border-top:2px solid var(--color-divider); border-bottom:2px solid var(--color-divider); }
   /* gap/align reset: .hz-header .in (brand row) also matches this element */
-  .hz-tabbar .in{ display:grid; grid-template-columns:repeat(5,1fr); max-width:1720px; margin:0 auto;
+  .hz-tabbar .in{ display:grid; grid-template-columns:repeat(6,1fr); max-width:1720px; margin:0 auto;
     padding:0; gap:0; align-items:stretch; }
   .hz-tabbar .tab{
     appearance:none; background:transparent; border:0; border-right:1px solid var(--color-divider);
@@ -884,6 +884,74 @@
     background:color-mix(in srgb,var(--color-accent) 5%,var(--color-surface)); }
   :root[data-tint="on"] .hz-header{ background:color-mix(in srgb,var(--color-accent) 6%,var(--color-bg)); }
   :root[data-rm="true"] *{ animation-duration:.001s !important; animation-iteration-count:1 !important; transition:none !important; }
+
+  /* ---------- Positions tab + Ask Claude drawer ---------- */
+  .pos-headcard{ padding:12px 14px; margin-bottom:10px; }
+  .pos-title-row{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; }
+  .pos-actions{ display:flex; gap:8px; flex-wrap:wrap; }
+  .pos-sub{ font-size:11px; color:var(--muted); font-family:var(--mono); }
+  .pos-gate{ margin-top:10px; }
+  .pos-gate-form{ display:flex; gap:8px; flex-wrap:wrap; }
+  .pos-gate-form input{ font-family:var(--mono); padding:6px 8px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); min-width:240px; }
+  .pos-group{ padding:12px 14px; margin-bottom:12px; }
+  .pos-g-head{ display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+  .pos-g-title{ font-size:17px; font-weight:700; }
+  .pos-strip{ display:flex; gap:14px; flex-wrap:wrap; font-family:var(--mono); font-size:12px; margin:4px 0 8px; color:var(--text); }
+  .pos-strip span b{ font-weight:600; }
+  .pos-strip .k{ color:var(--muted); margin-right:4px; }
+  /* grid items default to min-width:auto and grow to fit the 880px legs table
+     (the OI Flow overflow trap) — let them shrink so the table scrolls instead */
+  #tabPositions, .pos-group, .pos-headcard{ min-width:0; }
+  .pos-table-wrap{ overflow-x:auto; max-width:100%; }
+  table.pos-legs{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:12px; min-width:880px; }
+  table.pos-legs th{ text-align:right; color:var(--muted); font-weight:600; font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; padding:5px 6px; border-bottom:1px solid var(--border); }
+  table.pos-legs td{ text-align:right; padding:6px; border-bottom:1px solid var(--border); vertical-align:top; white-space:nowrap; }
+  table.pos-legs th:first-child, table.pos-legs td:first-child{ text-align:left; }
+  table.pos-legs tr:last-child td{ border-bottom:none; }
+  table.pos-legs .act-sell{ color:var(--neg); font-weight:600; }
+  table.pos-legs .act-buy{ color:var(--pos); font-weight:600; }
+  .pos-flag{ color:var(--amber); font-size:10px; }
+  .pos-chart{ margin-top:10px; }
+  .pos-legend{ display:flex; gap:14px; font-size:11px; color:var(--muted); font-family:var(--mono); }
+  .pos-legend i{ display:inline-block; width:18px; height:0; border-top:2px solid var(--text); vertical-align:middle; margin-right:5px; }
+  .pos-legend i.dash{ border-top:2px dashed var(--accent); }
+  .pos-warn{ color:var(--amber); font-size:12px; margin:4px 0; }
+  .pos-whatif{ margin-top:10px; border-top:1px solid var(--border); padding-top:8px; }
+  .pos-whatif summary{ cursor:pointer; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; font-weight:600; }
+  .pos-whatif-row{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin:8px 0; font-size:12px; }
+  .pos-whatif-row input, .pos-whatif-row select{ width:84px; font-family:var(--mono); padding:4px 6px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); }
+  .pos-whatif-row select{ width:auto; }
+  .pos-whatif-row label{ display:flex; flex-direction:column; gap:3px; color:var(--muted); }
+  .ai-mini{ cursor:pointer; background:none; border:1px solid var(--border); color:var(--accent); font-size:11px; padding:1px 6px; }
+  .ai-drawer{ position:fixed; top:0; right:0; height:100vh; height:100dvh; width:min(560px, 100vw);
+    background:var(--panel); border-left:1px solid var(--border); box-shadow:var(--shadow-md, 0 0 24px rgba(0,0,0,.18));
+    z-index:1000; display:flex; flex-direction:column; transform:translateX(102%); visibility:hidden;
+    transition:transform .22s ease, visibility .22s; }
+  .ai-drawer.open{ transform:none; visibility:visible; }
+  .ai-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; padding:12px 14px; border-bottom:1px solid var(--border); }
+  .ai-head-btns{ display:flex; gap:6px; }
+  .ai-scope{ font-family:var(--mono); font-size:12px; color:var(--accent); margin-left:6px; }
+  .ai-msgs{ flex:1; overflow-y:auto; padding:12px 14px; display:flex; flex-direction:column; gap:10px; }
+  .ai-msg{ max-width:100%; font-size:13.5px; line-height:1.5; }
+  .ai-msg.user{ align-self:flex-end; background:var(--panel-2); border:1px solid var(--border); padding:8px 10px; white-space:pre-wrap; max-width:88%; }
+  .ai-msg.assistant p{ margin:0 0 8px; }
+  .ai-msg.assistant ul, .ai-msg.assistant ol{ margin:0 0 8px; padding-left:20px; }
+  .ai-msg.assistant code{ font-family:var(--mono); font-size:12px; background:var(--panel-2); padding:0 3px; }
+  .ai-msg.assistant pre{ font-family:var(--mono); font-size:12px; background:var(--panel-2); padding:8px; overflow-x:auto; }
+  .ai-msg .ai-h{ font-weight:700; margin:8px 0 4px; }
+  table.ai-table{ border-collapse:collapse; font-family:var(--mono); font-size:12px; margin:4px 0 8px; display:block; overflow-x:auto; }
+  table.ai-table th, table.ai-table td{ border-bottom:1px solid var(--border); padding:4px 8px; text-align:right; white-space:nowrap; }
+  table.ai-table th:first-child, table.ai-table td:first-child{ text-align:left; }
+  table.ai-table th{ color:var(--muted); font-weight:600; }
+  .ai-status{ font-size:12px; color:var(--muted); font-style:italic; }
+  .ai-err{ color:var(--neg); font-size:12.5px; }
+  .ai-usage{ font-size:10.5px; color:var(--muted); font-family:var(--mono); }
+  .ai-suggest{ display:flex; flex-wrap:wrap; gap:6px; padding:0 14px 8px; }
+  .ai-suggest button{ cursor:pointer; font-size:12px; background:var(--panel-2); color:var(--text); border:1px solid var(--border); padding:4px 8px; text-align:left; }
+  .ai-form{ display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); }
+  .ai-form textarea{ flex:1; resize:none; font-family:var(--sans); font-size:13.5px; padding:8px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); }
+  .ai-foot{ font-size:11px; color:var(--muted); padding:0 14px 10px; }
+  @media (max-width:640px){ .ai-drawer{ width:100vw; } .hz-tabbar .in{ grid-template-columns:repeat(3,1fr); } }
 </style>
 </head>
 <body>
@@ -940,6 +1008,7 @@
   <div class="hz-tabbar">
     <div class="in" role="tablist">
       <button class="tab" data-tab="dashboard" role="tab">Dashboard</button>
+      <button class="tab" data-tab="positions" role="tab">Positions</button>
       <button class="tab" data-tab="strategy" role="tab">By Strategy</button>
       <button class="tab active" data-tab="oiflow" role="tab">OI Flow</button>
       <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
@@ -1318,6 +1387,53 @@
     <div id="paperLog"><div class="note">Loading…</div></div>
   </div>
 
+  <!-- ============================ POSITIONS TAB ============================ -->
+  <!-- Live Kite book from GET /positions (positions.py): legs, greeks, payoff,
+       margins; "Ask Claude" opens the assistant drawer scoped to the book or
+       one underlying (assistant.py). Both are gated by ASSISTANT_KEY. -->
+  <div class="tab-panel" id="tabPositions">
+    <div class="card pos-headcard">
+      <div class="pos-title-row">
+        <div class="strat-meta"><b style="color:var(--text)">Live positions · Kite</b>
+          <span id="posAsOf" class="pos-sub"></span></div>
+        <div class="pos-actions">
+          <button type="button" class="live-refresh ai-open" data-scope="overall">✦ Ask Claude about the whole book</button>
+          <button type="button" id="posReload" class="live-refresh">Reload</button>
+        </div>
+      </div>
+      <div id="posGate" class="pos-gate" style="display:none">
+        <div id="posGateMsg" class="note"></div>
+        <form id="posGateForm" class="pos-gate-form">
+          <input type="password" id="posKeyInput" placeholder="App key (ASSISTANT_KEY)" autocomplete="off">
+          <button type="submit" class="live-refresh">Unlock</button>
+        </form>
+      </div>
+      <div id="posTiles" class="pt-tiles"></div>
+      <details class="pos-whatif" id="posWhatIf">
+        <summary>What-if: reprice the book</summary>
+        <div class="pos-whatif-row">
+          <label>Underlying <select id="wiUnder"><option value="">All</option></select></label>
+          <label>Spot % <input type="number" id="wiSpot" step="0.5" value="-1"></label>
+          <label>IV pts <input type="number" id="wiIv" step="1" value="0"></label>
+          <label>Days on <input type="number" id="wiDays" step="1" min="0" value="0"></label>
+          <button type="button" id="wiRun" class="live-refresh">Run</button>
+        </div>
+        <div id="wiOut"></div>
+      </details>
+    </div>
+    <div id="posBody"><div class="note">Loading…</div></div>
+    <p class="note pos-foot">
+      <b>How to read.</b> Quantities are in units (Kite's convention); lots in brackets.
+      IV is backed out of the bid/ask mid (LTP when the book is one-sided) by Black-Scholes;
+      <b>iv*</b> means the quote couldn't support an IV and a neighbouring leg's was used.
+      Δ is in units, which is also ₹ per 1-point move; Θ is ₹ per calendar day; Vega is ₹ per
+      vol point. <b>Margin</b>: each leg as if placed alone, the legs combined with hedge
+      benefit (Kite's basket calculator), and what Kite has actually blocked — the last also
+      carries MTM and premium, so they differ. The payoff's solid line is P&amp;L at the
+      nearest expiry (later legs keep their time value); the dashed line is today.
+    </p>
+  </div>
+
   <!-- ============================ CASH PUTS TAB (#79) ============================ -->
   <div class="tab-panel" id="tabCsp">
     <div class="oi-controls">
@@ -1380,6 +1496,23 @@
       company is sound.
     </p>
   </div>
+
+  <aside id="aiDrawer" class="ai-drawer" aria-label="Ask Claude">
+    <div class="ai-head">
+      <div><b>Ask Claude</b> <span id="aiScope" class="ai-scope"></span></div>
+      <div class="ai-head-btns">
+        <button type="button" id="aiNew" class="live-refresh">New chat</button>
+        <button type="button" id="aiClose" class="live-refresh" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div id="aiMsgs" class="ai-msgs"></div>
+    <div id="aiSuggest" class="ai-suggest"></div>
+    <form id="aiForm" class="ai-form">
+      <textarea id="aiInput" rows="3" placeholder="Ask about this position…"></textarea>
+      <button type="submit" id="aiSend" class="live-refresh">Send</button>
+    </form>
+    <div class="ai-foot" id="aiFoot">Read-only: Claude can analyse, price what-ifs and check margins — it never places orders.</div>
+  </aside>
 
   <div class="footer">
     Conditions are auto-checked from the live built trade — a ✗ means a saved rule was relaxed to build it.<br/>
@@ -1588,10 +1721,12 @@
       oiflow: document.getElementById("tabOiflow"),
       paper: document.getElementById("tabPaper"),
       csp: document.getElementById("tabCsp"),
+      positions: document.getElementById("tabPositions"),
     };
     const activate = (key) => {
       tabs.forEach(x=>x.classList.toggle("active", x.dataset.tab === key));
       Object.entries(panels).forEach(([k,p])=>p.classList.toggle("active", k === key));
+      if (key === "positions") initPositionsTab(); else posStopTimer();
       if (key === "oiflow") initOiFlowTab();
       if (key === "paper") initPaperTab();
       if (key === "csp") initCspTab();
@@ -1610,6 +1745,424 @@
     skinSel.value = document.documentElement.dataset.skin;
     themeSel.addEventListener("change", ()=>{ localStorage.setItem("hz_theme", themeSel.value); location.reload(); });
     skinSel.addEventListener("change", ()=>{ localStorage.setItem("hz_skin", skinSel.value); location.reload(); });
+  }
+
+  // ---------- Positions tab (live Kite book) ----------
+  // GET /positions (positions.py) — legs, greeks, payoff curves, margins.
+  // Gated by ASSISTANT_KEY: the key is entered once and kept in localStorage,
+  // sent as X-App-Key. A 401 forgets it and shows the gate again.
+  const POS_KEY_LS = "hz_app_key";
+  const POS_REFRESH_MS = 30000;
+  let _posInited = false, _posTimer = null, _posBook = null, _posLoading = false;
+
+  function posKey(){ try { return localStorage.getItem(POS_KEY_LS) || ""; } catch (e) { return ""; } }
+  function posSetKey(v){ try { v ? localStorage.setItem(POS_KEY_LS, v) : localStorage.removeItem(POS_KEY_LS); } catch (e) {} }
+
+  async function posFetch(url, opts = {}){
+    const headers = Object.assign({}, opts.headers || {}, { "X-App-Key": posKey() });
+    const r = await fetch(url, Object.assign({}, opts, { headers }));
+    if (r.status === 401){ posSetKey(""); posShowGate("That key was not accepted — enter the ASSISTANT_KEY from the server's .env."); throw new Error("app key required"); }
+    if (r.status === 503){ const j = await r.json().catch(() => ({})); posShowGate(j.detail || "The server is not configured for this tab yet.", true); throw new Error("not configured"); }
+    return r;
+  }
+
+  function posShowGate(msg, serverSide){
+    const gate = document.getElementById("posGate");
+    gate.style.display = "block";
+    document.getElementById("posGateMsg").textContent = msg ||
+      "This tab shows your live Kite book and talks to Claude, so it is locked separately from the rest of the dashboard. Enter the app key (ASSISTANT_KEY in the server's .env).";
+    document.getElementById("posGateForm").style.display = serverSide ? "none" : "flex";
+    document.getElementById("posBody").innerHTML = "";
+    document.getElementById("posTiles").innerHTML = "";
+  }
+
+  function posStopTimer(){ if (_posTimer){ clearInterval(_posTimer); _posTimer = null; } }
+
+  function initPositionsTab(){
+    if (!_posInited){
+      _posInited = true;
+      document.getElementById("posReload").addEventListener("click", () => loadPositions(true));
+      document.getElementById("posGateForm").addEventListener("submit", e => {
+        e.preventDefault();
+        const v = document.getElementById("posKeyInput").value.trim();
+        if (!v) return;
+        posSetKey(v);
+        document.getElementById("posKeyInput").value = "";
+        document.getElementById("posGate").style.display = "none";
+        loadPositions(true); posStartTimer();
+      });
+      document.getElementById("wiRun").addEventListener("click", posRunWhatIf);
+      document.getElementById("tabPositions").addEventListener("click", e => {
+        const b = e.target.closest(".ai-open, .ai-mini");
+        if (!b) return;
+        aiOpen(b.dataset.scope || "overall", b.dataset.focus || null);
+      });
+      aiInit();
+    }
+    if (!posKey()){ posShowGate(); return; }
+    document.getElementById("posGate").style.display = "none";
+    loadPositions(); posStartTimer();
+  }
+
+  function posStartTimer(){
+    posStopTimer();
+    _posTimer = setInterval(() => { if (!document.hidden) loadPositions(); }, POS_REFRESH_MS);
+  }
+
+  async function loadPositions(force){
+    if (_posLoading && !force) return;
+    _posLoading = true;
+    try {
+      const r = await posFetch("/positions");
+      const b = await r.json();
+      _posBook = b;
+      renderPositions(b);
+    } catch (e) {
+      if (!/app key|not configured/.test(String(e.message))){
+        document.getElementById("posBody").innerHTML = `<div class="note">Could not load positions: ${esc(e.message)}</div>`;
+      }
+    } finally { _posLoading = false; }
+  }
+
+  const posRs = v => v == null ? "—" : "₹" + Math.round(v).toLocaleString("en-IN");
+  const posRsS = v => v == null ? "—" : (v >= 0 ? "+" : "−") + "₹" + Math.abs(Math.round(v)).toLocaleString("en-IN");
+  const posN = (v, dp = 2) => (v == null || Number.isNaN(v)) ? "—"
+    : Number(v).toLocaleString("en-IN", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+  const posCls = v => v == null ? "" : (v >= 0 ? "profit" : "loss");
+
+  function posTile(lbl, val, cls = "", title = ""){
+    return `<div class="pt-tile"${title ? ` title="${esc(title)}"` : ""}><div class="lbl">${lbl}</div><div class="val ${cls}">${val}</div></div>`;
+  }
+
+  function renderPositions(b){
+    const body = document.getElementById("posBody"), tiles = document.getElementById("posTiles");
+    document.getElementById("posAsOf").textContent = b.as_of ? ` · as of ${String(b.as_of).slice(11, 19)} IST · refreshes every 30s` : "";
+    if (!b.ok){
+      tiles.innerHTML = "";
+      body.innerHTML = `<div class="note">${esc(b.reason || "No data")}${b.logged_in === false ? ' — <a href="/login" style="color:var(--accent)">log in to Kite</a>' : ""}</div>`;
+      return;
+    }
+    const t = b.totals || {}, m = b.margin || {}, a = b.account || {};
+    tiles.innerHTML = [
+      posTile("P&amp;L (Kite)", posRsS(t.pnl), posCls(t.pnl), "realised + unrealised, as Kite reports it"),
+      posTile("Theta / day", posRsS(t.theta_day), posCls(t.theta_day), "₹ the book earns (+) or pays (−) per calendar day if nothing moves"),
+      posTile("Vega / vol pt", posRsS(t.vega_pt), posCls(t.vega_pt), "₹ change for a 1-point rise in every leg's implied vol"),
+      posTile("Δ · 1% move", posRsS(t.delta_rs_1pct), posCls(t.delta_rs_1pct), "₹ change if every underlying rises 1% (first-order)"),
+      posTile("Γ · 1% move", posRsS(t.gamma_rs_1pct), posCls(t.gamma_rs_1pct), "convexity term for a 1% move either way: ½·Γ·(1%·spot)²"),
+      posTile("Margin · combined", posRs(m.combined), "", "all F&O legs as one Kite basket, hedge benefit included"),
+      posTile("Margin · standalone Σ", posRs(m.standalone_sum), "", "sum of each leg's margin as if placed alone"),
+      posTile("Hedge benefit", posRs(m.hedge_benefit), "", "standalone sum minus combined"),
+      posTile("Kite blocked", posRs(a.utilised), "", "what Kite has actually blocked (includes MTM / premium effects)"),
+      posTile("Available", posRs(a.available), "", "Kite live balance"),
+    ].join("");
+    const sel = document.getElementById("wiUnder"), cur = sel.value;
+    sel.innerHTML = `<option value="">All</option>` + b.groups.map(g => `<option value="${esc(g.underlying)}">${esc(g.underlying)}</option>`).join("");
+    sel.value = b.groups.some(g => g.underlying === cur) ? cur : "";
+    const warn = [...(b.warnings || []), ...(b.margin_errors || [])];
+    body.innerHTML = (warn.length ? `<div class="pos-warn">${warn.map(esc).join("<br>")}</div>` : "")
+      + (b.groups.length ? b.groups.map(renderPosGroup).join("")
+                         : `<div class="note">No open positions.</div>`);
+  }
+
+  function posLegDesc(l){
+    if (l.kind === "option") return `${posN(l.strike, 0)} ${esc(l.opt_type)} · ${esc(l.expiry || "")}${l.dte != null ? ` (${posN(l.dte, 1)}d)` : ""}`;
+    if (l.kind === "future") return `FUT · ${esc(l.expiry || "")}`;
+    if (l.kind === "equity") return "equity";
+    return esc(l.note || "");
+  }
+
+  function renderPosGroup(g){
+    const k = g.greeks || {}, m = g.margin || {};
+    const rows = g.legs.map(l => `<tr>
+        <td>${esc(l.tradingsymbol)}${l.iv_assumed ? ' <span class="pos-flag" title="the quote could not support an IV; a neighbouring leg\'s IV was used">iv*</span>' : ""}
+          <div class="pos-sub">${posLegDesc(l)} · ${esc(l.product || "")}</div></td>
+        <td class="${l.qty < 0 ? "act-sell" : "act-buy"}">${l.qty}<div class="pos-sub">${l.lots != null ? posN(l.lots, Number.isInteger(l.lots) ? 0 : 2) + (Math.abs(l.lots) === 1 ? " lot" : " lots") : ""}</div></td>
+        <td>${posN(l.avg)}</td>
+        <td>${posN(l.price != null ? l.price : l.ltp)}<div class="pos-sub">${l.price_basis || ""}</div></td>
+        <td class="${posCls(l.pnl)}">${posRsS(l.pnl)}</td>
+        <td>${l.iv == null ? "—" : posN(l.iv, 1) + "%"}</td>
+        <td>${posN(l.delta, 1)}</td>
+        <td>${posN(l.gamma, 4)}</td>
+        <td class="${posCls(l.theta_day)}">${posRsS(l.theta_day)}</td>
+        <td>${posRsS(l.vega_pt)}</td>
+        <td>${posRs(l.margin)}</td>
+        <td><button type="button" class="ai-mini" data-scope="${esc(g.underlying)}" data-focus="${esc(l.tradingsymbol)}" title="Ask Claude about this leg">✦</button></td>
+      </tr>`).join("");
+    const closed = (g.closed || []).length
+      ? `<div class="pos-sub" style="margin-top:4px">Closed today: ${g.closed.map(c => `${esc(c.tradingsymbol)} ${posRsS(c.realised)}`).join(" · ")}</div>` : "";
+    const exp = g.nearest_expiry ? ` · nearest expiry ${g.nearest_expiry}` : "";
+    return `<div class="card pos-group">
+      <div class="pos-g-head">
+        <div><span class="pos-g-title">${esc(g.underlying)}</span>
+          <span class="pos-sub"> spot ${posN(g.spot, 2)}${exp}</span></div>
+        <div style="display:flex;gap:10px;align-items:baseline">
+          <b class="${posCls(g.pnl)}" style="font-family:var(--mono)">${posRsS(g.pnl)}</b>
+          <button type="button" class="live-refresh ai-open" data-scope="${esc(g.underlying)}">✦ Ask Claude</button>
+        </div>
+      </div>
+      <div class="pos-strip">
+        <span><span class="k">Δ</span><b>${posN(k.delta, 1)}</b> <span class="pos-sub">(${posN(k.delta_lots, 2)} lots)</span></span>
+        <span><span class="k">Δ·1%</span><b class="${posCls(k.delta_rs_1pct)}">${posRsS(k.delta_rs_1pct)}</b></span>
+        <span><span class="k">Γ·1%</span><b class="${posCls(k.gamma_rs_1pct)}">${posRsS(k.gamma_rs_1pct)}</b></span>
+        <span><span class="k">Θ/day</span><b class="${posCls(k.theta_day)}">${posRsS(k.theta_day)}</b></span>
+        <span><span class="k">Vega/pt</span><b class="${posCls(k.vega_pt)}">${posRsS(k.vega_pt)}</b></span>
+        <span><span class="k">Margin</span><b>${posRs(m.combined)}</b> <span class="pos-sub">combined · ${posRs(m.standalone_sum)} standalone · ${posRs(m.hedge_benefit)} hedge benefit</span></span>
+      </div>
+      <div class="pos-table-wrap"><table class="pos-legs">
+        <thead><tr><th>Instrument</th><th>Qty</th><th>Avg</th><th>Price</th><th>P&amp;L</th><th>IV</th><th>Δ</th><th>Γ</th><th>Θ/day</th><th>Vega</th><th>Margin</th><th></th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      ${closed}
+      ${g.curve ? posPayoffSvg(g.curve) : ""}
+    </div>`;
+  }
+
+  // Two curves on one axis: P&L at the nearest expiry (solid, shaded by sign)
+  // and P&L today at current IVs (dashed). ±1σ to the nearest expiry shaded.
+  let _posSvgUid = 0;
+  function posPayoffSvg(c){
+    const xs = c.spots, yE = c.expiry, yT = c.today;
+    if (!xs || xs.length < 2) return "";
+    const W = 900, H = 190, PX = 12, PT = 16, PB = 26;
+    const lo = xs[0], hi = xs[xs.length - 1];
+    let ymin = Math.min(...yE, ...yT, 0), ymax = Math.max(...yE, ...yT, 0);
+    const yr = (ymax - ymin) || 1; ymin -= yr * 0.08; ymax += yr * 0.1;
+    const X = s => PX + (s - lo) / (hi - lo) * (W - 2 * PX);
+    const Y = v => PT + (ymax - v) / (ymax - ymin) * (H - PT - PB);
+    const y0 = Y(0);
+    const path = ys => xs.map((s, i) => `${i ? "L" : "M"}${X(s).toFixed(1)},${Y(ys[i]).toFixed(1)}`).join("");
+    const lineE = path(yE), lineT = path(yT);
+    const area = lineE + `L${X(hi).toFixed(1)},${y0.toFixed(1)}L${X(lo).toFixed(1)},${y0.toFixed(1)}Z`;
+    const uid = "pps" + (++_posSvgUid);
+    const fk = v => Math.round(v).toLocaleString("en-IN");
+    const band = c.one_sigma ? `<rect x="${X(Math.max(lo, c.one_sigma[0])).toFixed(1)}" y="${PT}" width="${(X(Math.min(hi, c.one_sigma[1])) - X(Math.max(lo, c.one_sigma[0]))).toFixed(1)}" height="${H - PT - PB}" fill="${withAlpha(cssv("--accent"), 0.06)}"/>` : "";
+    const bes = (c.breakevens_expiry || []).map(b => `<circle cx="${X(b).toFixed(1)}" cy="${y0.toFixed(1)}" r="3" fill="var(--warn)"/>
+      <text x="${X(b).toFixed(1)}" y="${(y0 - 6).toFixed(1)}" text-anchor="middle" font-size="10" fill="var(--warn)" font-family="var(--mono)">BE ${fk(b)}</text>`).join("");
+    const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => {
+      const s = lo + (hi - lo) * f;
+      const anchor = f === 0 ? "start" : (f === 1 ? "end" : "middle");
+      return `<text x="${X(s).toFixed(1)}" y="${H - PB + 14}" text-anchor="${anchor}" font-size="10" fill="var(--muted)" font-family="var(--mono)">${fk(s)}</text>`;
+    }).join("");
+    const spot = c.spot ? `<line x1="${X(c.spot).toFixed(1)}" y1="${PT}" x2="${X(c.spot).toFixed(1)}" y2="${H - PB}" stroke="var(--accent)" stroke-width="1" stroke-dasharray="3,3"/>
+      <text x="${X(c.spot).toFixed(1)}" y="${PT - 4}" text-anchor="middle" font-size="10" fill="var(--accent)" font-family="var(--mono)">spot ${fk(c.spot)}</text>` : "";
+    const yl = v => `<text x="${W - PX}" y="${(Y(v) - 3).toFixed(1)}" text-anchor="end" font-size="9.5" fill="var(--muted)" font-family="var(--mono)">${posRsS(v)}</text>`;
+    return `<div class="pos-chart payoff-wrap">
+      <div class="payoff-head"><span class="payoff-title">Payoff</span>
+        <span class="pos-legend"><span><i></i>at ${esc(c.expiry_date || "expiry")}${c.multi_expiry ? " (later legs keep time value)" : ""}</span><span><i class="dash"></i>today</span><span>shaded: ±1σ (IV ${posN(c.iv_ref, 1)}%)</span></span></div>
+      <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Payoff chart">
+        <defs>
+          <clipPath id="${uid}a"><rect x="0" y="0" width="${W}" height="${y0.toFixed(1)}"/></clipPath>
+          <clipPath id="${uid}b"><rect x="0" y="${y0.toFixed(1)}" width="${W}" height="${(H - y0).toFixed(1)}"/></clipPath>
+        </defs>
+        ${band}
+        <path d="${area}" fill="${withAlpha(cssv("--pos"), 0.15)}" clip-path="url(#${uid}a)"/>
+        <path d="${area}" fill="${withAlpha(cssv("--neg"), 0.12)}" clip-path="url(#${uid}b)"/>
+        <line x1="${PX}" y1="${y0.toFixed(1)}" x2="${W - PX}" y2="${y0.toFixed(1)}" stroke="var(--muted)" stroke-width="1" opacity=".6"/>
+        <path d="${lineE}" fill="none" stroke="var(--color-text)" stroke-width="2"/>
+        <path d="${lineT}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-dasharray="5,4"/>
+        ${yl(Math.max(...yE, ...yT))}${yl(Math.min(...yE, ...yT))}
+        ${spot}${bes}${ticks}
+      </svg>
+    </div>`;
+  }
+
+  async function posRunWhatIf(){
+    const out = document.getElementById("wiOut");
+    const val = id => { const v = document.getElementById(id).value; return v === "" ? null : Number(v); };
+    const body = { underlying: document.getElementById("wiUnder").value || null,
+                   spot_change_pct: val("wiSpot"), iv_change_pts: val("wiIv") || 0, days_forward: val("wiDays") || 0 };
+    out.innerHTML = `<div class="note">Repricing…</div>`;
+    try {
+      const r = await posFetch("/positions/scenario", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const d = await r.json();
+      if (!d.ok){ out.innerHTML = `<div class="note">${esc(d.reason || d.detail || "failed")}</div>`; return; }
+      const rows = d.groups.map(g => `<tr><td>${esc(g.underlying)}</td><td>${posN(g.spot_now, 1)} → ${posN(g.spot_after, 1)}</td>
+          <td class="${posCls(g.pnl_now)}">${posRsS(g.pnl_now)}</td><td class="${posCls(g.pnl_change)}">${posRsS(g.pnl_change)}</td>
+          <td class="${posCls(g.pnl_after)}">${posRsS(g.pnl_after)}</td></tr>`).join("");
+      out.innerHTML = `<table class="pt-recent"><thead><tr><th>Underlying</th><th>Spot</th><th>P&amp;L now</th><th>Change</th><th>P&amp;L after</th></tr></thead>
+        <tbody>${rows}<tr><td><b>Total</b></td><td></td><td></td><td class="${posCls(d.total_pnl_change)}"><b>${posRsS(d.total_pnl_change)}</b></td><td></td></tr></tbody></table>
+        <div class="pos-sub">${esc(d.assumptions.model)}${d.assumptions.beta_note ? " · " + esc(d.assumptions.beta_note) : ""}</div>`;
+    } catch (e) {
+      if (!/app key|not configured/.test(String(e.message))) out.innerHTML = `<div class="note">${esc(e.message)}</div>`;
+    }
+  }
+
+  // ---------- Ask Claude drawer (assistant.py) ----------
+  // One conversation per scope ("overall" or an underlying), its id kept in
+  // localStorage so the chat survives a reload; the server holds the history.
+  let _aiScope = "overall", _aiFocus = null, _aiBusy = false;
+  const AI_SUGGEST = {
+    overall: ["Where is my biggest risk right now?",
+              "What happens to the whole book if NIFTY gaps down 2% tomorrow?",
+              "Which position uses the most margin for the least theta?",
+              "Summarise my book in five lines."],
+    one: ["Explain this position's risk in plain terms.",
+          "Where are my breakevens and how far is spot from them?",
+          "Show P&L for spot −3% to +3% today and at expiry.",
+          "What would it cost in margin to roll the short strike one step further out?",
+          "Do the app's signals support or contradict this position?"],
+  };
+  const aiConvKey = scope => "hz_ai_conv_" + scope;
+
+  function aiInit(){
+    document.getElementById("aiClose").addEventListener("click", aiClose);
+    document.getElementById("aiNew").addEventListener("click", () => {
+      try { localStorage.removeItem(aiConvKey(_aiScope)); } catch (e) {}
+      document.getElementById("aiMsgs").innerHTML = "";
+      aiShowSuggest();
+    });
+    document.getElementById("aiForm").addEventListener("submit", e => { e.preventDefault(); aiSubmit(); });
+    document.getElementById("aiInput").addEventListener("keydown", e => {
+      if (e.key === "Enter" && !e.shiftKey){ e.preventDefault(); aiSubmit(); }
+    });
+    document.getElementById("aiSuggest").addEventListener("click", e => {
+      const b = e.target.closest("button"); if (!b) return;
+      document.getElementById("aiInput").value = b.textContent; aiSubmit();
+    });
+    document.addEventListener("keydown", e => { if (e.key === "Escape") aiClose(); });
+  }
+
+  function aiClose(){ document.getElementById("aiDrawer").classList.remove("open"); }
+
+  function aiShowSuggest(){
+    const list = _aiScope === "overall" ? AI_SUGGEST.overall : AI_SUGGEST.one;
+    const empty = !document.getElementById("aiMsgs").children.length;
+    document.getElementById("aiSuggest").innerHTML = empty
+      ? list.map(q => `<button type="button">${esc(q)}</button>`).join("") : "";
+  }
+
+  async function aiOpen(scope, focus){
+    if (!posKey()){ posShowGate(); return; }
+    _aiScope = scope; _aiFocus = focus;
+    document.getElementById("aiScope").textContent = scope === "overall" ? "whole book" : scope + (focus ? ` · ${focus}` : "");
+    document.getElementById("aiInput").placeholder = focus ? `Ask about ${focus}…` : (scope === "overall" ? "Ask about your whole book…" : `Ask about your ${scope} position…`);
+    document.getElementById("aiDrawer").classList.add("open");
+    const msgs = document.getElementById("aiMsgs");
+    msgs.innerHTML = "";
+    let id = null;
+    try { id = localStorage.getItem(aiConvKey(scope)); } catch (e) {}
+    if (id){
+      try {
+        const r = await posFetch(`/assistant/conversation?id=${encodeURIComponent(id)}`);
+        const d = await r.json();
+        if (d.ok) d.turns.forEach(t => aiBubble(t.role, t.text));
+        else { try { localStorage.removeItem(aiConvKey(scope)); } catch (e) {} }
+      } catch (e) {}
+    }
+    aiShowSuggest();
+    msgs.scrollTop = msgs.scrollHeight;
+    setTimeout(() => document.getElementById("aiInput").focus(), 60);
+  }
+
+  function aiBubble(role, text){
+    const el = document.createElement("div");
+    el.className = "ai-msg " + role;
+    if (role === "user") el.textContent = text; else el.innerHTML = aiMd(text);
+    document.getElementById("aiMsgs").appendChild(el);
+    return el;
+  }
+
+  async function aiSubmit(){
+    const input = document.getElementById("aiInput");
+    const q = input.value.trim();
+    if (!q || _aiBusy) return;
+    _aiBusy = true; input.value = "";
+    document.getElementById("aiSend").disabled = true;
+    document.getElementById("aiSuggest").innerHTML = "";
+    const msgs = document.getElementById("aiMsgs");
+    aiBubble("user", q);
+    const ans = aiBubble("assistant", "");
+    const status = document.createElement("div");
+    status.className = "ai-status"; status.textContent = "Reading your positions…";
+    msgs.appendChild(status);
+    msgs.scrollTop = msgs.scrollHeight;
+    let text = "", convId = null;
+    try { convId = localStorage.getItem(aiConvKey(_aiScope)); } catch (e) {}
+    const scope = _aiScope;
+    try {
+      const r = await posFetch("/assistant/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope, message: q, focus: _aiFocus, conversation_id: convId }) });
+      if (!r.ok){ const j = await r.json().catch(() => ({})); throw new Error(j.detail || `HTTP ${r.status}`); }
+      const reader = r.body.getReader(), dec = new TextDecoder();
+      let buf = "";
+      const handle = raw => {
+        let ev = "message", data = "";
+        raw.split("\n").forEach(line => {
+          if (line.startsWith("event: ")) ev = line.slice(7);
+          else if (line.startsWith("data: ")) data += line.slice(6);
+        });
+        let d = {};
+        try { d = JSON.parse(data || "{}"); } catch (e) { return; }
+        if (ev === "meta"){ try { localStorage.setItem(aiConvKey(scope), d.conversation_id); } catch (e) {} }
+        else if (ev === "status"){ status.textContent = d.text + "…"; }
+        else if (ev === "text"){ text += d.text; ans.innerHTML = aiMd(text); status.textContent = ""; }
+        else if (ev === "error"){ const e2 = document.createElement("div"); e2.className = "ai-err"; e2.textContent = d.message; ans.appendChild(e2); }
+        else if (ev === "done"){
+          const u = d.usage || {};
+          const k = v => (v >= 1000 ? (v / 1000).toFixed(1) + "k" : String(v || 0));
+          status.className = "ai-usage";
+          status.textContent = `${u.model_calls || 0} model call${u.model_calls === 1 ? "" : "s"} · ${u.tool_calls || 0} tool call${u.tool_calls === 1 ? "" : "s"} · in ${k((u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0))} (${k(u.cache_read_input_tokens)} cached) · out ${k(u.output_tokens)} tokens`;
+        }
+        msgs.scrollTop = msgs.scrollHeight;
+      };
+      for (;;){
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf("\n\n")) >= 0){ handle(buf.slice(0, i)); buf = buf.slice(i + 2); }
+      }
+      if (!text && !ans.querySelector(".ai-err")) ans.innerHTML = `<div class="ai-err">No answer came back.</div>`;
+    } catch (e) {
+      status.textContent = "";
+      const e2 = document.createElement("div"); e2.className = "ai-err"; e2.textContent = e.message;
+      ans.appendChild(e2);
+    } finally {
+      _aiBusy = false;
+      document.getElementById("aiSend").disabled = false;
+      if (status.className === "ai-status") status.remove();
+    }
+  }
+
+  // Small, safe markdown: everything is escaped first, then **bold**,
+  // `code`, headings, lists, fenced code and pipe tables are recognised.
+  function aiMd(src){
+    const e = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const inline = s => e(s).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+    const lines = String(src || "").replace(/\r/g, "").split("\n");
+    const isTable = l => /^\s*\|.*\|\s*$/.test(l);
+    const isList = l => /^\s*([-*•]|\d+\.)\s+/.test(l);
+    let html = "", i = 0;
+    while (i < lines.length){
+      const l = lines[i];
+      if (/^\s*```/.test(l)){
+        const buf = []; let j = i + 1;
+        while (j < lines.length && !/^\s*```/.test(lines[j])) buf.push(lines[j++]);
+        html += `<pre>${e(buf.join("\n"))}</pre>`; i = j + 1; continue;
+      }
+      if (isTable(l) && i + 1 < lines.length && /^\s*\|?[\s:|-]+\|?\s*$/.test(lines[i + 1]) && lines[i + 1].includes("-")){
+        const row = s => s.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(c => c.trim());
+        const head = row(l), rows = []; let j = i + 2;
+        while (j < lines.length && isTable(lines[j])) rows.push(row(lines[j++]));
+        html += `<table class="ai-table"><thead><tr>${head.map(h => `<th>${inline(h)}</th>`).join("")}</tr></thead><tbody>${
+          rows.map(r => `<tr>${r.map(c => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+        i = j; continue;
+      }
+      const h = l.match(/^\s*#{1,4}\s+(.*)$/);
+      if (h){ html += `<div class="ai-h">${inline(h[1])}</div>`; i++; continue; }
+      if (isList(l)){
+        const ordered = /^\s*\d+\./.test(l), items = []; let j = i;
+        while (j < lines.length && isList(lines[j])) items.push(lines[j++].replace(/^\s*([-*•]|\d+\.)\s+/, ""));
+        const tag = ordered ? "ol" : "ul";
+        html += `<${tag}>${items.map(x => `<li>${inline(x)}</li>`).join("")}</${tag}>`; i = j; continue;
+      }
+      if (!l.trim()){ i++; continue; }
+      const para = []; let j = i;
+      while (j < lines.length && lines[j].trim() && !/^\s*```/.test(lines[j]) && !isTable(lines[j])
+             && !/^\s*#{1,4}\s/.test(lines[j]) && !isList(lines[j])) para.push(lines[j++]);
+      if (!para.length) para.push(lines[j++]);
+      html += `<p>${para.map(inline).join("<br>")}</p>`; i = j;
+    }
+    return html;
   }
 
   // ---------- Paper Trades tab ----------
