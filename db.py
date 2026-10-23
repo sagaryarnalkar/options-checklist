@@ -164,9 +164,9 @@ CREATE TABLE IF NOT EXISTS non_trading_day (
     checked_ts TEXT
 );
 
--- Positions-tab assistant conversations (assistant.py). APPEND-ONLY: every
--- content block the API returned is kept verbatim, because thinking blocks
--- are bound to the exact conversation that produced them.
+-- Positions-tab assistant conversations (assistant.py). The model-side
+-- history lives in the Claude Code session (`session_id`, resumed on each
+-- follow-up); messages_json keeps the question/answer text for the UI.
 CREATE TABLE IF NOT EXISTS assistant_conv (
     id            TEXT PRIMARY KEY,
     scope         TEXT NOT NULL,
@@ -175,7 +175,8 @@ CREATE TABLE IF NOT EXISTS assistant_conv (
     model         TEXT,
     system_text   TEXT NOT NULL,
     messages_json TEXT NOT NULL,
-    usage_json    TEXT
+    usage_json    TEXT,
+    session_id    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_assistant_conv_scope ON assistant_conv(scope, updated);
 
@@ -395,6 +396,11 @@ def init_db() -> None:
                 conn.execute(f"ALTER TABLE csp_snapshot ADD COLUMN {col} {decl}")
             except sqlite3.OperationalError:
                 pass
+        # #99: the assistant runs on Claude Code sessions; keep the id to resume
+        try:
+            conn.execute("ALTER TABLE assistant_conv ADD COLUMN session_id TEXT")
+        except sqlite3.OperationalError:
+            pass
         # WAL mode → safe for concurrent reads while the recorder writes.
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")

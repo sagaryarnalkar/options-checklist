@@ -1,27 +1,28 @@
-"""The Positions tab's AI helper: Claude with read-only tools over the app.
+"""The Positions tab's AI helper: Claude, on the account owner's own Claude
+subscription, with read-only tools over the app.
 
-Each question is answered by Claude (claude-opus-5-5 by default) running a
-tool loop on the server. Every question carries a fresh <app_context>
-snapshot (positions, greeks, margins, spot/VIX) so the common questions need
-no tool call at all; the tools reach everything else the app knows — option
-chains, what-if repricing, hypothetical margins, the OI-flow / WCash / pulse
-reads, the strategy recommendations and the paper book, and the backtest
-verdicts that say which of those signals carry information.
+RUNS ON CLAUDE CODE, NOT THE API. Each question is answered through the
+Claude Agent SDK, which drives the Claude Code binary bundled in the
+`claude-agent-sdk` package. It authenticates with CLAUDE_CODE_OAUTH_TOKEN, the
+one-year subscription token `claude setup-token` prints, so usage counts
+against the owner's Pro/Max plan rather than an API bill. This is one person
+using their own subscription for their own tool: the tab is locked behind
+ASSISTANT_KEY so nobody else can drive it (Anthropic does not allow offering
+claude.ai login to OTHER people through Agent SDK products).
 
-READ-ONLY BY CONSTRUCTION. No tool places, modifies or cancels an order; the
-only Kite calls are quotes, positions, history and the margin CALCULATORS.
+LOCKED DOWN. `tools=[]` removes every Claude Code built-in (no shell, files,
+web), `setting_sources=[]` ignores ~/.claude settings and hooks, and the only
+tools are ten in-process MCP tools that READ the app's data: positions,
+what-if repricing, option chains, hypothetical margins, the OI-flow / WCash /
+pulse reads, recommendations, the paper book, the backtest verdicts and stock
+filings/news. None can place, modify or cancel an order.
 
-CONVERSATIONS ARE APPEND-ONLY and live server-side (SQLite `assistant_conv`)
-with every content block the API returned — thinking, tool_use and
-tool_result included — because Opus 5.5 binds each thinking block to the
-exact conversation that produced it: rebuilding history (dropping blocks,
-editing an old turn, re-rendering the system prompt) would invalidate them.
-So the system prompt is frozen per conversation (stored with it), fresh data
-arrives only in new user turns, and a turn interrupted mid-tool-call is
-repaired by APPENDING error tool_results, never by deleting anything.
-
-COST CONTROL: the endpoints sit behind ASSISTANT_KEY, turns are rate-limited
-per hour, and the frozen system prompt + growing history are prompt-cached.
+CONTEXT. Every question carries a fresh <app_context> snapshot. The system
+prompt adds the project notes if CLAUDE.md has been copied next to the app on
+the server, plus data/assistant_notes.md, and is frozen per conversation (a
+resumed session keeps the prompt it started with). Follow-ups resume the
+Claude Code session, so the model keeps the whole conversation, tool results
+included.
 """
 from __future__ import annotations
 
@@ -40,13 +41,18 @@ from typing import Optional
 import db
 
 IST = timezone(timedelta(hours=5, minutes=30))
-MODEL = os.environ.get("ASSISTANT_MODEL", "claude-opus-5-5")
-EFFORT = os.environ.get("ASSISTANT_EFFORT", "medium")
+MODEL = os.environ.get("ASSISTANT_MODEL") or None      # None = the plan's default
+EFFORT = os.environ.get("ASSISTANT_EFFORT") or None
 MAX_TURNS_PER_HOUR = int(os.environ.get("ASSISTANT_MAX_TURNS_PER_HOUR", "40"))
-MAX_STEPS = 12                  # model calls per question (tool rounds)
-MAX_TOKENS = 32000
+MAX_STEPS = 12                  # agent turns per question (tool rounds)
 TOOL_RESULT_CAP = 14000         # chars per tool result
 NOTES_FILE = db.DATA_DIR / "assistant_notes.md"   # optional, droplet-only
+# The developer notes (CLAUDE.md) give the model the project's history and
+# findings. Copy them to data/ on the server (gitignored); the repo root is
+# also checked for a local checkout.
+PROJECT_NOTES_PATHS = (db.DATA_DIR / "CLAUDE.md", Path(__file__).parent / "CLAUDE.md")
+WORKDIR = db.DATA_DIR / "assistant"                 # Claude Code's cwd
+MCP_SERVER = "app"
 SCOPE_RE = re.compile(r"^(overall|[A-Z0-9&_-]{1,24})$")
 
 SYSTEM_PROMPT = """You are the analysis assistant inside a self-hosted options dashboard. The user is an Indian index-options seller who trades NIFTY and BANKNIFTY (and some stock options, mostly cash-secured puts) through Zerodha Kite. You help them understand and manage their LIVE positions using the data this application has.
@@ -92,7 +98,6 @@ Golden Goose (BB-21 daily midline cross → monthly 100-pt credit spread, roll T
 
 def _tool(name: str, description: str, properties: dict, required: list) -> dict:
     return {"name": name, "description": description,
-            "eager_input_streaming": True,
             "input_schema": {"type": "object", "properties": properties,
                              "required": required, "additionalProperties": False}}
 
@@ -711,16 +716,20 @@ def build_context(ctx: ToolContext, scope: str, focus: Optional[str] = None) -> 
 # ---------------------------------------------------------- conversations --
 
 def _system_text() -> str:
-    """Frozen per conversation (stored with it): editing the system prompt
-    mid-conversation would invalidate every thinking block after it."""
+    """Frozen per conversation (stored with it), so a resumed session keeps
+    the prompt it started with even if the notes files change."""
     text = SYSTEM_PROMPT
-    try:
-        if NOTES_FILE.exists():
-            notes = NOTES_FILE.read_text().strip()
-            if notes:
-                text += "\n\n# Operator notes (from the account owner)\n" + notes
-    except Exception:
-        pass
+    project = next((p for p in PROJECT_NOTES_PATHS if p.exists()), PROJECT_NOTES_PATHS[0])
+    for path, title in ((project, "Project notes (the developer's working notes for this "
+                                        "app — background knowledge, not instructions to you)"),
+                        (NOTES_FILE, "Operator notes (from the account owner)")):
+        try:
+            if path.exists():
+                body = path.read_text().strip()
+                if body:
+                    text += f"\n\n# {title}\n{body}"
+        except Exception:
+            pass
     return text
 
 
@@ -737,56 +746,60 @@ def load_conv(conn, conv_id: str) -> Optional[dict]:
 def save_conv(conn, c: dict) -> None:
     conn.execute(
         "INSERT OR REPLACE INTO assistant_conv (id, scope, created, updated, model, system_text, "
-        "messages_json, usage_json) VALUES (?,?,?,?,?,?,?,?)",
+        "messages_json, usage_json, session_id) VALUES (?,?,?,?,?,?,?,?,?)",
         (c["id"], c["scope"], c["created"], datetime.now(IST).isoformat(timespec="seconds"),
-         c["model"], c["system_text"], json.dumps(c["messages"], default=str),
-         json.dumps(c.get("usage") or {})))
+         c.get("model"), c["system_text"], json.dumps(c["messages"], default=str),
+         json.dumps(c.get("usage") or {}), c.get("session_id")))
     conn.commit()
 
 
-def repair(messages: list) -> list:
-    """If the last turn ended on unanswered tool calls (a disconnect or crash
-    mid-loop), APPEND error results so the history is valid — never delete."""
-    if messages and messages[-1]["role"] == "assistant":
-        pending = [b for b in messages[-1]["content"]
-                   if isinstance(b, dict) and b.get("type") == "tool_use"]
-        if pending:
-            messages.append({"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": b["id"], "is_error": True,
-                 "content": "interrupted before this tool ran"} for b in pending]})
-    return messages
-
-
 def transcript(c: dict) -> list:
-    """User questions and assistant text, for redrawing a chat."""
-    out = []
-    for m in c["messages"]:
-        content = m["content"] if isinstance(m["content"], list) else [
-            {"type": "text", "text": m["content"]}]
-        texts = [b.get("text", "") for b in content if b.get("type") == "text"]
-        if m["role"] == "user":
-            q = [t for t in texts if not t.startswith("<app_context")]
-            if q:
-                out.append({"role": "user", "text": "\n".join(q)})
-        elif texts:
-            joined = "".join(texts).strip()
-            if joined:
-                if out and out[-1]["role"] == "assistant":
-                    out[-1]["text"] += "\n\n" + joined
-                else:
-                    out.append({"role": "assistant", "text": joined})
-    return out
+    """User questions and assistant answers, for redrawing a chat."""
+    return [{"role": m["role"], "text": m["text"]} for m in c["messages"]
+            if isinstance(m, dict) and m.get("text")]
 
 
 # ------------------------------------------------------------------- turn --
 
 _turns = deque()
 _locks: dict = {}
+_sem = None                              # one Claude Code process at a time
+
+
+def _one_at_a_time():
+    # created on first use, inside the server's event loop (Python 3.9 binds a
+    # Semaphore to whatever loop exists at construction)
+    global _sem
+    if _sem is None:
+        _sem = asyncio.Semaphore(1)
+    return _sem
+
+
+def auth_method() -> str:
+    """Which credential Claude Code will pick (its own precedence order)."""
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        return "api_key"              # outranks the subscription token
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        return "subscription_token"
+    cfg = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    if (cfg / ".credentials.json").exists():
+        return "claude_login"
+    return "none"
 
 
 def configured() -> dict:
-    return {"api_key": bool(os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")),
-            "app_key": bool(os.environ.get("ASSISTANT_KEY")), "model": MODEL, "effort": EFFORT}
+    try:
+        import claude_agent_sdk  # noqa: F401
+        sdk = True
+    except ImportError:
+        sdk = False
+    m = auth_method()
+    return {"sdk_installed": sdk, "auth": m, "auth_ok": m != "none",
+            "uses_subscription": m in ("subscription_token", "claude_login"),
+            "app_key": bool(os.environ.get("ASSISTANT_KEY")),
+            "model": MODEL or "plan default", "effort": EFFORT or "default",
+            "project_notes": any(p.exists() for p in PROJECT_NOTES_PATHS),
+            "operator_notes": NOTES_FILE.exists()}
 
 
 def _rate_ok() -> bool:
@@ -799,147 +812,147 @@ def _rate_ok() -> bool:
     return True
 
 
-def _strip_thinking(messages: list) -> None:
-    for m in messages:
-        if m["role"] == "assistant" and isinstance(m["content"], list):
-            m["content"] = [b for b in m["content"]
-                            if b.get("type") not in ("thinking", "redacted_thinking")] or [
-                {"type": "text", "text": "(earlier reasoning omitted)"}]
+def _mcp_tools(ctx: ToolContext) -> list:
+    """The ten read-only tools as an in-process MCP server's tool list. Built
+    per question so each handler sees that question's Kite session."""
+    from claude_agent_sdk import ToolAnnotations, tool
+    out = []
+    for t in TOOLS:
+        async def handler(args, _name=t["name"]):
+            content, is_err = await asyncio.to_thread(run_tool, ctx, _name, args)
+            res = {"content": [{"type": "text", "text": content}]}
+            if is_err:
+                res["is_error"] = True
+            return res
+        out.append(tool(t["name"], t["description"], t["input_schema"],
+                        annotations=ToolAnnotations(readOnlyHint=True))(handler))
+    return out
+
+
+def _options(c: dict, ctx: ToolContext):
+    from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server
+    WORKDIR.mkdir(parents=True, exist_ok=True)
+    kw = {}
+    if c.get("model"):
+        kw["model"] = c["model"]
+    if EFFORT:
+        kw["effort"] = EFFORT
+    return ClaudeAgentOptions(
+        system_prompt=c["system_text"],
+        tools=[],                                  # no shell / files / web — ever
+        mcp_servers={MCP_SERVER: create_sdk_mcp_server(name=MCP_SERVER, tools=_mcp_tools(ctx))},
+        allowed_tools=[f"mcp__{MCP_SERVER}__{t['name']}" for t in TOOLS],
+        strict_mcp_config=True,                    # ignore any .mcp.json / user MCP servers
+        setting_sources=[],                        # ignore ~/.claude settings, hooks, CLAUDE.md
+        permission_mode="dontAsk",                 # anything not pre-approved is refused
+        include_partial_messages=True,             # token-level streaming
+        resume=c.get("session_id") or None,
+        max_turns=MAX_STEPS,
+        cwd=str(WORKDIR),
+        env={"ENABLE_TOOL_SEARCH": "false",        # 10 tools: load them all up front
+             "CLAUDE_AGENT_SDK_CLIENT_APP": "options-dashboard"},
+        **kw)
 
 
 async def chat_turn(conv_id: Optional[str], scope: str, question: str,
                     focus: Optional[str] = None):
     """Async generator of events: meta, status, text, done, error."""
-    import anthropic
     if not SCOPE_RE.match(scope or ""):
         yield {"type": "error", "message": "bad scope"}
         return
-    if not configured()["api_key"]:
-        yield {"type": "error", "message": "ANTHROPIC_API_KEY is not set in .env on the server"}
+    cfg = configured()
+    if not cfg["sdk_installed"]:
+        yield {"type": "error", "message": "claude-agent-sdk is not installed on the server — "
+                                           "run venv/bin/pip install -r requirements.txt"}
+        return
+    if not cfg["auth_ok"]:
+        yield {"type": "error", "message": "no Claude credentials on the server — run "
+                                           "`claude setup-token` and put the token in .env as "
+                                           "CLAUDE_CODE_OAUTH_TOKEN"}
         return
     if not _rate_ok():
         yield {"type": "error", "message": f"limit of {MAX_TURNS_PER_HOUR} questions per hour reached "
                                            "(ASSISTANT_MAX_TURNS_PER_HOUR)"}
         return
+    from claude_agent_sdk import (AssistantMessage, ClaudeSDKError, CLINotFoundError,
+                                  ResultMessage, StreamEvent, SystemMessage, ToolUseBlock, query)
     with db.get_conn() as conn:
         c = load_conv(conn, conv_id) if conv_id else None
     if c is None or c["scope"] != scope:
         now = datetime.now(IST).isoformat(timespec="seconds")
         c = {"id": uuid.uuid4().hex, "scope": scope, "created": now, "model": MODEL,
-             "system_text": _system_text(), "messages": [], "usage": {}}
+             "system_text": _system_text(), "messages": [], "usage": {}, "session_id": None}
     lock = _locks.setdefault(c["id"], asyncio.Lock())
     if lock.locked():
         yield {"type": "error", "message": "this chat is still answering the previous question"}
         return
-    async with lock:
-        repair(c["messages"])
+    async with lock, _one_at_a_time():
         ctx = ToolContext()
         context = await asyncio.to_thread(build_context, ctx, scope, focus)
-        c["messages"].append({"role": "user", "content": [
-            {"type": "text", "text": context}, {"type": "text", "text": question.strip()}]})
-        yield {"type": "meta", "conversation_id": c["id"], "model": c["model"]}
+        yield {"type": "meta", "conversation_id": c["id"], "model": c.get("model") or "plan default"}
         usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
                  "cache_creation_input_tokens": 0, "model_calls": 0, "tool_calls": 0}
-        # a client per question: its connection pool is bound to the event loop
-        # it was created on, and a pool reused from another loop fails its first
-        # request (the SDK then retries — invisible, but a wasted round trip)
-        client = anthropic.AsyncAnthropic()
-        stripped = False
-        json_retries = 0
-        steps = 0
+        answer = ""
+        failed = None
         try:
-            while steps < MAX_STEPS:
-                steps += 1
-                try:
-                    async with client.beta.messages.stream(
-                        model=c["model"], max_tokens=MAX_TOKENS,
-                        system=[{"type": "text", "text": c["system_text"],
-                                 "cache_control": {"type": "ephemeral"}}],
-                        tools=TOOLS, messages=c["messages"],
-                        thinking={"type": "adaptive"},
-                        output_config={"effort": EFFORT},
-                        cache_control={"type": "ephemeral"},
-                        betas=["server-side-fallback-2026-07-01"],
-                        fallbacks="default",
-                    ) as stream:
-                        thinking_shown = False
-                        async for ev in stream:
-                            if ev.type == "text":
-                                yield {"type": "text", "text": ev.text}
-                            elif ev.type == "content_block_start":
-                                cb = ev.content_block
-                                if cb.type == "tool_use":
-                                    yield {"type": "status", "text": TOOL_LABELS.get(cb.name, cb.name)}
-                                elif cb.type in ("thinking", "redacted_thinking") and not thinking_shown:
-                                    thinking_shown = True
-                                    yield {"type": "status", "text": "Thinking"}
-                        final = await stream.get_final_message()
-                    json_retries = 0
-                except ValueError:
-                    # tool input JSON the SDK could not parse at all: no tool_use
-                    # block completed, so re-issue the same request (bounded)
-                    json_retries += 1
-                    if json_retries > 2:
-                        raise
-                    steps -= 1
-                    continue
-                except anthropic.BadRequestError as e:
-                    if "different conversation" in str(e) and not stripped:
-                        # one-time recovery if a history ever fails the thinking
-                        # binding check: drop thinking blocks, keep everything else
-                        _strip_thinking(c["messages"])
-                        stripped = True
-                        steps -= 1
-                        continue
-                    raise
-                usage["model_calls"] += 1
-                u = final.usage
-                for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
-                          "cache_creation_input_tokens"):
-                    usage[k] += getattr(u, k, 0) or 0
-                c["messages"].append({"role": "assistant",
-                                      "content": [b.to_dict(mode="json") for b in final.content]})
-                if final.stop_reason == "pause_turn":
-                    continue
-                tool_uses = [b for b in final.content if b.type == "tool_use"]
-                if final.stop_reason == "refusal":
-                    repair(c["messages"])
-                    yield {"type": "error", "message": "the model declined to answer this one"}
-                    break
-                if not tool_uses:
-                    break
-                if final.stop_reason == "max_tokens":
-                    repair(c["messages"])
-                    yield {"type": "error", "message": "the answer hit the length limit before a tool ran"}
-                    break
-                usage["tool_calls"] += len(tool_uses)
-                results = await asyncio.gather(*[
-                    asyncio.to_thread(run_tool, ctx, b.name, b.input) for b in tool_uses])
-                c["messages"].append({"role": "user", "content": [
-                    {"type": "tool_result", "tool_use_id": b.id, "content": content,
-                     **({"is_error": True} if is_err else {})}
-                    for b, (content, is_err) in zip(tool_uses, results)]})
-            else:
-                yield {"type": "error", "message": f"stopped after {MAX_STEPS} tool rounds"}
-        except anthropic.AuthenticationError:
-            yield {"type": "error", "message": "the Anthropic API key was rejected"}
-        except anthropic.RateLimitError:
-            yield {"type": "error", "message": "Anthropic rate limit — try again in a minute"}
-        except anthropic.APIStatusError as e:
-            yield {"type": "error", "message": f"Anthropic API error {e.status_code}: {e.message}"}
-        except anthropic.APIConnectionError:
-            yield {"type": "error", "message": "could not reach the Anthropic API"}
+            async for msg in query(prompt=f"{context}\n\n{question.strip()}",
+                                   options=_options(c, ctx)):
+                if isinstance(msg, StreamEvent):
+                    ev = msg.event or {}
+                    t = ev.get("type")
+                    if t == "content_block_delta":
+                        d = ev.get("delta") or {}
+                        if d.get("type") == "text_delta" and d.get("text"):
+                            answer += d["text"]
+                            yield {"type": "text", "text": d["text"]}
+                    elif t == "content_block_start":
+                        cb = ev.get("content_block") or {}
+                        if cb.get("type") == "tool_use":
+                            name = str(cb.get("name", "")).split("__")[-1]
+                            yield {"type": "status", "text": TOOL_LABELS.get(name, name)}
+                        elif cb.get("type") in ("thinking", "redacted_thinking"):
+                            yield {"type": "status", "text": "Thinking"}
+                        elif cb.get("type") == "text" and answer and not answer.endswith("\n\n"):
+                            answer += "\n\n"         # text resumed after a tool call
+                            yield {"type": "text", "text": "\n\n"}
+                    elif t == "message_start":
+                        usage["model_calls"] += 1
+                elif isinstance(msg, SystemMessage):
+                    if msg.subtype == "init" and msg.data.get("session_id"):
+                        c["session_id"] = msg.data["session_id"]
+                elif isinstance(msg, AssistantMessage):
+                    usage["tool_calls"] += sum(isinstance(b, ToolUseBlock) for b in msg.content)
+                    if msg.error:
+                        failed = f"Claude Code reported: {msg.error}"
+                elif isinstance(msg, ResultMessage):
+                    c["session_id"] = msg.session_id or c.get("session_id")
+                    for k in ("input_tokens", "output_tokens", "cache_read_input_tokens",
+                              "cache_creation_input_tokens"):
+                        usage[k] += int((msg.usage or {}).get(k) or 0)
+                    if msg.is_error:
+                        failed = (msg.result or "; ".join(msg.errors or []) or msg.subtype)
+                    elif not answer and msg.result:
+                        answer = msg.result
+                        yield {"type": "text", "text": msg.result}
+        except CLINotFoundError:
+            failed = "the Claude Code binary is missing — reinstall claude-agent-sdk"
+        except ClaudeSDKError as e:
+            failed = failed or f"{type(e).__name__}: {e}"
         finally:
-            try:
-                await client.close()
-            except Exception:
-                pass
+            if answer or failed:
+                c["messages"].append({"role": "user", "text": question.strip()})
+                c["messages"].append({"role": "assistant", "text": answer or ""})
             tot = c.get("usage") or {}
             for k, v in usage.items():
                 tot[k] = (tot.get(k) or 0) + v
             c["usage"] = tot
             with db.get_conn() as conn:
                 save_conv(conn, c)
+        if failed:
+            hint = ""
+            if re.search(r"auth|login|401|credential|token|api key", failed, re.I):
+                hint = " — check CLAUDE_CODE_OAUTH_TOKEN in .env (regenerate with `claude setup-token`)"
+            yield {"type": "error", "message": failed[:400] + hint}
         yield {"type": "done", "usage": usage, "conversation_id": c["id"]}
 
 
@@ -953,8 +966,7 @@ def list_convs(conn, scope: Optional[str] = None, limit: int = 20) -> list:
     args.append(limit)
     out = []
     for r in conn.execute(q, args):
-        msgs = json.loads(r["messages_json"])
-        t = transcript({"messages": msgs})
+        t = transcript({"messages": json.loads(r["messages_json"])})
         first = next((x["text"] for x in t if x["role"] == "user"), "")
         out.append({"id": r["id"], "scope": r["scope"], "created": r["created"],
                     "updated": r["updated"], "title": first[:80],
