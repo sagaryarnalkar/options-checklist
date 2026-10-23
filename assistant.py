@@ -70,7 +70,7 @@ Every question arrives with an <app_context> block: a fresh snapshot taken when 
 - Kite quantities are in UNITS, not lots (-65 = one short NIFTY lot; lot sizes are in the data). Show lots where it helps.
 - delta is in units and equals the rupee P&L for a 1-point move in that underlying; gamma is delta change per point; theta_day is ₹ per calendar day; vega_pt is ₹ per 1 implied-vol point. Across underlyings only rupee figures add: delta_rs_1pct (₹ for a 1% move) and gamma_rs_1pct.
 - IV is backed out of the bid/ask mid (else LTP) with Black-Scholes, r 6.5%, q 1.2%. iv_assumed=true means the quote could not support an IV and a neighbour's IV was used.
-- Margin: "standalone" = each leg as if placed alone (Kite order_margins); "combined" = the legs as one basket with hedge benefit (Kite basket margin); "account" = what Kite has actually blocked, which also reflects MTM and premium. They differ for good reasons — explain which one answers the question.
+- Margin: "standalone" = each leg as if placed alone (Kite order_margins); "combined" = the legs as one basket with hedge benefit (Kite basket margin); "account" = what Kite has actually blocked, which also reflects MTM and premium. All exclude option premium — a long already held paid it long ago, so its margin is ~0. For hypothetical orders check_margin reports margin, premium and their sum (funds needed) separately. They differ for good reasons — explain which one answers the question.
 - Payoff "today" reprices at current IVs; "at expiry" settles the nearest-expiry legs at intrinsic and keeps later legs' time value.
 - Money in rupees with Indian grouping (₹1,25,000; lakh; crore). Times in IST.
 
@@ -331,22 +331,28 @@ def t_check_margin(ctx, orders, with_existing=False):
                       "quantity": qty, "price": 0, "trigger_price": 0})
     out = {"ok": True, "orders": [{"tradingsymbol": b["tradingsymbol"], "side": b["transaction_type"],
                                    "quantity": b["quantity"]} for b in built]}
+    # margin and premium kept apart: a BUY needs its premium in cash, but only
+    # SELLs (and futures) block margin; Kite's `total` mixes the two
+    def split(m):
+        return {"margin": _r(P._margin(m), 0), "premium": _r(P._premium(m), 0),
+                "total_funds": _r(P._total(m), 0)}
     try:
         per = kite.order_margins(built) or []
         for row, m in zip(out["orders"], per):
-            row["standalone_margin"] = _r(P._total(m), 0)
+            row.update(split(m))
     except Exception as e:
         out["order_margins_error"] = f"{type(e).__name__}: {e}"
     base = kite.basket_order_margins(built, consider_positions=False)
-    out["basket_alone"] = {"initial": _r(P._total(base.get("initial")), 0),
-                           "final_after_hedge_benefit": _r(P._total(base.get("final")), 0)}
+    out["basket_alone"] = {"initial": split(base.get("initial")),
+                           "final_after_hedge_benefit": split(base.get("final"))}
     if with_existing:
         live = kite.basket_order_margins(built, consider_positions=True)
         out["with_existing_positions"] = {
-            "initial": _r(P._total(live.get("initial")), 0),
-            "final": _r(P._total(live.get("final")), 0),
+            "initial": split(live.get("initial")), "final": split(live.get("final")),
             "note": "Kite's requirement for these orders given the live book; compare with "
                     "basket_alone to see the netting benefit"}
+    out["meaning"] = ("margin = SPAN+exposure blocked; premium = cash a BUY pays; "
+                      "total_funds = both (what the order needs available)")
     return out
 
 

@@ -33,6 +33,8 @@ MARGIN. Three numbers, because they answer different questions:
               (Kite basket_order_margins, consider_positions=False)
   account     what Kite has actually blocked (margins().utilised), which
               also carries MTM and premium effects the calculators don't.
+All three exclude option PREMIUM: the calculators charge a BUY its premium,
+but a long already held paid it long ago, so a long leg's margin is ~0.
 """
 from __future__ import annotations
 
@@ -301,12 +303,27 @@ def _order(leg: dict) -> dict:
 
 
 def _total(m) -> Optional[float]:
+    """Kite's `total`: margin PLUS any option premium a BUY would pay."""
     if not isinstance(m, dict):
         return None
     t = m.get("total")
     if t is None and (m.get("span") is not None or m.get("exposure") is not None):
         t = (m.get("span") or 0) + (m.get("exposure") or 0) + (m.get("option_premium") or 0)
     return None if t is None else float(t)
+
+
+def _premium(m) -> float:
+    return float((m or {}).get("option_premium") or 0) if isinstance(m, dict) else 0.0
+
+
+def _margin(m) -> Optional[float]:
+    """Margin WITHOUT option premium. Kite's calculators price every order as
+    if placed now, so a BUY's `total` is mostly the premium it would pay — but
+    for a position already held that premium is long gone and blocks nothing.
+    Counting it overstated the live book's margin by the value of every long
+    option (~₹24 lakh on one real NIFTY book)."""
+    t = _total(m)
+    return None if t is None else max(0.0, t - _premium(m))
 
 
 def margins(kite, groups: dict) -> dict:
@@ -324,14 +341,14 @@ def margins(kite, groups: dict) -> dict:
         try:
             res = kite.order_margins([_order(l) for l in chunk]) or []
             for l, m in zip(chunk, res):
-                out["per_leg"][f"{l['tradingsymbol']}|{l.get('product')}"] = _total(m)
+                out["per_leg"][f"{l['tradingsymbol']}|{l.get('product')}"] = _margin(m)
         except Exception as e:
             out["errors"].append(f"order_margins: {type(e).__name__}: {e}")
 
     def basket(legs):
         res = kite.basket_order_margins([_order(l) for l in legs], consider_positions=False)
-        return {"combined": _total((res or {}).get("final")),
-                "initial": _total((res or {}).get("initial"))}
+        return {"combined": _margin((res or {}).get("final")),
+                "initial": _margin((res or {}).get("initial"))}
 
     for name, legs in groups.items():
         gl = [l for l in legs if l["qty"] and l["exchange"] in FNO_EXCHANGES

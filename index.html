@@ -1458,7 +1458,8 @@
       Δ is in units, which is also ₹ per 1-point move; Θ is ₹ per calendar day; Vega is ₹ per
       vol point. <b>Margin</b>: each leg as if placed alone, the legs combined with hedge
       benefit (Kite's basket calculator), and what Kite has actually blocked — the last also
-      carries MTM and premium, so they differ. The payoff's solid line is P&amp;L at the
+      carries MTM and premium, so they differ. Option premium is excluded throughout: a long
+      you already hold paid it long ago, so its margin is ₹0. The payoff's solid line is P&amp;L at the
       nearest expiry (later legs keep their time value); the dashed line is today.
     </p>
   </div>
@@ -1884,8 +1885,8 @@
       posTile("Vega / vol pt", posRsS(t.vega_pt), posCls(t.vega_pt), "₹ change for a 1-point rise in every leg's implied vol"),
       posTile("Δ · 1% move", posRsS(t.delta_rs_1pct), posCls(t.delta_rs_1pct), "₹ change if every underlying rises 1% (first-order)"),
       posTile("Γ · 1% move", posRsS(t.gamma_rs_1pct), posCls(t.gamma_rs_1pct), "convexity term for a 1% move either way: ½·Γ·(1%·spot)²"),
-      posTile("Margin · combined", posRs(m.combined), "", "all F&O legs as one Kite basket, hedge benefit included"),
-      posTile("Margin · standalone Σ", posRs(m.standalone_sum), "", "sum of each leg's margin as if placed alone"),
+      posTile("Margin · combined", posRs(m.combined), "", "all F&O legs as one Kite basket, hedge benefit included — SPAN + exposure only; a held long's premium is already paid and blocks nothing"),
+      posTile("Margin · standalone Σ", posRs(m.standalone_sum), "", "sum of each leg's margin as if placed alone (longs ≈ ₹0: premium already paid)"),
       posTile("Hedge benefit", posRs(m.hedge_benefit), "", "standalone sum minus combined"),
       posTile("Kite blocked", posRs(a.utilised), "", "what Kite has actually blocked (includes MTM / premium effects)"),
       posTile("Available", posRs(a.available), "", "Kite live balance"),
