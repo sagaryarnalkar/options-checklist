@@ -478,7 +478,8 @@ def t_get_market_context(ctx, underlying, sections=None):
             safe("holds", lambda: _holds(conn, underlying))
         if "participants" in secs:
             import participants
-            safe("participants", lambda: participants.latest(conn))
+            safe("participants", lambda: {**participants.latest(conn),
+                                          "trend": participants.trend_summary(conn)})
     return out
 
 

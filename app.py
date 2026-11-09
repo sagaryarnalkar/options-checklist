@@ -861,6 +861,15 @@ async def participants_read():
         return JSONResponse(_p.latest(conn))
 
 
+@app.get("/participants/history")
+def participants_history(instrument: str = "idx_fut", window: int = 10):
+    """Each class's positioning across sessions, with long and short kept apart
+    and expiry steps separated. Public NSE data, like /participants."""
+    import participants as _p
+    with db.get_conn() as conn:
+        return JSONResponse(_p.history(conn, instrument, window))
+
+
 @app.post("/participants/refresh")
 async def participants_refresh(days: int = 10):
     import participants as _p
@@ -1459,11 +1468,12 @@ def _backfill_missing():
     import hold as _hold
     import participants as _p
     try:
+        # a year of files, once: the trend panel ranks each move against it.
+        # (#79/#80/#84 lesson: nothing should wait on the user to bootstrap it)
         with db.get_conn() as conn:
-            have = conn.execute("SELECT COUNT(*) FROM participant_oi").fetchone()[0]
-        if not have:
-            with db.get_conn() as conn:
-                print(f"[bootstrap] participants: {_p.backfill(conn, days=25)}")
+            res = _p.ensure_history(conn)
+        if res is not None:
+            print(f"[bootstrap] participants history: {res}")
     except Exception as e:
         print(f"[bootstrap] participants failed: {type(e).__name__}: {e}")
     try:
