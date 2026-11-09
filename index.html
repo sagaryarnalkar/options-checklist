@@ -952,6 +952,26 @@
   .ai-form{ display:flex; gap:8px; padding:10px 14px; border-top:1px solid var(--border); }
   .ai-form textarea{ flex:1; resize:none; font-family:var(--sans); font-size:13.5px; padding:8px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); }
   .ai-foot{ font-size:11px; color:var(--muted); padding:0 14px 10px; }
+  /* ---------- Participant positioning trend ---------- */
+  #ptrendCard .oi-chart-title{ flex-wrap:wrap; }
+  .ptrend-ctl{ display:inline-flex; gap:6px; text-transform:none; letter-spacing:0; }
+  .ptrend-ctl select{ font-family:var(--sans); font-size:12px; padding:3px 6px; background:var(--panel-2); color:var(--text); border:1px solid var(--border); }
+  .ptrend-top{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-family:var(--mono); font-size:12px; margin:2px 0 10px; }
+  .ptrend-top svg{ display:block; width:150px; height:26px; flex:none; }
+  .ptrend-legend{ display:flex; gap:12px; font-size:11px; color:var(--muted); margin-left:auto; }
+  .ptrend-legend i{ display:inline-block; width:16px; height:0; border-top:2px solid; vertical-align:middle; margin-right:4px; }
+  .ptrend-grid{ display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; }
+  @media (max-width:1250px){ .ptrend-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  @media (max-width:640px){ .ptrend-grid{ grid-template-columns:minmax(0,1fr); } }
+  .ptrend-cls{ background:var(--panel-2); border:1px solid var(--border); padding:8px 10px; min-width:0; display:flex; flex-direction:column; }
+  .ptrend-cls h5{ margin:0 0 3px; font-size:14px; font-weight:800; font-family:var(--sans); }
+  .ptrend-read{ font-size:12px; line-height:1.4; color:var(--text); min-height:68px; }
+  .ptrend-cls svg{ display:block; width:100%; height:auto; margin:6px 0 4px; }
+  table.ptrend-tbl{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11px; margin-top:auto; }
+  table.ptrend-tbl th{ text-align:right; color:var(--muted); font-weight:600; font-size:10px; padding:2px 3px; }
+  table.ptrend-tbl td{ text-align:right; padding:3px; border-top:1px solid var(--border); white-space:nowrap; }
+  table.ptrend-tbl th:first-child, table.ptrend-tbl td:first-child{ text-align:left; }
+
   /* ---------- Header on phones ----------
      The brand row is one flex line (logo · ticker · LIVE · account chip ·
      theme · skin) that measures ~750px. With nowrap children it can't shrink,
@@ -1198,6 +1218,27 @@
       <div class="oi-chart-card" id="gapCard" hidden>
         <div class="oi-chart-title"><span>Recording gaps</span></div>
         <div id="gapBody"></div>
+      </div>
+
+      <div class="oi-chart-card" id="ptrendCard">
+          <div class="oi-chart-title">
+            <span>Participant positioning trend — who has been doing what</span>
+            <span class="ptrend-ctl">
+              <select id="ptrendInstr" aria-label="Instrument">
+                <option value="idx_fut">Index futures</option>
+                <option value="stk_fut">Stock futures</option>
+                <option value="idx_opt">Index options</option>
+                <option value="stk_opt">Stock options</option>
+              </select>
+              <select id="ptrendWindow" aria-label="Window">
+                <option value="5">5 sessions</option>
+                <option value="10">10 sessions</option>
+                <option value="20">20 sessions</option>
+                <option value="60">60 sessions</option>
+              </select>
+            </span>
+          </div>
+          <div id="ptrendBody"><div class="note">Loading…</div></div>
       </div>
 
       <div class="oi-chart-card" id="holdCard">
@@ -3197,6 +3238,130 @@
     } catch(e){ /* secondary panel */ }
   }
 
+  // ---------- Participant positioning trend ----------
+  // /participants/history: each class's longs and shorts across sessions. The
+  // file changes once a day, so the 60s OI refresh reloads this at most every
+  // 30 minutes; the selectors reload it at once.
+  let _ptrendAt = 0, _ptrendInit = false;
+
+  async function loadPartTrend(force){
+    const instr = document.getElementById("ptrendInstr"), win = document.getElementById("ptrendWindow");
+    if (!_ptrendInit){
+      _ptrendInit = true;
+      try {
+        const a = localStorage.getItem("hz_ptrend_instr"), b = localStorage.getItem("hz_ptrend_window");
+        if (a && [...instr.options].some(o => o.value === a)) instr.value = a;
+        win.value = (b && [...win.options].some(o => o.value === b)) ? b : "10";
+      } catch (e) { win.value = "10"; }
+      const on = () => {
+        try { localStorage.setItem("hz_ptrend_instr", instr.value); localStorage.setItem("hz_ptrend_window", win.value); } catch (e) {}
+        loadPartTrend(true);
+      };
+      instr.addEventListener("change", on);
+      win.addEventListener("change", on);
+    }
+    if (!force && Date.now() - _ptrendAt < 30 * 60 * 1000) return;
+    _ptrendAt = Date.now();
+    try {
+      const r = await fetch(`/participants/history?instrument=${instr.value}&window=${win.value}`, { cache: "no-store" });
+      renderPartTrend(r.ok ? await r.json() : null);
+    } catch (e) { _ptrendAt = 0; }
+  }
+
+  const ptrendN = v => v == null ? "—" : Math.round(v).toLocaleString("en-IN");
+  const ptrendS = v => v == null ? "—" : (v > 0 ? "+" : v < 0 ? "−" : "") + Math.abs(Math.round(v)).toLocaleString("en-IN");
+  const ptrendDay = d => { const x = new Date(d + "T00:00:00"); return `${x.getDate()} ${x.toLocaleString("en-IN", { month: "short" })}`; };
+
+  function ptrendChart(d, c){
+    const n = d.dates.length, W = 300, H = 118, PX = 4, PT = 8, PB = 14;
+    const lines = d.futures
+      ? [{ ys: c.series.long, color: "var(--pos)", w: 1.8 }, { ys: c.series.short, color: "var(--neg)", w: 1.8 }]
+      : [{ ys: c.series.net, color: withAlpha(cssv("--accent"), 0.35), w: 1.1 }, { ys: c.series.avg, color: "var(--accent)", w: 2 }];
+    const all = lines.flatMap(l => l.ys).filter(v => v != null);
+    let lo = Math.min(...all), hi = Math.max(...all);
+    if (!d.futures){ lo = Math.min(lo, 0); hi = Math.max(hi, 0); }
+    const pad = (hi - lo) * 0.08 || 1; lo -= pad; hi += pad;
+    const X = i => PX + i / Math.max(n - 1, 1) * (W - 2 * PX);
+    const Y = v => PT + (hi - v) / (hi - lo) * (H - PT - PB);
+    const startI = d.dates.indexOf(d.window_start);
+    const shade = startI >= 0 ? `<rect x="${X(startI).toFixed(1)}" y="${PT}" width="${(X(n - 1) - X(startI)).toFixed(1)}" height="${H - PT - PB}" fill="${withAlpha(cssv("--accent"), 0.07)}"/>` : "";
+    const marks = (list, op, label) => list.map(e => {
+      const i = d.dates.indexOf(e); if (i < 0) return "";
+      return `<line x1="${X(i).toFixed(1)}" y1="${PT}" x2="${X(i).toFixed(1)}" y2="${H - PB}" stroke="var(--amber)" stroke-width="1" stroke-dasharray="2,3" opacity="${op}"/>`
+        + (label ? `<text x="${X(i).toFixed(1)}" y="${H - 3}" text-anchor="middle" font-size="8.5" fill="var(--amber)" font-family="var(--mono)">exp</text>` : "");
+    }).join("");
+    const weekly = d.futures ? "" : marks(d.weekly_expiries.filter(e => !d.monthly_expiries.includes(e)), 0.35, false);
+    const zero = (!d.futures && lo < 0 && hi > 0) ? `<line x1="${PX}" y1="${Y(0).toFixed(1)}" x2="${W - PX}" y2="${Y(0).toFixed(1)}" stroke="var(--muted)" stroke-width="1" opacity=".5"/>` : "";
+    const path = ys => ys.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join("");
+    const dw = (W - 2 * PX) / Math.max(n - 1, 1);
+    const hovers = d.dates.map((dt, i) => {
+      const parts = d.futures
+        ? `long ${ptrendN(c.series.long[i])} · short ${ptrendN(c.series.short[i])} · net ${ptrendS(c.series.net[i])}`
+        : `net ${ptrendS(c.series.net[i])} · ${ptrendS(c.series.avg[i])} (5-session avg)`;
+      const tag = d.monthly_expiries.includes(dt) ? " · monthly expiry" : d.weekly_expiries.includes(dt) ? " · weekly expiry" : "";
+      return `<rect x="${(X(i) - dw / 2).toFixed(1)}" y="0" width="${dw.toFixed(1)}" height="${H}" fill="transparent"><title>${ptrendDay(dt)}: ${parts}${tag}</title></rect>`;
+    }).join("");
+    return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="${esc(c.name)} ${esc(d.label)} open interest">
+      ${shade}${zero}${weekly}${marks(d.monthly_expiries, 0.9, true)}
+      ${lines.map(l => `<path d="${path(l.ys)}" fill="none" stroke="${l.color}" stroke-width="${l.w}"/>`).join("")}
+      ${hovers}
+    </svg>`;
+  }
+
+  function ptrendNiftySvg(d){
+    const pts = d.nifty.map((v, i) => [i, v]).filter(p => p[1] != null);
+    if (pts.length < 2) return "";
+    const ys = pts.map(p => p[1]), lo = Math.min(...ys), hi = Math.max(...ys), n = d.nifty.length;
+    const X = i => 2 + i / Math.max(n - 1, 1) * 146, Y = v => 2 + (hi - v) / ((hi - lo) || 1) * 22;
+    return `<svg viewBox="0 0 150 26" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NIFTY"><path d="${pts.map((p, i) => `${i ? "L" : "M"}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("")}" fill="none" stroke="var(--color-text)" stroke-width="1.5"/></svg>`;
+  }
+
+  function ptrendRow(label, r){
+    if (!r) return "";
+    const tip = [`${ptrendN(r.start)} → ${ptrendN(r.end)}`,
+      r.days_up != null ? `${r.days_up} sessions up, ${r.days_down} down` : "",
+      r.expiry_chg ? `${ptrendS(r.expiry_chg)} on monthly expiry` : "",
+      r.pct_rank != null ? `rank ${r.pct_rank}% of ${r.n_windows} past windows` : "",
+      r.low_since ? `lowest since ${r.low_since}` : "", r.high_since ? `highest since ${r.high_since}` : ""].filter(Boolean).join(" · ");
+    return `<tr title="${esc(tip)}"><td>${label}</td><td>${ptrendN(r.end)}</td>
+      <td class="${r.chg > 0 ? "profit" : r.chg < 0 ? "loss" : ""}">${ptrendS(r.chg)}</td>
+      <td>${r.pct == null ? "" : (r.pct > 0 ? "+" : "") + r.pct.toFixed(0) + "%"}</td></tr>`;
+  }
+
+  function renderPartTrend(d){
+    const el = document.getElementById("ptrendBody");
+    if (!d || !d.ok){
+      el.innerHTML = `<div class="note">${esc((d && d.reason) || "No data yet")}</div>`;
+      return;
+    }
+    const m = d.nifty_move;
+    const top = `<div class="ptrend-top">
+      ${m ? `<b>NIFTY ${ptrendN(m.start)} → ${ptrendN(m.end)} <span class="${m.pct >= 0 ? "profit" : "loss"}">(${m.pct >= 0 ? "+" : ""}${m.pct.toFixed(1)}%)</span></b>` : `<b>NIFTY —</b>`}
+      ${ptrendNiftySvg(d)}
+      <span class="csp-sub">${d.window} sessions · ${ptrendDay(d.window_start)} → ${ptrendDay(d.as_of)}</span>
+      <span class="ptrend-legend">${d.futures
+        ? `<span><i style="border-color:var(--pos)"></i>Long</span><span><i style="border-color:var(--neg)"></i>Short</span>`
+        : `<span><i style="border-color:var(--accent)"></i>Net, 5-session avg</span>`}
+        <span><i style="border-color:var(--amber);border-top-style:dashed"></i>Expiry</span></span>
+    </div>`;
+    const cards = d.classes.map(c => `<div class="ptrend-cls">
+      <h5>${esc(c.name)}</h5>
+      <div class="ptrend-read">${esc(c.sentence)}</div>
+      ${ptrendChart(d, c)}
+      <table class="ptrend-tbl"><thead><tr><th></th><th>Now</th><th>Chg</th><th></th></tr></thead><tbody>
+        ${d.futures ? ptrendRow("Long", c.read.long) + ptrendRow("Short", c.read.short) : ""}
+        ${ptrendRow(d.futures ? "Net" : "Net avg", c.read.net)}
+      </tbody></table>
+    </div>`).join("");
+    el.innerHTML = top + `<div class="ptrend-grid">${cards}</div>
+      <div class="hold-note">Contract counts from NSE's daily file, not rupees; not adjusted for lot-size changes.
+        ${d.futures
+          ? "Monthly expiry removes whatever isn't rolled, so each change names how much was that one-day step."
+          : "Option OI collapses every weekly expiry and rebuilds, so raw values are only comparable a full cycle apart; the read uses a 5-session average."}
+        "Largest since" ranks the move against this series' own history (from ${ptrendDay(d.first_date)} ${d.first_date.slice(0, 4)}).
+        This describes what each class did. Whether such a trend predicts the market has not been tested.</div>`;
+  }
+
   function chartTheme(){
     const text = cssv("--color-text");
     return {
@@ -3345,6 +3510,7 @@
       loadHolds();
       loadPulse();
       loadParticipants();
+      loadPartTrend();
       loadGaps();
       loadReview();
     } catch(e) {
