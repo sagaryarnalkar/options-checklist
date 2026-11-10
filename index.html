@@ -790,6 +790,7 @@
     #tabDashboard.active{ display:grid; grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);
       gap:0 16px; align-items:start; grid-auto-flow:row dense; }
     #tabDashboard > .top{ grid-column:1/-1; }
+    #tabDashboard > #fcPanel{ grid-column:1/-1; margin-top:0; }
     #tabDashboard > #liveCard{ grid-column:1; }
     #tabDashboard > .triggers{ grid-column:2; margin-top:14px; }
     #tabDashboard > #recBlock{ grid-column:1/-1; }
@@ -954,6 +955,48 @@
   .ai-foot{ font-size:11px; color:var(--muted); padding:0 14px 10px; }
   /* ---------- Participant positioning trend ---------- */
   #ptrendCard .oi-chart-title{ flex-wrap:wrap; }
+  /* Claude's nightly call (forecast.py) */
+  .fc-sub{ font-weight:500; text-transform:none; letter-spacing:0; color:var(--muted); font-size:12px; }
+  .fc-head{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:12px 16px; align-items:start; }
+  @media (max-width:980px){ .fc-head{ grid-template-columns:minmax(0,1fr); } }
+  .fc-calls{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+  .fc-call{ background:var(--panel-2); border:1px solid var(--border); padding:8px 11px; min-width:0; }
+  .fc-k{ font-size:10px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); }
+  .fc-big{ font-family:var(--mono); font-size:24px; font-weight:800; letter-spacing:-.02em; line-height:1.15; }
+  .fc-m{ font-family:var(--mono); font-size:11px; color:var(--muted); }
+  .fc-rec{ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+  @media (max-width:520px){ .fc-rec{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
+  .fc-tile{ background:var(--panel-2); border:1px solid var(--border); padding:6px 9px; min-width:0; }
+  .fc-v{ font-family:var(--mono); font-size:15px; font-weight:700; }
+  .fc-verdict{ display:inline-block; font-size:10.5px; font-weight:700; text-transform:uppercase;
+    letter-spacing:.05em; padding:1px 6px; border:1px solid currentColor; white-space:nowrap; }
+  .fc-summary{ font-size:13px; line-height:1.5; margin:10px 0 6px; }
+  .fc-drivers{ display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 6px; }
+  .fc-drv{ font-size:11.5px; padding:2px 8px; border:1px solid var(--border); background:var(--panel-2); cursor:help; }
+  .fc-drv i{ font-style:normal; letter-spacing:1px; font-size:9px; vertical-align:1px; }
+  :root[data-skin="fintech"] .fc-drv{ border-radius:999px; }
+  .fc-inval{ font-size:12px; color:var(--muted); line-height:1.45; }
+  details.fc-more > summary{ cursor:pointer; font-size:12px; color:var(--accent); margin-top:8px; }
+  .fc-sec{ margin-top:12px; min-width:0; }
+  .fc-sec h4{ margin:0 0 5px; font-size:11px; text-transform:uppercase; letter-spacing:.07em; color:var(--muted); }
+  .fc-grid2{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 16px; }
+  @media (max-width:900px){ .fc-grid2{ grid-template-columns:minmax(0,1fr); } }
+  .fc-scroll{ overflow-x:auto; }
+  table.fc-tbl{ width:100%; border-collapse:collapse; font-family:var(--mono); font-size:11.5px; }
+  table.fc-tbl th{ text-align:right; color:var(--muted); font-weight:600; font-size:10.5px; padding:3px 5px; white-space:nowrap; }
+  table.fc-tbl td{ text-align:right; padding:4px 5px; border-top:1px solid var(--border); vertical-align:top; white-space:nowrap; }
+  table.fc-tbl th:first-child, table.fc-tbl td:first-child{ text-align:left; }
+  table.fc-tbl td.txt{ text-align:left; font-family:var(--sans); white-space:normal; min-width:240px; line-height:1.4; }
+  .fc-pm{ color:var(--muted); font-size:11.5px; margin-top:3px; }
+  .fc-lessons{ margin:0; padding-left:18px; font-size:12.5px; line-height:1.5; }
+  .fc-chart{ display:block; width:100%; height:auto; }
+  .fc-foot{ font-size:10.5px; color:var(--muted); margin-top:10px; line-height:1.5; }
+  .fc-actions{ display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; margin-top:6px; font-size:11px; }
+  .fc-actions a{ color:var(--accent); }
+  .fc-actions button{ font:inherit; font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+    background:transparent; color:var(--accent); border:1px solid var(--accent); padding:3px 9px; cursor:pointer; }
+  :root[data-skin="fintech"] .fc-actions button{ border-radius:999px; }
+  .fc-actions button:disabled{ opacity:.5; cursor:default; }
   .ptrend-ctl{ display:inline-flex; gap:6px; text-transform:none; letter-spacing:0; }
   .ptrend-ctl select{ font-family:var(--sans); font-size:12px; padding:3px 6px; background:var(--panel-2); color:var(--text); border:1px solid var(--border); }
   .ptrend-top{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; font-family:var(--mono); font-size:12px; margin:2px 0 10px; }
@@ -1077,6 +1120,11 @@
       <div class="clock" id="clock">—</div>
     </div>
     <div class="badges" id="badges"></div>
+  </div>
+
+  <div class="triggers fc-panel" id="fcPanel">
+    <h2>Claude's call · NIFTY <span class="fc-sub" id="fcSub"></span></h2>
+    <div id="fcBody"><div class="note">Loading…</div></div>
   </div>
 
   <div class="live-card" id="liveCard">
@@ -3878,6 +3926,218 @@
       <div class="wc-meta" style="margin-top:3px">call writers ${cr(w.ce_cr)} · put writers ${cr(w.pe_cr)}</div>
     </div>`;
   }
+  // ---------- Claude's nightly call (forecast.py, GET /forecast) ----------
+  // Made after the close for the NEXT session and the next five. Graded
+  // against Kite's official closes, scored on the same days as a coin, the
+  // base rate and persistence. Copy must never imply an edge the record has
+  // not shown: below 20 graded calls every verdict is "insufficient sample".
+  let _fcLast = 0, _fcPoll = null;
+  const FC_FACTOR = { price_trend: "Trend", momentum_reversal: "Stretch / reversal",
+    participants_fii: "FII positioning", participants_other: "Client / Pro / DII",
+    options_positioning: "Options OI", oi_flow: "OI flow", writer_pressure: "Writer pressure",
+    volatility: "Volatility", hm_srt: "HM / SRT", expiry_calendar: "Calendar",
+    banknifty_relative: "BANKNIFTY", track_record: "Own record / base rate", other: "Other" };
+  const fcPct = (v, dp = 2) => v == null ? "—" : `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(dp)}%`;
+  const fcP = v => v == null ? "—" : `${v.toFixed(1)}%`;
+  const fcNum = (v, dp = 3) => v == null ? "—" : v.toFixed(dp);
+  function fcSide(p){
+    if (p == null) return ["—", "--muted"];
+    if (p === 0.5) return ["Even", "--muted"];
+    return p > 0.5 ? [`Up ${Math.round(p * 100)}%`, "--pos"] : [`Down ${Math.round((1 - p) * 100)}%`, "--neg"];
+  }
+  function fcDate(d){
+    if (!d) return "—";
+    const x = new Date(d + "T00:00:00");
+    return isNaN(x) ? d : x.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+  }
+  const fcRight = (p, r) => (p == null || r == null || r === 0 || p === 0.5) ? null : (p > 0.5) === (r > 0);
+  const fcMark = ok => ok == null ? `<span style="color:var(--muted)">pending</span>`
+    : ok ? `<span style="color:var(--pos)">✓</span>` : `<span style="color:var(--neg)">✗</span>`;
+  const fcVcol = v => (v === "beats baseline" || v === "beats chance") ? "--pos"
+    : String(v || "").startsWith("WORSE") ? "--neg"
+    : (v === "insufficient sample" || v === "too few") ? "--muted" : "--amber";
+  const fcVerdict = v => `<span class="fc-verdict" style="color:var(${fcVcol(v)})">${esc(v || "—")}</span>`;
+  const fcLean = l => l === "bullish" ? "--pos" : l === "bearish" ? "--neg" : "--muted";
+
+  async function loadForecast(force){
+    if (!document.getElementById("fcBody")) return;
+    const now = Date.now();
+    if (!force && now - _fcLast < 20000) return;
+    _fcLast = now;
+    try {
+      const r = await fetch("/forecast", { cache: "no-store" });
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      renderForecast(await r.json());
+    } catch (e) {
+      document.getElementById("fcBody").innerHTML = `<div class="note">The forecast record is unavailable (${esc(e.message)}).</div>`;
+    }
+  }
+
+  // cumulative Brier edge over the base-rate forecaster: rising = beating it
+  function fcChart(series){
+    if (!series || series.length < 5) return "";
+    let cum = 0;
+    const pts = series.map(([d, p, r, b]) => {
+      const y = r > 0 ? 1 : 0;
+      cum += ((b == null ? 0.5 : b) - y) ** 2 - (p - y) ** 2;
+      return [d, cum];
+    });
+    const W = 600, H = 90, pad = 4, n = pts.length;
+    const ys = pts.map(x => x[1]).concat([0]);
+    const lo = Math.min(...ys), hi = Math.max(...ys), span = (hi - lo) || 1;
+    const X = i => pad + i * (W - 2 * pad) / Math.max(1, n - 1);
+    const Y = v => pad + (hi - v) * (H - 2 * pad) / span;
+    const path = pts.map((p, i) => `${i ? "L" : "M"}${X(i).toFixed(1)},${Y(p[1]).toFixed(1)}`).join("");
+    const col = cum >= 0 ? "--pos" : "--neg";
+    return `<div class="fc-sec"><h4>Cumulative Brier edge vs the base rate</h4>
+      <svg class="fc-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"
+        aria-label="cumulative Brier score advantage over the base-rate forecaster">
+        <line x1="0" x2="${W}" y1="${Y(0).toFixed(1)}" y2="${Y(0).toFixed(1)}" style="stroke:var(--border)" stroke-dasharray="3 3"/>
+        <path d="${path}" fill="none" style="stroke:var(${col})" stroke-width="1.6" vector-effect="non-scaling-stroke"/>
+      </svg>
+      <div class="fc-m">${esc(pts[0][0])} → ${esc(pts[n - 1][0])} · above the line = better than always saying the base rate · ${cum >= 0 ? "+" : "−"}${Math.abs(cum).toFixed(3)} total</div></div>`;
+  }
+
+  function fcFoot(d){
+    const lr = d.last_run;
+    let run = "";
+    if (d.running || (lr && lr.running)) run = `<span style="color:var(--amber)">a call is being made now…</span>`;
+    else if (lr) {
+      const when = String(lr.finished || lr.started || "").replace("T", " ").slice(0, 16);
+      const what = lr.ok && lr.skipped ? "nothing new (" + lr.skipped + ")"
+        : lr.ok ? `call made for after ${lr.as_of}` : `no call — ${lr.reason || "failed"}`;
+      run = `last run ${esc(when)} IST: ${esc(what)}`;
+    }
+    const key = posKey();
+    const audit = d.latest ? `<a href="/forecast/briefing?as_of=${encodeURIComponent(d.latest.as_of)}" target="_blank" rel="noopener">what it saw</a>` : "";
+    return `<div class="fc-foot">${esc(d.schedule || "")}. It reads only the app's data after the close —
+      no US session, GIFT Nifty or overnight news, and the next close includes that gap. One call per
+      session, never re-rolled; graded against Kite's official closes on the same days as three naive
+      forecasters (coin, base rate, persistence). The model does not learn between nights: each night it
+      is shown its own graded record, its last call to review, and the lessons notebook it keeps — and
+      whether that helps is measured below, not assumed.</div>
+      <div class="fc-actions">${run ? `<span>${run}</span>` : ""}${audit}
+        ${key ? `<button type="button" id="fcRunBtn" ${d.running ? "disabled" : ""}>Make tonight's call now</button>` : ""}
+        <span id="fcRunMsg"></span></div>`;
+  }
+
+  function fcWire(d){
+    const b = document.getElementById("fcRunBtn");
+    if (b) b.onclick = async () => {
+      b.disabled = true;
+      const msg = document.getElementById("fcRunMsg");
+      try {
+        const r = await fetch("/forecast/run", { method: "POST", headers: { "X-App-Key": posKey() } });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(j.detail || ("HTTP " + r.status));
+        if (!j.ok) throw new Error(j.reason || "not started");
+        msg.textContent = "started — this takes a minute or two";
+        setTimeout(() => loadForecast(true), 4000);
+      } catch (e) { msg.textContent = e.message; b.disabled = false; }
+    };
+    clearTimeout(_fcPoll);
+    if (d.running || (d.last_run && d.last_run.running)) _fcPoll = setTimeout(() => loadForecast(true), 15000);
+  }
+
+  function renderForecast(d){
+    const el = document.getElementById("fcBody");
+    if (!el) return;
+    const L = d.latest, R = d.record || {}, H = R.next_session || {}, W = R.next_week || {};
+    const sub = document.getElementById("fcSub");
+    if (!L){
+      sub.textContent = "";
+      el.innerHTML = `<div class="note">No calls yet. Claude makes the first one at 20:30 IST on the next
+        trading evening (it needs that day's Kite login). The record only grows forward — there is no
+        back-test, because a model asked about a past date may simply remember what happened.</div>${fcFoot(d)}`;
+      fcWire(d);
+      return;
+    }
+    sub.textContent = `· made after the ${fcDate(L.as_of)} close`;
+    const [n1, c1] = fcSide(L.p_up_next), [n5, c5] = fcSide(L.p_up_week);
+    const got1 = L.actual_next_pct != null
+      ? `<div class="fc-m">actual ${fcPct(L.actual_next_pct)} ${fcMark(fcRight(L.p_up_next, L.actual_next_pct))} · ${fcDate(L.next_session)}</div>` : "";
+    const got5 = L.actual_week_pct != null
+      ? `<div class="fc-m">actual ${fcPct(L.actual_week_pct)} ${fcMark(fcRight(L.p_up_week, L.actual_week_pct))} · ${fcDate(L.s5_session)}</div>` : "";
+    const few = (H.graded || 0) < (d.min_graded || 20);
+    const tiles = [
+      ["Graded calls", `${H.graded || 0}`, `${H.pending || 0} awaiting the close`],
+      ["Hit rate", fcP(H.hit_pct), H.calls ? `${H.hits}/${H.calls} right` : "none graded yet"],
+      ["Always-up, same days", fcP(H.always_up_pct), `persistence ${fcP(H.persistence_pct)} · coin 50%`],
+      ["Brier (lower = better)", fcNum(H.brier), `base rate ${fcNum(H.brier_base_rate)} · coin 0.250`],
+      ["Verdict vs base rate", fcVerdict(H.verdict), few
+        ? `judged from ${d.min_graded || 20} calls; a real 55% edge needs ~${R.n_for_55pct || 385}`
+        : H.z_brier_vs_base == null ? "z —"
+        : H.z_brier_vs_base <= 0 ? `z ${(-H.z_brier_vs_base).toFixed(2)} in its favour`
+        : `z ${H.z_brier_vs_base.toFixed(2)} against it`],
+      ["Next-week calls", fcP(W.hit_pct), W.graded ? `${W.hits}/${W.calls} right · always-up ${fcP(W.always_up_pct)}` : "none graded yet"],
+    ].map(([k, v, s]) => `<div class="fc-tile"><div class="fc-k">${k}</div><div class="fc-v">${v}</div><div class="fc-m">${s}</div></div>`).join("");
+    const drivers = (L.drivers || []).map(x => `<span class="fc-drv" title="${esc(x.evidence)}"
+        style="color:var(${fcLean(x.lean)})"><b>${esc(FC_FACTOR[x.factor] || x.factor)}</b> ${esc(x.lean)}
+        <i>${"●".repeat(x.weight || 1)}</i></span>`).join("");
+
+    const cal = (H.calibration || []).length ? `<div class="fc-sec"><h4>Calibration — does "60% sure" come true 60% of the time?</h4>
+      <div class="fc-scroll"><table class="fc-tbl"><tr><th>Confidence</th><th>Calls</th><th>Said</th><th>Came true</th></tr>
+      ${H.calibration.map(c => `<tr><td>${esc(c.bin)}</td><td>${c.n}</td><td>${fcP(c.said_pct)}</td><td>${fcP(c.came_true_pct)}</td></tr>`).join("")}
+      </table></div></div>` : "";
+    const fac = (R.factors || []).length ? `<div class="fc-sec"><h4>What worked — each factor's lean vs the next session</h4>
+      <div class="fc-scroll"><table class="fc-tbl"><tr><th>Factor</th><th>Leans</th><th>Bull / bear</th><th>Right</th><th>Chance</th><th>z</th><th>Verdict</th></tr>
+      ${R.factors.map(f => `<tr><td>${esc(FC_FACTOR[f.factor] || f.factor)}</td><td>${f.leans}</td><td>${f.bullish} / ${f.bearish}</td>
+        <td>${fcP(f.right_pct)}</td><td>${fcP(f.chance_pct)}</td><td>${f.verdict === "too few" ? "—" : (f.z == null ? "—" : f.z)}</td><td>${fcVerdict(f.verdict)}</td></tr>`).join("")}
+      </table></div><div class="fc-m" style="margin-top:4px">Chance = how often a lean that direction is right with no information (the up-day share).
+      ${esc(R.factor_note || "")}. Neutral readings are not graded.</div></div>` : "";
+    const halves = (R.halves || []).length === 2 ? `<div class="fc-sec"><h4>Is it improving? first half vs second half</h4>
+      <div class="fc-scroll"><table class="fc-tbl"><tr><th>Calls</th><th>Graded</th><th>Hit</th><th>Always-up</th><th>Brier</th><th>Base rate</th><th>Skill</th></tr>
+      ${R.halves.map(h => `<tr><td>${esc(h.first)} → ${esc(h.last)}</td><td>${h.graded}</td><td>${fcP(h.hit_pct)}</td><td>${fcP(h.always_up_pct)}</td>
+        <td>${fcNum(h.brier)}</td><td>${fcNum(h.brier_base_rate)}</td><td>${h.brier_skill_vs_base == null ? "—" : (h.brier_skill_vs_base * 100).toFixed(1) + "%"}</td></tr>`).join("")}
+      </table></div></div>` : `<div class="fc-sec"><h4>Is it improving?</h4><div class="fc-m">Compared once there are ${2 * (d.min_graded || 20)} graded calls (first half vs second half).</div></div>`;
+    const models = (R.by_model || []).length > 1 ? `<div class="fc-sec"><h4>By model</h4><div class="fc-scroll"><table class="fc-tbl">
+      <tr><th>Model</th><th>Graded</th><th>Hit</th><th>Brier</th><th>Base rate</th><th>Verdict</th></tr>
+      ${R.by_model.map(m => `<tr><td>${esc(m.model)}</td><td>${m.graded}</td><td>${fcP(m.hit_pct)}</td><td>${fcNum(m.brier)}</td><td>${fcNum(m.brier_base_rate)}</td><td>${fcVerdict(m.verdict)}</td></tr>`).join("")}
+      </table></div></div>` : "";
+    const lessons = `<div class="fc-sec"><h4>Lessons notebook (rewritten each night)</h4>${(L.lessons || []).length
+      ? `<ol class="fc-lessons">${L.lessons.map(x => `<li>${esc(x)}</li>`).join("")}</ol>` : `<div class="fc-m">empty</div>`}</div>`;
+    const review = L.review_of_previous && L.review_of_previous.toLowerCase() !== "none"
+      ? `<div class="fc-sec"><h4>Its review of the previous call</h4><div class="fc-summary" style="margin:0">${esc(L.review_of_previous)}</div></div>` : "";
+    const drvTbl = (L.drivers || []).length ? `<div class="fc-sec"><h4>Tonight's evidence</h4><div class="fc-scroll"><table class="fc-tbl">
+      <tr><th>Factor</th><th>Lean</th><th>Weight</th><th style="text-align:left">Reading</th></tr>
+      ${L.drivers.map(x => `<tr><td>${esc(FC_FACTOR[x.factor] || x.factor)}</td><td style="color:var(${fcLean(x.lean)})">${esc(x.lean)}</td>
+        <td>${x.weight}</td><td class="txt">${esc(x.evidence)}</td></tr>`).join("")}</table></div></div>` : "";
+    const calls = (d.calls || []);
+    const callsTbl = calls.length ? `<div class="fc-sec"><h4>Every call (${calls.length})</h4><div class="fc-scroll"><table class="fc-tbl">
+      <tr><th>After</th><th>Next session</th><th>Expected</th><th>Actual</th><th></th><th>Week</th><th>Actual</th><th></th><th style="text-align:left">Reasoning · post-mortem</th></tr>
+      ${calls.map(c => {
+        const [a1, k1] = fcSide(c.p1), [a5, k5] = fcSide(c.p5);
+        return `<tr><td>${fcDate(c.as_of)}</td><td style="color:var(${k1})">${a1}</td><td>${fcPct(c.e1)}</td>
+          <td>${fcPct(c.ret1)}</td><td>${fcMark(fcRight(c.p1, c.ret1))}</td>
+          <td style="color:var(${k5})">${a5}</td><td>${fcPct(c.ret5)}</td><td>${fcMark(fcRight(c.p5, c.ret5))}</td>
+          <td class="txt">${esc(c.summary || "")}${c.postmortem ? `<div class="fc-pm">↳ ${esc(c.postmortem)}</div>` : ""}</td></tr>`;
+      }).join("")}</table></div></div>` : "";
+    const failed = (d.failed || []).length ? `<div class="fc-m" style="margin-top:6px">Attempts without a call: ${d.failed.map(f =>
+      `${esc(f.as_of)} (${esc(f.status)}: ${esc(String(f.error || "").slice(0, 90))})`).join(" · ")}</div>` : "";
+
+    el.innerHTML = `
+      <div class="fc-head">
+        <div class="fc-calls">
+          <div class="fc-call"><div class="fc-k">Next session · ${fcDate(L.next_session) === "—" ? "first after " + fcDate(L.as_of) : fcDate(L.next_session)}</div>
+            <div class="fc-big" style="color:var(${c1})">${n1}</div>
+            <div class="fc-m">expected ${fcPct(L.expected_next_pct)} · base rate ${L.base_rate_next == null ? "—" : Math.round(L.base_rate_next * 100) + "% up"}</div>${got1}</div>
+          <div class="fc-call"><div class="fc-k">Five sessions out</div>
+            <div class="fc-big" style="color:var(${c5})">${n5}</div>
+            <div class="fc-m">expected ${fcPct(L.expected_week_pct)} · base rate ${L.base_rate_week == null ? "—" : Math.round(L.base_rate_week * 100) + "% up"}</div>${got5}</div>
+        </div>
+        <div class="fc-rec">${tiles}</div>
+      </div>
+      <div class="fc-summary">${esc(L.summary)}</div>
+      <div class="fc-drivers">${drivers}</div>
+      <div class="fc-inval"><b>Wrong if:</b> ${esc(L.invalidation)}</div>
+      <details class="fc-more"><summary>Record, what worked, lessons and every call</summary>
+        <div class="fc-grid2"><div>${drvTbl}${review}${lessons}</div><div>${fcChart(R.series)}${cal}${halves}${models}</div></div>
+        ${fac}${callsTbl}${failed}
+      </details>
+      ${fcFoot(d)}`;
+    fcWire(d);
+  }
+
   function renderWCash(d){
     const el = document.getElementById("wcashBody");
     if (!el) return;
@@ -4615,6 +4875,7 @@
   async function loadSignals(opts){
     const skipAutoRefresh = !!(opts && opts.skipAutoRefresh);
     ensureLiveCardSkeleton();
+    loadForecast();           // its own endpoint: must not wait on data.json
     try {
       const r = await fetch("data.json?_=" + Date.now(), { cache: "no-store" });
       if (!r.ok) throw new Error("HTTP " + r.status);
