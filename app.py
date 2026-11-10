@@ -49,6 +49,7 @@ import asyncio
 import datetime as _dt
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -675,11 +676,11 @@ def forecast_read():
 
 
 @app.get("/forecast/briefing")
-def forecast_briefing(as_of: str):
+def forecast_briefing(as_of: str, replay: bool = False):
     """Exactly what the model was shown for one call (audit)."""
     import forecast as _fc
     with db.get_conn() as conn:
-        b = _fc.briefing_for(conn, as_of[:10])
+        b = _fc.briefing_for(conn, as_of[:10], _fc.REPLAY if replay else _fc.LIVE)
     if not b:
         return JSONResponse({"ok": False, "reason": "no call for that session"}, status_code=404)
     return JSONResponse({"ok": True, **b})
@@ -699,6 +700,79 @@ async def forecast_run(x_app_key: Optional[str] = Header(default=None)):
     _bg_tasks.add(t)                     # keep a reference until it finishes
     t.add_done_callback(_bg_tasks.discard)
     return JSONResponse({"ok": True, "started": True})
+
+
+# Schooling: the same call replayed over past sessions (forecast_replay.py),
+# as its own low-priority process like history.py. Reading is public; starting
+# or stopping it spends / controls the owner's Claude plan, so it needs the key.
+
+def _spawn_replay(args: list) -> int:
+    import subprocess
+    import forecast_replay as _fr
+    python_bin = os.environ.get("PYTHON_BIN") or sys.executable or "python3"
+    log = open(_fr.LOG_FILE, "a")
+    p = subprocess.Popen([python_bin, str(ROOT / "forecast_replay.py"), *args], cwd=str(ROOT),
+                         stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                         start_new_session=True)
+    log.close()
+    _fr.mark_starting(p.pid, args)
+    return p.pid
+
+
+@app.get("/forecast/replay")
+def forecast_replay_read():
+    import forecast_replay as _fr
+    with db.get_conn() as conn:
+        return JSONResponse(_fr.public(conn))
+
+
+@app.post("/forecast/replay/start")
+def forecast_replay_start(payload: dict = Body(default={}),
+                          x_app_key: Optional[str] = Header(default=None)):
+    """mode=prep: panels only (no Claude). mode=run: prep, then one Claude call
+    per past session, paced and capped."""
+    _require_app_key(x_app_key)
+    import forecast_replay as _fr
+    st = _fr.read_status()
+    if st.get("running"):
+        return JSONResponse({"ok": False, "reason": f"already running ({st.get('phase')})"})
+    mode = payload.get("mode") or "prep"
+    if mode not in ("prep", "run"):
+        raise HTTPException(status_code=400, detail="mode must be prep or run")
+    args = [mode]
+    for k in ("since", "until"):
+        v = payload.get(k)
+        if v:
+            try:
+                _dt.date.fromisoformat(str(v))
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"{k} must be YYYY-MM-DD")
+            args += [f"--{k}", str(v)]
+    if mode == "run":
+        model = payload.get("model")
+        if model:
+            if not re.fullmatch(r"[A-Za-z0-9._\[\]-]{1,60}", str(model)):
+                raise HTTPException(status_code=400, detail="bad model name")
+            args += ["--model", str(model)]
+        for k, flag, lo, hi in (("pace_s", "--pace", 0, 3600), ("day_cap", "--cap", 1, 2000),
+                                ("max_sessions", "--max", 1, 5000)):
+            v = payload.get(k)
+            if v not in (None, ""):
+                v = int(v)
+                if not lo <= v <= hi:
+                    raise HTTPException(status_code=400, detail=f"{k} must be {lo}..{hi}")
+                args += [flag, str(v)]
+        args.append("--prep")
+    pid = _spawn_replay(args)
+    return JSONResponse({"ok": True, "pid": pid, "args": args})
+
+
+@app.post("/forecast/replay/stop")
+def forecast_replay_stop(x_app_key: Optional[str] = Header(default=None)):
+    _require_app_key(x_app_key)
+    import forecast_replay as _fr
+    _fr.stop()
+    return JSONResponse({"ok": True, "note": "stops after the current session"})
 
 
 @app.post("/logout")

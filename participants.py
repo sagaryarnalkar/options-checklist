@@ -181,8 +181,10 @@ def ensure_history(conn) -> Optional[dict]:
     return backfill(conn, days=HIST_DAYS, pause=0.12)
 
 
-def latest(conn) -> dict:
-    d = conn.execute("SELECT MAX(d) FROM participant_oi").fetchone()[0]
+def latest(conn, until: Optional[str] = None) -> dict:
+    """The newest session's file (or the newest on/before `until`)."""
+    d = conn.execute("SELECT MAX(d) FROM participant_oi WHERE d<=?",
+                     (until or "9999-12-31",)).fetchone()[0]
     if not d:
         return {"ok": False, "reason": "no participant data yet"}
     prev = conn.execute("SELECT MAX(d) FROM participant_oi WHERE d<?", (d,)).fetchone()[0]
@@ -204,9 +206,11 @@ def latest(conn) -> dict:
 
 # ------------------------------------------------------------------ trend --
 
-def _sessions(conn) -> tuple:
-    """(dates, {class: {column: [values]}}) for sessions all four classes have."""
-    cur = conn.execute("SELECT * FROM participant_oi ORDER BY d")
+def _sessions(conn, until: Optional[str] = None) -> tuple:
+    """(dates, {class: {column: [values]}}) for sessions all four classes have,
+    on or before `until` (a replay must not see later files)."""
+    cur = conn.execute("SELECT * FROM participant_oi WHERE d<=? ORDER BY d",
+                       (until or "9999-12-31",))
     names = [c[0] for c in cur.description]
     by = {}
     for r in cur:
@@ -399,13 +403,15 @@ def _sentence(read: dict, w: int) -> str:
     return text[0].upper() + text[1:] + "."
 
 
-def history(conn, instrument: str = "idx_fut", window: int = 10) -> dict:
-    """Each class's positioning over the last `window` sessions, with reads."""
+def history(conn, instrument: str = "idx_fut", window: int = 10,
+            until: Optional[str] = None) -> dict:
+    """Each class's positioning over the last `window` sessions, with reads.
+    `until` cuts the data at a past session (forecast replay)."""
     if instrument not in INSTRUMENTS:
         return {"ok": False, "reason": f"instrument must be one of {list(INSTRUMENTS)}"}
     if window not in WINDOWS:
         return {"ok": False, "reason": f"window must be one of {list(WINDOWS)}"}
-    dates, data = _sessions(conn)
+    dates, data = _sessions(conn, until)
     if len(dates) <= window:
         return {"ok": False, "reason": f"only {len(dates)} sessions stored so far — the history "
                                        "fills in automatically after a restart"}
