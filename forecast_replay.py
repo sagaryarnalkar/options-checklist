@@ -29,9 +29,16 @@ still.
 COST. One Claude Code run per session on the owner's subscription (two model
 turns: the forecast, then the end of the turn). ~1,180 sessions since 2022 is
 a large job, so it is paced (`pace_s` between sessions), capped per IST day
-(`day_cap`), keeps clear of the live call's 20:15-22:45 window, and backs off
-on a usage-limit error instead of failing. Resumable: a stop, crash or app
-restart loses nothing; finished sessions are skipped.
+(`day_cap`), and on a usage-limit error sleeps until the reset time Claude
+Code quotes instead of failing. Resumable: a stop, crash or app restart loses
+nothing; finished sessions are skipped.
+
+SHARED LIMIT. Schooling, the live call, Ask Claude and the owner's own Claude
+use all draw on ONE subscription. A 5-hour session window that schooling
+drains just before 20:30 starves the live call (all four retries fail). So
+on weekdays no session STARTS from 15:15 to 22:45 IST: any window schooling
+opened has reset by 20:15. A WEEKLY limit stops the run outright - waiting
+days would lock the owner out of Claude meanwhile; that is their call.
 
 CLI: python3 forecast_replay.py prep [--since D] [--until D] [--redo]
      python3 forecast_replay.py run [--since D] [--until D] [--model M]
@@ -59,13 +66,22 @@ START = "2022-01-03"                       # first session of the Fyers archive
 STATUS_FILE = db.DATA_DIR / "forecast_replay_status.json"
 STOP_FILE = db.DATA_DIR / "forecast_replay_stop"
 LOG_FILE = db.DATA_DIR / "forecast_replay.log"
-QUIET = ((20, 15), (22, 45))               # the live call's window
+QUIET = ((15, 15), (22, 45))   # weekdays: a 5-h window opened before 15:15 resets by 20:15
 DEFAULT_PACE_S = 20
 DEFAULT_DAY_CAP = 250
 USAGE_BACKOFF_S = 1800
 MAX_FAILS_IN_ROW = 5
+# Claude Code says e.g. "You've hit your session limit · resets 8:10am (UTC)";
+# the old "hit your limit" alone missed it and five sessions failed instead.
 LIMIT_RE = re.compile(r"usage limit|rate.?limit|limit (reached|exceeded)|\b429\b|\b529\b|"
-                      r"overloaded|too many requests|hit your limit|quota", re.I)
+                      r"overloaded|too many requests|hit your (\w+[ -])*limit|"
+                      r"(session|weekly|daily|opus|sonnet|\d+.hour) limit|out of (extra )?usage|"
+                      r"quota", re.I)
+WEEKLY_RE = re.compile(r"weekly limit|week(ly)? usage", re.I)
+RESET_RE = re.compile(r"resets?\s+(?:at\s+)?(?:(?P<mon>[A-Z][a-z]{2})[a-z]*\s+(?P<day>\d{1,2}),?\s+"
+                      r"(?:at\s+)?)?(?P<h>\d{1,2})(?::(?P<m>\d{2}))?\s*(?P<ap>am|pm)?"
+                      r"(?:\s*\((?P<tz>[A-Za-z_]+(?:/[A-Za-z_]+)*)\))?", re.I)
+MONTHS = {m: i + 1 for i, m in enumerate("jan feb mar apr may jun jul aug sep oct nov dec".split())}
 AUTH_RE = re.compile(r"\b401\b|unauthori[sz]ed|invalid (api key|token|x-api-key)|"
                      r"authentication_error|please run /login|oauth token", re.I)
 
@@ -226,7 +242,48 @@ def replay_prompt(conn, d: str, seq: int) -> tuple:
     return text, {**base, "ref_close": bars[-1]["c"], "has_prev": prev is not None}
 
 
+def limit_reset(err: str, now: datetime) -> Optional[datetime]:
+    """When a usage limit lifts, from Claude Code's own message: 'resets
+    8:10am (UTC)', 'resets 3pm', 'resets Nov 12, 8am (Asia/Kolkata)', or the
+    older 'usage limit reached|<epoch>'. None when it cannot be read."""
+    from zoneinfo import ZoneInfo
+    m = re.search(r"\|(\d{10})\b", err)
+    if m:
+        return datetime.fromtimestamp(int(m.group(1)), IST)
+    m = RESET_RE.search(err)
+    if not m:
+        return None
+    h, mi, ap = int(m["h"]), int(m["m"] or 0), (m["ap"] or "").lower()
+    if ap == "pm" and h < 12:
+        h += 12
+    elif ap == "am" and h == 12:
+        h = 0
+    if h > 23 or mi > 59:
+        return None
+    try:
+        tz = ZoneInfo(m["tz"]) if m["tz"] else datetime.now().astimezone().tzinfo
+    except Exception:
+        tz = timezone.utc if (m["tz"] or "").upper() in ("UTC", "GMT") else None
+    if tz is None:
+        return None
+    loc = now.astimezone(tz)
+    if m["mon"]:
+        mon = MONTHS.get(m["mon"][:3].lower())
+        if not mon:
+            return None
+        t = loc.replace(month=mon, day=int(m["day"]), hour=h, minute=mi, second=0, microsecond=0)
+        if t < loc - timedelta(days=1):
+            t = t.replace(year=t.year + 1)
+    else:
+        t = loc.replace(hour=h, minute=mi, second=0, microsecond=0)
+        if t <= loc - timedelta(minutes=10):     # a reset minutes ago = clock skew, not tomorrow
+            t += timedelta(days=1)
+    return t.astimezone(IST)
+
+
 def _quiet_left(now: datetime) -> int:
+    if now.weekday() >= 5:                      # no live call on weekends
+        return 0
     a = now.replace(hour=QUIET[0][0], minute=QUIET[0][1], second=0, microsecond=0)
     b = now.replace(hour=QUIET[1][0], minute=QUIET[1][1], second=0, microsecond=0)
     return int((b - now).total_seconds()) if a <= now < b else 0
@@ -321,8 +378,19 @@ def run(since: str = START, until: Optional[str] = None, model: Optional[str] = 
         except Exception as e:
             err = f"{type(e).__name__}: {e}"[:600]
             if LIMIT_RE.search(err):
-                _log(f"{d}: usage limit - backing off ({err[:120]})")
-                if not _sleep(USAGE_BACKOFF_S, f"Claude usage limit: {err[:160]}"):
+                now = datetime.now(IST)
+                at = limit_reset(err, now)
+                if WEEKLY_RE.search(err):
+                    _status(error=f"weekly Claude limit - stopped (resets "
+                                  f"{at.strftime('%a %d %b %H:%M IST') if at else 'later'}); "
+                                  f"start again after that: {err[:200]}")
+                    _log(f"{d}: weekly limit - stopping ({err[:160]})")
+                    break
+                wait = int((at - now).total_seconds()) + 120 if at else USAGE_BACKOFF_S
+                wait = max(60, min(wait, 6 * 3600))
+                _log(f"{d}: usage limit - waiting {wait // 60} min ({err[:120]})")
+                if not _sleep(wait, "Claude usage limit"
+                              + (f" (resets {at.strftime('%H:%M')} IST)" if at else "")):
                     stopped = True
                     break
                 continue                                   # same session again
