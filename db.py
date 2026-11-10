@@ -220,6 +220,69 @@ CREATE TABLE IF NOT EXISTS market_forecast (
     PRIMARY KEY (underlying, as_of)
 );
 
+-- forecast_replay.py: the same call made day by day over PAST sessions, on a
+-- blinded briefing (no dates, no index levels, no tools). Kept apart from
+-- market_forecast so the live record stays a clean forward test.
+CREATE TABLE IF NOT EXISTS forecast_replay (
+    underlying       TEXT NOT NULL,
+    as_of            TEXT NOT NULL,       -- session whose close the call is made after
+    created_at       TEXT NOT NULL,
+    status           TEXT NOT NULL,       -- ok | failed | skipped
+    error            TEXT,
+    trigger          TEXT,
+    model            TEXT,
+    ref_close        REAL,
+    day_ret          REAL,                -- as_of's own move %, for the persistence baseline
+    week_ret         REAL,                -- last 5 sessions %, ditto for the 5-session call
+    base_p1          REAL,                -- trailing up-day share: the base-rate forecaster
+    base_p5          REAL,
+    p1               REAL,                -- P(next close > ref_close)
+    e1               REAL,                -- expected next-session change %
+    p5               REAL,
+    e5               REAL,
+    drivers_json     TEXT,
+    summary          TEXT,
+    invalidation     TEXT,
+    review_of_prev   TEXT,
+    lessons_json     TEXT,
+    briefing_json    TEXT,                -- exactly what the model was shown
+    tools_json       TEXT,                -- tool calls it made
+    usage_json       TEXT,
+    session_id       TEXT,
+    next_session     TEXT,
+    next_close       REAL,
+    ret1             REAL,
+    s5_session       TEXT,
+    s5_close         REAL,
+    ret5             REAL,
+    graded_at        TEXT,
+    postmortem       TEXT,                -- written by the NEXT night's run
+    seq              INTEGER,             -- session number shown to the model
+    PRIMARY KEY (underlying, as_of)
+);
+
+-- panel.py: every indicator for one session, built the same way live and in
+-- replay. states_json = the discretised readings the history stats count.
+CREATE TABLE IF NOT EXISTS forecast_panel (
+    underlying  TEXT NOT NULL,
+    d           TEXT NOT NULL,
+    panel_json  TEXT NOT NULL,
+    states_json TEXT NOT NULL,
+    source      TEXT,                 -- live | archive
+    built_at    TEXT,
+    PRIMARY KEY (underlying, d)
+);
+
+-- Official daily bars (Kite; Fyers 1D fills gaps) for NIFTY, BANKNIFTY and
+-- INDIA VIX: one source for panels, grading and replay.
+CREATE TABLE IF NOT EXISTS index_daily (
+    sym    TEXT NOT NULL,             -- NIFTY | BANKNIFTY | VIX
+    d      TEXT NOT NULL,
+    o REAL, h REAL, l REAL, c REAL,
+    source TEXT,
+    PRIMARY KEY (sym, d)
+);
+
 CREATE TABLE IF NOT EXISTS hold_baseline (
     d                TEXT NOT NULL,
     underlying       TEXT NOT NULL,
