@@ -371,7 +371,20 @@ def run(since: str = START, until: Optional[str] = None, model: Optional[str] = 
 
 # ----------------------------------------------------------------- public --
 
-def public(conn) -> dict:
+def plan(conn, since: str, until: Optional[str] = None) -> dict:
+    """What a run from `since` would replay: the same session list run() walks
+    (panels in [since, until]) minus the ones already called."""
+    until = until or _yesterday()
+    n = conn.execute("SELECT COUNT(*) FROM forecast_panel WHERE underlying=? AND d>=? AND d>=? "
+                     "AND d<=?", (F.UNDERLYING, START, since, until)).fetchone()[0]
+    done = conn.execute("SELECT COUNT(*) FROM forecast_panel p JOIN forecast_replay r "
+                        "ON r.underlying=p.underlying AND r.as_of=p.d AND r.status='ok' "
+                        "WHERE p.underlying=? AND p.d>=? AND p.d>=? AND p.d<=?",
+                        (F.UNDERLYING, START, since, until)).fetchone()[0]
+    return {"since": since, "until": until, "sessions": n, "done": done, "left": n - done}
+
+
+def public(conn, since: Optional[str] = None) -> dict:
     rows = F._load(conn, F.REPLAY)
     ok = [r for r in rows if r["status"] == "ok"]
     n_panels, p_first, p_last = conn.execute(
@@ -385,6 +398,7 @@ def public(conn) -> dict:
                                                            "last": p_last},
             "summary": F.schooling_summary(conn), "calls": calls,
             "failed": sum(1 for r in rows if r["status"] != "ok"),
+            "plan": plan(conn, since) if since else None,
             "defaults": {"since": START, "pace_s": DEFAULT_PACE_S, "day_cap": DEFAULT_DAY_CAP,
                          "model_cutoff": F.MODEL_CUTOFF}}
 

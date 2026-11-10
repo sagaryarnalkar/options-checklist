@@ -720,10 +720,14 @@ def _spawn_replay(args: list) -> int:
 
 
 @app.get("/forecast/replay")
-def forecast_replay_read():
+def forecast_replay_read(since: Optional[str] = None):
+    """?since=YYYY-MM-DD adds `plan`: how many sessions a run from that date
+    would replay (the Start confirm quotes it)."""
     import forecast_replay as _fr
+    if since is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", since):
+        raise HTTPException(400, "since must be YYYY-MM-DD")
     with db.get_conn() as conn:
-        return JSONResponse(_fr.public(conn))
+        return JSONResponse(_fr.public(conn, since))
 
 
 @app.post("/forecast/replay/start")
