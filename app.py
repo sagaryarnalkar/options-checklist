@@ -121,6 +121,14 @@ async def _startup():
         trigger=CronTrigger(hour=14, minute=30, day_of_week="mon-fri", timezone="UTC"),
         id="participants_pull", replace_existing=True, max_instances=1, coalesce=True,
     )
+    # Claude's nightly NIFTY call (forecast.py): after the 20:00 participant
+    # pull, with a retry that no-ops once the night's call exists.
+    _scheduler.add_job(
+        _forecast_tick,
+        trigger=CronTrigger(hour="15,16", minute="0,30", day_of_week="mon-fri", timezone="UTC"),
+        id="forecast_call", replace_existing=True, max_instances=1, coalesce=True,
+        misfire_grace_time=900,
+    )
     _scheduler.add_job(
         _weekly_review,
         trigger=CronTrigger(day_of_week="sat", hour=4, minute=30, timezone="UTC"),
@@ -649,6 +657,48 @@ async def assistant_conversations(scope: Optional[str] = None,
     import assistant as _as
     with db.get_conn() as conn:
         return JSONResponse({"ok": True, "conversations": _as.list_convs(conn, scope)})
+
+
+# ---------------------------------------------------------------- forecast --
+# Claude's nightly NIFTY call and its graded record (forecast.py). Reading is
+# public like the rest of the dashboard (market data only, nothing from the
+# book); starting a run spends the owner's Claude plan, so it needs the key.
+
+_bg_tasks: set = set()
+
+
+@app.get("/forecast")
+def forecast_read():
+    import forecast as _fc
+    with db.get_conn() as conn:
+        return JSONResponse(_fc.public(conn))
+
+
+@app.get("/forecast/briefing")
+def forecast_briefing(as_of: str):
+    """Exactly what the model was shown for one call (audit)."""
+    import forecast as _fc
+    with db.get_conn() as conn:
+        b = _fc.briefing_for(conn, as_of[:10])
+    if not b:
+        return JSONResponse({"ok": False, "reason": "no call for that session"}, status_code=404)
+    return JSONResponse({"ok": True, **b})
+
+
+@app.post("/forecast/run")
+async def forecast_run(x_app_key: Optional[str] = Header(default=None)):
+    """Start tonight's call now (it takes a minute or two); poll GET /forecast."""
+    _require_app_key(x_app_key)
+    import forecast as _fc
+    if _fc.running():
+        return JSONResponse({"ok": False, "reason": "a forecast run is already in progress"})
+    why = _fc.window_closed(_dt.datetime.now(_fc.IST))
+    if why:
+        return JSONResponse({"ok": False, "reason": why})
+    t = asyncio.create_task(_fc.run(trigger="manual"))
+    _bg_tasks.add(t)                     # keep a reference until it finishes
+    t.add_done_callback(_bg_tasks.discard)
+    return JSONResponse({"ok": True, "started": True})
 
 
 @app.post("/logout")
@@ -1532,6 +1582,21 @@ def _eod_tick():
             print(f"[eod] participants: {_p.backfill(conn, days=PARTICIPANT_LOOKBACK_DAYS)}")
     except Exception as e:
         print(f"[eod] participants failed: {type(e).__name__}: {e}")
+    try:
+        import forecast as _fc
+        print(f"[eod] forecast grading: {_fc.grade_now()}")
+    except Exception as e:
+        print(f"[eod] forecast grading failed: {type(e).__name__}: {e}")
+
+
+async def _forecast_tick():
+    """20:30 IST (and the retries): grade, then make tonight's call. A no-op
+    once the call for the latest session exists."""
+    import forecast as _fc
+    try:
+        await _fc.run(trigger="schedule")
+    except Exception as e:
+        print(f"[forecast] tick failed: {type(e).__name__}: {e}")
 
 
 def _equity_names(instruments) -> dict:

@@ -55,6 +55,18 @@ WORKDIR = db.DATA_DIR / "assistant"                 # Claude Code's cwd
 MCP_SERVER = "app"
 SCOPE_RE = re.compile(r"^(overall|[A-Z0-9&_-]{1,24})$")
 
+# Shared with forecast.py: what each of the app's reads is worth, from the
+# backtests. Keep it in step with CLAUDE.md "BACKTEST RESULTS".
+SIGNAL_WORTH = """# What the app's signals are worth (4.7-year replay, 2022-2026, matched controls)
+- OI-build "did it hold": validated — flagged contract-days kept their OI 69% vs 36% unflagged (NIFTY), 74% vs 51% (BANKNIFTY), every year. It shows positions persisting, NOT that price will respect the strike (untested).
+- OI-flow score markers: about a coin flip (51-52% vs a 51% baseline, under 1 bp). Do not treat them as directional calls.
+- Large-lot (LLT) futures prints: slightly WORSE than chance at 5 minutes (48.5%); fresh longs and fresh shorts tend to reverse a little.
+- WCash (writer mark-to-market): a loose state gauge (-0.28 with the day's |move|); its bull/bear tilt is coincident (+0.76 with the day's move, sign right 92%) and does not forecast the afternoon.
+- Max pain: no magnet — price moved toward it 48-52% of the time against 50% chance.
+- Expected-move band: the expiry close landed inside the implied 1-sigma band about 72% of the time (target 68%) — implied vol modestly rich to expiry; over one day roughly fair.
+- Hilega-Milega daily/weekly state and its fresh-buy rule: no edge since 2015 on 21 years of daily data. SRT (close / 124-day average) <= ~0.87 has historically been a good long-horizon entry zone; weekly SRT > 1.24 was followed by weak 1-year returns. Few independent episodes — treat as context, not timing.
+get_signal_track_record has the full figures."""
+
 SYSTEM_PROMPT = """You are the analysis assistant inside a self-hosted options dashboard. The user is an Indian index-options seller who trades NIFTY and BANKNIFTY (and some stock options, mostly cash-secured puts) through Zerodha Kite. You help them understand and manage their LIVE positions using the data this application has.
 
 # What you can see
@@ -80,15 +92,7 @@ Every question arrives with an <app_context> block: a fresh snapshot taken when 
 - Mention the risks that actually apply: gap/event risk overnight and over weekends, expiry-day gamma, liquidity at far strikes, assignment for stock puts.
 - A one-line caveat is enough; no boilerplate disclaimers. You are not a registered adviser and the user makes the decisions — say that only if they ask you to decide for them.
 
-# What the app's signals are worth (4.7-year replay, 2022-2026, matched controls)
-- OI-build "did it hold": validated — flagged contract-days kept their OI 69% vs 36% unflagged (NIFTY), 74% vs 51% (BANKNIFTY), every year. It shows positions persisting, NOT that price will respect the strike (untested).
-- OI-flow score markers: about a coin flip (51-52% vs a 51% baseline, under 1 bp). Do not treat them as directional calls.
-- Large-lot (LLT) futures prints: slightly WORSE than chance at 5 minutes (48.5%); fresh longs and fresh shorts tend to reverse a little.
-- WCash (writer mark-to-market): a loose state gauge (-0.28 with the day's |move|); its bull/bear tilt is coincident (+0.76 with the day's move, sign right 92%) and does not forecast the afternoon.
-- Max pain: no magnet — price moved toward it 48-52% of the time against 50% chance.
-- Expected-move band: the expiry close landed inside the implied 1-sigma band about 72% of the time (target 68%) — implied vol modestly rich to expiry; over one day roughly fair.
-- Hilega-Milega daily/weekly state and its fresh-buy rule: no edge since 2015 on 21 years of daily data. SRT (close / 124-day average) <= ~0.87 has historically been a good long-horizon entry zone; weekly SRT > 1.24 was followed by weak 1-year returns. Few independent episodes — treat as context, not timing.
-get_signal_track_record has the full figures.
+""" + SIGNAL_WORTH + """
 
 # The saved strategies (the app builds and paper-trades these)
 Golden Goose (BB-21 daily midline cross → monthly 100-pt credit spread, roll T-7); Panther (CMF-21 zero-cross → monthly credit spread, wing 200-400); Nidhi Kalash (EMA-53 daily close cross → monthly credit spread ≥0.5% OTM); Ocean Treasure (2h VWMA-21 cross → sell quarter-end option + monthly hedge); GG LEAPS (BB-21 → quarter-end LEAPS short + ~2% further-OTM monthly hedge); EDB (Monday before weekly expiry → call + put butterflies, exit Tuesday); Batman and No Brainer (last Friday → call 1-2-1, next month); Matrix Calendar (Mondays when VIX > 20 → ratio calendar); Triple Calendar (always-on weekly calendars, VIX 10-22). get_strategy_recommendations and get_paper_book show today's builds and the paper book."""
@@ -819,14 +823,20 @@ def _rate_ok() -> bool:
     return True
 
 
-def _mcp_tools(ctx: ToolContext) -> list:
-    """The ten read-only tools as an in-process MCP server's tool list. Built
-    per question so each handler sees that question's Kite session."""
+def _mcp_tools(ctx: ToolContext, names: Optional[set] = None, log: Optional[list] = None) -> list:
+    """The read-only tools (all ten, or `names`) as an in-process MCP server's
+    tool list. Built per question so each handler sees that question's Kite
+    session. `log` collects (name, args, is_error) for an audit trail."""
     from claude_agent_sdk import ToolAnnotations, tool
     out = []
     for t in TOOLS:
+        if names is not None and t["name"] not in names:
+            continue
         async def handler(args, _name=t["name"]):
             content, is_err = await asyncio.to_thread(run_tool, ctx, _name, args)
+            if log is not None:
+                log.append({"tool": _name, "args": args, "error": is_err,
+                            "chars": len(content)})
             res = {"content": [{"type": "text", "text": content}]}
             if is_err:
                 res["is_error"] = True

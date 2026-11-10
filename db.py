@@ -180,6 +180,46 @@ CREATE TABLE IF NOT EXISTS assistant_conv (
 );
 CREATE INDEX IF NOT EXISTS idx_assistant_conv_scope ON assistant_conv(scope, updated);
 
+-- forecast.py: Claude's nightly NIFTY direction call, graded against the
+-- official closes. One row per session; a status='ok' row is never rewritten
+-- except to fill its outcome columns (no re-rolling a call you dislike).
+CREATE TABLE IF NOT EXISTS market_forecast (
+    underlying       TEXT NOT NULL,
+    as_of            TEXT NOT NULL,       -- session whose close the call is made after
+    created_at       TEXT NOT NULL,
+    status           TEXT NOT NULL,       -- ok | failed | skipped
+    error            TEXT,
+    trigger          TEXT,
+    model            TEXT,
+    ref_close        REAL,
+    day_ret          REAL,                -- as_of's own move %, for the persistence baseline
+    week_ret         REAL,                -- last 5 sessions %, ditto for the 5-session call
+    base_p1          REAL,                -- trailing up-day share: the base-rate forecaster
+    base_p5          REAL,
+    p1               REAL,                -- P(next close > ref_close)
+    e1               REAL,                -- expected next-session change %
+    p5               REAL,
+    e5               REAL,
+    drivers_json     TEXT,
+    summary          TEXT,
+    invalidation     TEXT,
+    review_of_prev   TEXT,
+    lessons_json     TEXT,
+    briefing_json    TEXT,                -- exactly what the model was shown
+    tools_json       TEXT,                -- tool calls it made
+    usage_json       TEXT,
+    session_id       TEXT,
+    next_session     TEXT,
+    next_close       REAL,
+    ret1             REAL,
+    s5_session       TEXT,
+    s5_close         REAL,
+    ret5             REAL,
+    graded_at        TEXT,
+    postmortem       TEXT,                -- written by the NEXT night's run
+    PRIMARY KEY (underlying, as_of)
+);
+
 CREATE TABLE IF NOT EXISTS hold_baseline (
     d                TEXT NOT NULL,
     underlying       TEXT NOT NULL,
