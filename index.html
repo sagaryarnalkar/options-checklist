@@ -4197,6 +4197,33 @@
       renderSchool(await r.json());
     } catch (e) { el.innerHTML = `<h4>Schooling</h4><div class="fc-m">unavailable (${esc(e.message)})</div>`; }
   }
+  // How many sessions a run from the chosen date would replay. The run walks
+  // panels from `since`, so the count must too (the old confirm quoted every
+  // panel since 2022 whatever date was picked).
+  function fcDateY(d){
+    const x = new Date(d + "T00:00:00");
+    return isNaN(x) ? d : x.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  }
+  function fcPlanText(pl){
+    const cap = Math.max(1, +(document.getElementById("fcCap") || {}).value || 250);
+    const days = Math.ceil(pl.left / cap);
+    return `${pl.left.toLocaleString("en-IN")} session${pl.left === 1 ? "" : "s"} to replay`
+      + (pl.done ? ` (${pl.done.toLocaleString("en-IN")} of ${pl.sessions.toLocaleString("en-IN")} from that date already done)` : "")
+      + ` = ${pl.left.toLocaleString("en-IN")} Claude run${pl.left === 1 ? "" : "s"}, `
+      + (days <= 1 ? "within a day at this max/day." : `about ${days} days at ${cap}/day.`);
+  }
+  async function fcPlan(){
+    const since = (document.getElementById("fcSince") || {}).value;
+    const out = document.getElementById("fcPlan");
+    if (!since) return null;
+    try {
+      const r = await fetch("/forecast/replay?since=" + encodeURIComponent(since), { cache: "no-store" });
+      const j = await r.json();
+      if (!r.ok || !j.plan) throw new Error("HTTP " + r.status);
+      if (out) out.textContent = `From ${fcDateY(j.plan.since)}: ${fcPlanText(j.plan)}`;
+      return j.plan;
+    } catch (e) { if (out) out.textContent = ""; return null; }
+  }
   function renderSchool(s){
     const el = document.getElementById("fcSchool");
     if (!el) return;
@@ -4220,19 +4247,17 @@
       ${calls.map(c => { const [a1, k1] = fcSide(c.p1); return `<tr><td>${fcDate(c.as_of)} · S${c.seq}</td><td style="color:var(${k1})">${a1}</td><td>${fcPct(c.ret1)}</td>
         <td>${fcMark(fcRight(c.p1, c.ret1))}</td><td class="txt">${esc(c.postmortem || "")}</td></tr>`; }).join("")}</table></div>` : "";
     const key = posKey();
-    const left = Math.max(0, (pn.count || 0) - ((sm && sm.sessions_replayed) || 0));
     const ctl = key ? `<div class="fc-actions" style="margin-top:8px">
         <button type="button" id="fcPrepBtn" ${running ? "disabled" : ""}>Build panels only (free)</button>
-        <label>from <input id="fcSince" type="date" value="${esc(df.since || "2022-01-03")}" style="font:inherit;font-size:11px"></label>
+        <label>from <input id="fcSince" type="date" value="${esc(st.since || df.since || "2022-01-03")}" style="font:inherit;font-size:11px"></label>
         <label>model <select id="fcModel" style="font:inherit;font-size:11px"><option value="">plan default</option><option>sonnet</option><option>opus</option><option>haiku</option></select></label>
         <label>pause <input id="fcPace" type="number" min="0" max="3600" value="${df.pace_s || 20}" style="width:56px;font:inherit;font-size:11px">s</label>
         <label>max/day <input id="fcCap" type="number" min="1" max="2000" value="${df.day_cap || 250}" style="width:60px;font:inherit;font-size:11px"></label>
         <button type="button" id="fcRunReplay" ${running ? "disabled" : ""}>Start schooling</button>
         <button type="button" id="fcStopReplay" ${running ? "" : "disabled"}>Stop</button>
         <span id="fcSchoolMsg"></span></div>
-      <div class="fc-m" style="margin-top:4px">Each replayed session is one Claude run on your subscription. ${left ? `About ${left.toLocaleString("en-IN")} sessions are left` : "Build the panels first to see how many sessions there are"}; at the
-        default pace and cap that is several days, and it uses a real share of your plan's limits. It pauses on a usage-limit error, keeps clear of the 20:30 live call, and
-        resumes where it stopped.</div>` : `<div class="fc-m" style="margin-top:6px">Starting it needs the app key (enter it once on the Positions tab).</div>`;
+      <div class="fc-m" style="margin-top:4px">Each replayed session is one Claude run on your subscription. <span id="fcPlan">${pn.count ? "" : "Build the panels first to see how many sessions there are."}</span>
+        It pauses on a usage-limit error, keeps clear of the 20:30 live call, and resumes where it stopped.</div>` : `<div class="fc-m" style="margin-top:6px">Starting it needs the app key (enter it once on the Positions tab).</div>`;
     el.innerHTML = `<h4>Schooling — the same call replayed over past sessions, blind</h4>
       <div class="fc-m" style="line-height:1.5">One session at a time from the start of the data: no dates, no index levels, no tools; each call graded only with what was known then,
         its post-mortem and lessons carried to the next. Panels: ${pn.count ? `${pn.count.toLocaleString("en-IN")} sessions (${fcDate(pn.first)} → ${fcDate(pn.last)})` : "none yet"}.
@@ -4250,8 +4275,12 @@
     };
     const b1 = document.getElementById("fcPrepBtn"), b2 = document.getElementById("fcRunReplay"), b3 = document.getElementById("fcStopReplay");
     if (b1) b1.onclick = () => post("/forecast/replay/start", { mode: "prep", since: document.getElementById("fcSince").value });
-    if (b2) b2.onclick = () => {
-      if (!confirm("Start schooling? Each past session is one Claude run on your subscription — about " + (left || "1,000+") + " runs, paced over several days.")) return;
+    const sinceEl = document.getElementById("fcSince"), capEl = document.getElementById("fcCap");
+    if (sinceEl && pn.count) { sinceEl.onchange = capEl.onchange = () => fcPlan(); fcPlan(); }
+    if (b2) b2.onclick = async () => {
+      const pl = await fcPlan();
+      if (pl && !pl.left) { document.getElementById("fcSchoolMsg").textContent = "nothing left to replay from that date"; return; }
+      if (!confirm(pl ? `Start schooling from ${fcDateY(pl.since)}? ${fcPlanText(pl)}` : "Start schooling? Each past session is one Claude run on your subscription.")) return;
       post("/forecast/replay/start", { mode: "run", since: document.getElementById("fcSince").value,
         model: document.getElementById("fcModel").value, pace_s: document.getElementById("fcPace").value,
         day_cap: document.getElementById("fcCap").value });
