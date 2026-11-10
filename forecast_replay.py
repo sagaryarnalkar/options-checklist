@@ -275,7 +275,7 @@ def run(since: str = START, until: Optional[str] = None, model: Optional[str] = 
     days = [d for d in all_days if since <= d <= until]
     _status(running=True, phase="run", since=since, until=until, model=model or F.MODEL
             or "plan default", pace_s=pace_s, day_cap=day_cap, total=len(days),
-            paused=None, error=None, stopped=False)
+            paused=None, error=None, stopped=False, step=None, progress=None, day=None)
     _log(f"run: {len(days)} sessions {since}..{until}, model={model or F.MODEL or 'default'}")
     made = failed = in_row = 0
     usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0}
