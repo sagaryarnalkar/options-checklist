@@ -4257,7 +4257,8 @@
         <button type="button" id="fcStopReplay" ${running ? "" : "disabled"}>Stop</button>
         <span id="fcSchoolMsg"></span></div>
       <div class="fc-m" style="margin-top:4px">Each replayed session is one Claude run on your subscription. <span id="fcPlan">${pn.count ? "" : "Build the panels first to see how many sessions there are."}</span>
-        It pauses on a usage-limit error, keeps clear of the 20:30 live call, and resumes where it stopped.</div>` : `<div class="fc-m" style="margin-top:6px">Starting it needs the app key (enter it once on the Positions tab).</div>`;
+        It shares your Claude plan's limits with the live call, Ask Claude and your own Claude use. On a limit it waits for the reset time Claude quotes
+        (a weekly limit stops it instead); on weekdays it starts no session between 15:15 and 22:45 IST, so the 20:30 live call always has room. It resumes where it stopped.</div>` : `<div class="fc-m" style="margin-top:6px">Starting it needs the app key (enter it once on the Positions tab).</div>`;
     el.innerHTML = `<h4>Schooling — the same call replayed over past sessions, blind</h4>
       <div class="fc-m" style="line-height:1.5">One session at a time from the start of the data: no dates, no index levels, no tools; each call graded only with what was known then,
         its post-mortem and lessons carried to the next. Panels: ${pn.count ? `${pn.count.toLocaleString("en-IN")} sessions (${fcDate(pn.first)} → ${fcDate(pn.last)})` : "none yet"}.
