@@ -468,7 +468,7 @@ def public(conn, since: Optional[str] = None) -> dict:
             "failed": sum(1 for r in rows if r["status"] != "ok"),
             "plan": plan(conn, since) if since else None,
             "defaults": {"since": START, "pace_s": DEFAULT_PACE_S, "day_cap": DEFAULT_DAY_CAP,
-                         "model_cutoff": F.MODEL_CUTOFF}}
+                         "model_cutoff": F.MODEL_CUTOFF, "model": F.MODEL}}
 
 
 def stop() -> None:

@@ -53,7 +53,10 @@ import panel
 IST = timezone(timedelta(hours=5, minutes=30))
 UNDERLYING = "NIFTY"
 LIVE, REPLAY = "market_forecast", "forecast_replay"
-MODEL = os.environ.get("FORECAST_MODEL") or os.environ.get("ASSISTANT_MODEL") or None
+# Opus by default (owner's choice, 2026-11-11). FORECAST_MODEL overrides; the
+# chat's ASSISTANT_MODEL no longer leaks in (it silently made the nightly call
+# run on the plan default while schooling ran on Opus).
+MODEL = os.environ.get("FORECAST_MODEL") or "opus"
 # the model's training cutoff: replayed sessions before it may be remembered
 MODEL_CUTOFF = os.environ.get("FORECAST_MODEL_CUTOFF") or "2026-06-30"
 MAX_STEPS = 16                          # agent turns, incl. the structured-output call
@@ -106,9 +109,16 @@ SCHEMA = {
             "description": "One reading for EVERY indicator family — none may be skipped.",
             "properties": {f: dict(_READING, description=desc) for f, desc in FACTORS.items()},
             "required": list(FACTORS)},
-        "summary": {"type": "string", "description": "The call in plain words, 2-5 sentences."},
-        "invalidation": {"type": "string",
-                         "description": "What would show the call is wrong early."},
+        "summary": {"type": "string", "description": (
+            "Shown to the trader as the headline explanation. Plain English, 2-4 short "
+            "sentences: what you expect and how strongly (say plainly when it is close to a "
+            "coin flip), then the one or two readings that decided it. Percentages (52%), "
+            "never decimals (0.52); no internal codes or snake_case (bull_hold, vs_sma20, "
+            "history_stats); name indicators as a trader would ('the 20-day average', "
+            "'FII index futures').")},
+        "invalidation": {"type": "string", "description": (
+            "Plain English, one or two sentences: the price level or event that would show "
+            "early that the call is wrong.")},
         "review_of_previous": {
             "type": "string",
             "description": "Review of the previous call shown in the briefing (outcome AND "
@@ -847,6 +857,24 @@ def history_view(conn) -> Optional[dict]:
     return {"as_of": r["d"], **hs}
 
 
+def _market_context(conn, d: str) -> Optional[dict]:
+    """The options market's own size estimate for the next session, from the
+    panel the call read (pulse's ATM-IV sigma: one weekday band held 66.8% of
+    NIFTY sessions over 4.7 years). None on an expiry close (no time value)."""
+    try:
+        r = conn.execute("SELECT panel_json FROM forecast_panel WHERE underlying=? AND d=?",
+                         (UNDERLYING, d)).fetchone()
+        if not r:
+            return None
+        v = (json.loads(r[0]) or {}).get("volatility") or {}
+        out = {k: v.get(k) for k in ("one_day_sigma_pct", "atm_iv_pct", "vix", "vix_rank_1y_pct",
+                                     "to_expiry_one_sigma_pct", "to_expiry_days")
+               if v.get(k) is not None}
+        return out or None
+    except Exception:
+        return None
+
+
 def public(conn) -> dict:
     rows = _load(conn)
     ok = [r for r in rows if r["status"] == "ok"]
@@ -881,7 +909,17 @@ def public(conn) -> dict:
         hv = history_view(conn)
     except Exception as e:
         hv = {"error": f"{type(e).__name__}: {e}"}
-    return {"ok": True, "underlying": UNDERLYING, "latest": card(latest),
+    try:
+        sch = schooling_summary(conn)
+        sch = {k: sch[k] for k in ("sessions_replayed", "first", "last", "model_cutoff",
+                                   "all", "before_cutoff", "after_cutoff")} if sch else None
+    except Exception:
+        sch = None
+    lc = card(latest)
+    if lc:
+        lc["context"] = _market_context(conn, lc["as_of"])
+    return {"ok": True, "underlying": UNDERLYING, "latest": lc, "schooling": sch,
+            "model_default": MODEL,
             "record": record(rows), "calls": calls, "failed": failed,
             "last_run": last_run(), "running": running(), "history_says": hv,
             "schedule": "Mon-Fri 20:30 IST, retry until 22:00 IST; graded at 17:45 IST and "
