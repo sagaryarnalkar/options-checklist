@@ -41,7 +41,7 @@ from typing import Optional
 import db
 
 IST = timezone(timedelta(hours=5, minutes=30))
-MODEL = os.environ.get("ASSISTANT_MODEL") or None      # None = the plan's default
+MODEL = os.environ.get("ASSISTANT_MODEL") or "opus"    # owner's choice (2026-11-11); env overrides
 EFFORT = os.environ.get("ASSISTANT_EFFORT") or None
 MAX_TURNS_PER_HOUR = int(os.environ.get("ASSISTANT_MAX_TURNS_PER_HOUR", "40"))
 MAX_STEPS = 12                  # agent turns per question (tool rounds)
@@ -850,8 +850,9 @@ def _options(c: dict, ctx: ToolContext):
     from claude_agent_sdk import ClaudeAgentOptions, create_sdk_mcp_server
     WORKDIR.mkdir(parents=True, exist_ok=True)
     kw = {}
-    if c.get("model"):
-        kw["model"] = c["model"]
+    m = c.get("model") or MODEL        # chats started before #108 stored None = plan default
+    if m:
+        kw["model"] = m
     if EFFORT:
         kw["effort"] = EFFORT
     return ClaudeAgentOptions(
@@ -906,7 +907,7 @@ async def chat_turn(conv_id: Optional[str], scope: str, question: str,
     async with lock, _one_at_a_time():
         ctx = ToolContext()
         context = await asyncio.to_thread(build_context, ctx, scope, focus)
-        yield {"type": "meta", "conversation_id": c["id"], "model": c.get("model") or "plan default"}
+        yield {"type": "meta", "conversation_id": c["id"], "model": c.get("model") or MODEL or "plan default"}
         usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
                  "cache_creation_input_tokens": 0, "model_calls": 0, "tool_calls": 0}
         answer = ""
