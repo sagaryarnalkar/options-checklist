@@ -92,6 +92,10 @@ async def _startup():
     """
     global _scheduler
     db.init_db()
+    # Option Hub runs inside this service (option_hub.RUNTIME): install/build/supervise in a
+    # background thread, so one restart deploys both. No-op until OPTION_HUB_URL is set.
+    import option_hub as _oh
+    _oh.RUNTIME.start()
     if os.environ.get("DISABLE_OI_RECORDER", "").lower() in ("1", "true", "yes"):
         return
     _scheduler = AsyncIOScheduler(timezone="UTC")
@@ -161,6 +165,8 @@ async def _shutdown():
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+    import option_hub as _oh
+    await asyncio.get_running_loop().run_in_executor(None, _oh.RUNTIME.stop)
 
 
 @app.get("/healthz")
@@ -729,6 +735,18 @@ def hub_feed_profile(x_hub_feed: Optional[str] = Header(default=None)):
     _hub_feed_auth(x_hub_feed)
     import hub_feed as _hf
     return _hub_feed_call(lambda: JSONResponse({"status": "success", "data": _hf.profile()}))
+
+
+@app.post("/hub/runtime/build")
+def hub_runtime_build(force: bool = False, x_app_key: Optional[str] = Header(default=None)):
+    """'Build now' in the tab: retry a failed build at once; force=true also ignores the
+    no-builds-in-market-hours rule (the build takes ~1.2 GB RAM and a minute of CPU)."""
+    _require_app_key(x_app_key)
+    import option_hub as _oh
+    if not _oh.hub_url():
+        raise HTTPException(status_code=503, detail="Option Hub is not set up — run deploy/option_hub.sh once")
+    _oh.RUNTIME.request_build(force)
+    return JSONResponse({"ok": True, "runtime": _oh.RUNTIME.snapshot()})
 
 
 @app.post("/hub/session")

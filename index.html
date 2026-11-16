@@ -900,6 +900,9 @@
   .hub-steps code, .hub-about code{ font-family:var(--mono); font-size:.92em; }
   .hub-about{ margin-top:12px; }
   .hub-about summary{ cursor:pointer; color:var(--muted); }
+  .hub-log{ margin:8px 0 0; max-height:220px; overflow:auto; font-family:var(--mono); font-size:.8em; line-height:1.45;
+    background:var(--panel-2); border:1px solid var(--border); border-radius:8px; padding:8px 10px; white-space:pre-wrap; word-break:break-word; }
+  .hub-build-row{ margin-top:8px; display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
   .hub-about p{ margin:8px 0 0; line-height:1.55; color:var(--muted); }
   @media (max-width:640px){ .hub-frame-wrap iframe{ height:calc(100vh - 150px); } }
   .pos-gate-form{ display:flex; gap:8px; flex-wrap:wrap; }
@@ -2023,12 +2026,16 @@
   // the cookie Caddy demands at hub.<domain>; only then is the iframe pointed at it. The frame
   // loads once per page view — switching tabs keeps its state.
   let _hubInited = false, _hubLoaded = false, _hubBusy = false, _hubAwayTimer = null;
+  let _hubActive = false, _hubPollTimer = null;
   const HUB_UNLOAD_AFTER_MS = 5 * 60 * 1000;
+  const HUB_POLL_MS = 10 * 1000;   // while the server installs/builds it
 
   // Called on every tab switch. Away from this tab for 5 min → unload the frame: his app keeps
   // polling chains in the background (it records history every 15 s on any screen), and each
   // poll in market hours can cost a Kite top-up on our server.
   function hubTabChanged(key){
+    _hubActive = key === "hub";
+    if (!_hubActive){ clearTimeout(_hubPollTimer); _hubPollTimer = null; }
     if (key === "hub"){ clearTimeout(_hubAwayTimer); _hubAwayTimer = null; return; }
     if (!_hubLoaded || _hubAwayTimer) return;
     _hubAwayTimer = setTimeout(() => {
@@ -2047,6 +2054,41 @@
   }
 
   function hubNote(html){ document.getElementById("hubNote").innerHTML = html || ""; }
+
+  // The server installs, builds and runs the hub itself (option_hub.py RUNTIME). While it is not
+  // up, say what it is doing; keep checking while it installs or builds.
+  const HUB_STATES = {
+    off: "Starting…", starting: "Starting…", running: "Starting…",
+    installing: "Installing on the server", building: "Building on the server",
+    restarting: "Restarting", waiting: "Waiting for the market to close",
+    low_memory: "Not enough memory to build", failed: "Install failed",
+    other_worker: "Run by another app process", external: "Run outside this app",
+  };
+  function hubRuntimeNote(rt){
+    const st = rt.state || "off";
+    // only called while its two ports are not answering yet, so "running" = just spawned
+    const busy = ["off", "starting", "running", "installing", "building", "restarting"].includes(st);
+    let html = `<div class="note"><b>${esc(HUB_STATES[st] || st)}</b>${rt.detail ? " — " + esc(rt.detail) : ""}`;
+    if (busy) html += `<br>This tab checks again by itself every ${HUB_POLL_MS / 1000} s. The first install takes a few minutes.`;
+    if (st === "waiting" || st === "failed")
+      html += `<div class="hub-build-row"><button type="button" class="live-refresh" id="hubBuildNow">Build now</button>
+        <span class="pos-sub">${st === "waiting" ? "uses ~1.2 GB RAM and a minute of CPU next to the recorder" : "retries the install at once"}</span></div>`;
+    if ((rt.log_tail || []).length) html += `<div class="hub-log">${esc(rt.log_tail.join("\n"))}</div>`;
+    html += `</div>`;
+    hubNote(html);
+    const b = document.getElementById("hubBuildNow");
+    if (b) b.addEventListener("click", () => hubBuildNow(st === "waiting"));
+    clearTimeout(_hubPollTimer);
+    if (busy && _hubActive) _hubPollTimer = setTimeout(hubLoad, HUB_POLL_MS);
+  }
+
+  async function hubBuildNow(force){
+    if (!posKey()){ hubShowGate(); return; }
+    const r = await fetch("/hub/runtime/build" + (force ? "?force=true" : ""),
+                          { method: "POST", headers: { "X-App-Key": posKey() } }).catch(() => null);
+    if (r && r.status === 401){ posSetKey(""); hubShowGate("That key was not accepted — enter the ASSISTANT_KEY from the server's .env."); return; }
+    setTimeout(hubLoad, 1500);
+  }
 
   function initHubTab(){
     if (!_hubInited){
@@ -2078,10 +2120,17 @@
       if (!st){ hubNote(`<div class="note">Could not reach the dashboard server.</div>`); return; }
       if (!st.configured){
         sub.textContent = " · not set up on the server yet";
-        hubNote(`<div class="note">Option Hub is not installed on the server yet. On the droplet, from the app folder, run:
-          <ol class="hub-steps"><li><code>git pull</code></li><li><code>bash deploy/option_hub.sh</code></li></ol>
-          It builds Mr. Chartist's app outside this repo, starts it as the <code>option-hub</code> user service, adds a locked
-          <code>hub.</code> site to Caddy (it asks for sudo), sets <code>OPTION_HUB_URL</code> in .env and restarts this app.</div>`);
+        hubNote(`<div class="note">One-time setup. On the droplet, from the app folder, run
+          <ol class="hub-steps"><li><code>bash deploy/option_hub.sh</code></li></ol>
+          It adds the hub's locked <code>hub.</code> address to Caddy (asks for sudo once), sets <code>OPTION_HUB_URL</code>
+          and restarts this app, which then downloads, builds and runs Mr. Chartist's app by itself. After that there is
+          nothing separate to maintain: the usual <code>git pull</code> + restart updates both.</div>`);
+        return;
+      }
+      const rt = st.runtime || {};
+      if (!(st.frontend_ok && st.proxy_ok)){
+        sub.textContent = "";
+        hubRuntimeNote(rt);
         return;
       }
       if (!posKey()){ hubShowGate(); hubNote(""); return; }
@@ -2093,15 +2142,12 @@
         return;
       }
       document.getElementById("hubGate").style.display = "none";
-      const down = [];
-      if (!st.frontend_ok) down.push("its web app");
-      if (!st.proxy_ok) down.push("its data proxy");
       const kf = st.kite_feed || {};
       const tops = Object.values(kf.topups || {});
       const feedTxt = tops.length && Math.min(...tops) <= 90 ? " · chain from Kite via the dashboard" : "";
-      sub.textContent = down.length ? "" : " · running on our server · only you can open it" + feedTxt;
-      hubNote(down.length ? `<div class="note">The server is not answering for ${down.join(" and ")}. On the droplet:
-        <code>systemctl --user status option-hub</code> · logs <code>journalctl --user -u option-hub -n 80 --no-pager</code></div>` : "");
+      sub.textContent = " · running on our server · only you can open it" + feedTxt;
+      // running an older build while the pinned update waits (market hours / memory / failure)
+      hubNote(rt.detail ? `<div class="note">${esc(rt.detail)}</div>` : "");
       // Through serve.mjs's seed page: saves the placeholder Zerodha entry his app needs to ask
       // our Kite feed for the chain (once), then redirects into his app.
       const start = st.url + "/api/_options-checklist/seed?next=%2F";
