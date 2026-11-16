@@ -449,7 +449,36 @@ export function isVaultLocked(): boolean {
   return getStorageState() === "encrypted" && unlocked === null;
 }
 
+// ── options-checklist: the dashboard's Kite login as a built-in broker ──
+// Built for our dashboard (VITE_DASHBOARD_KITE=1), the hub's server answers every Zerodha call from the
+// dashboard's own Kite login (server/dashboard.mjs) and ignores browser-side Zerodha keys. So Zerodha is
+// listed as a saved broker even when nothing is stored. The values are placeholders the server never
+// forwards; the entry is never written to storage (addedAt "" marks it).
+const DASHBOARD_KITE = import.meta.env.VITE_DASHBOARD_KITE === "1";
+export const DASHBOARD_KITE_VALUES: Readonly<Record<string, string>> = {
+  apiKey: "dashboard-feed",
+  apiSecret: "not-used",
+  accessToken: "dashboard-feed",
+};
+
+export function isDashboardKiteBuild(): boolean {
+  return DASHBOARD_KITE;
+}
+
+function withDashboardKite(list: BrokerCredentials[]): BrokerCredentials[] {
+  if (!DASHBOARD_KITE || list.some((b) => b.brokerId === "zerodha")) return list;
+  return [...list, { brokerId: "zerodha", values: { ...DASHBOARD_KITE_VALUES }, addedAt: "", isActive: !list.some((b) => b.isActive) }];
+}
+
+function isBuiltInEntry(b: BrokerCredentials): boolean {
+  return DASHBOARD_KITE && b.brokerId === "zerodha" && b.addedAt === "";
+}
+
 export function getSavedBrokers(): BrokerCredentials[] {
+  return withDashboardKite(getStoredBrokers());
+}
+
+function getStoredBrokers(): BrokerCredentials[] {
   const state = getStorageState();
   if (state === "encrypted") {
     if (unlocked && !vaultMatchesKey()) {
@@ -475,7 +504,7 @@ export const LEGACY_SESSION_REFUSED =
   "A trading session token is never saved in plain browser storage.";
 
 async function persist(list: BrokerCredentials[]): Promise<void> {
-  const clean = sanitizeCredentials(list);
+  const clean = sanitizeCredentials(list.filter((b) => !isBuiltInEntry(b)));
   const state = getStorageState();
   if (state === "encrypted") {
     if (!vaultKey) throw new Error("Vault is locked. Unlock it with your passphrase first.");
@@ -507,7 +536,7 @@ export async function saveBrokerCredentials(creds: Omit<BrokerCredentials, "isAc
   const next: BrokerCredentials = {
     brokerId: creds.brokerId,
     values: creds.values,
-    addedAt: idx >= 0 ? existing[idx].addedAt : creds.addedAt,
+    addedAt: idx >= 0 && existing[idx].addedAt ? existing[idx].addedAt : creds.addedAt || new Date().toISOString(),
     isActive,
   };
   if (idx >= 0) existing[idx] = next;
@@ -540,7 +569,7 @@ export function getDhanCredentials(): { clientId: string; accessToken: string } 
 
 /** Switch to session-only storage. Moves current credentials (if readable) and wipes the vault and legacy copy. */
 export async function switchToSessionMode(): Promise<void> {
-  const current = getSavedBrokers();
+  const current = getStoredBrokers();
   writeStorage("local", VAULT_KEY, null);
   writeStorage("local", LEGACY_KEY, null);
   writeStorage("local", MODE_KEY, "session");
@@ -553,7 +582,7 @@ export async function switchToSessionMode(): Promise<void> {
 /** Switch to encrypted storage with a new passphrase, moving current credentials into the vault. */
 export async function enableEncryptedMode(passphrase: string): Promise<void> {
   if (passphrase.length < 8) throw new Error("Use a passphrase of at least 8 characters.");
-  const current = sanitizeCredentials(getSavedBrokers());
+  const current = sanitizeCredentials(getStoredBrokers());
   const salt = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const key = await deriveKey(passphrase, salt, PBKDF2_ITERATIONS);
   const blob = await encryptWithKey(key, salt, PBKDF2_ITERATIONS, current);

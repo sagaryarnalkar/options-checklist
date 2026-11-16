@@ -6,7 +6,7 @@
 # After this, there is nothing separate to maintain: the dashboard app itself installs, builds
 # and runs the hub (option_hub.py RUNTIME), so the usual deploy covers both:
 #   git pull && systemctl --user restart options-app
-# The hub's version is the pinned HUB_REF in option_hub.py; it is updated by a PR bumping it.
+# The hub's source is optionhub/ in this repo; the app rebuilds it whenever that folder changes.
 #
 # This script only does what the app cannot do for itself (sudo):
 #   1. a Caddy site block for hub.<domain> — the hub must sit at the root of its own host (his

@@ -25,6 +25,7 @@ import { KITE_LOGIN_URL, kiteFetch } from "./zerodhaClient.mjs";
 import { distinctExpiriesAscending, getOptionRows, optionUnderlying } from "./zerodhaInstruments.mjs";
 import { quoteByKeys } from "./zerodhaData.mjs";
 import { orderFeatures } from "./zerodhaOrders.mjs";
+import { DASHBOARD, addPrevious, previousSession } from "../dashboard.mjs";
 
 export const id = "zerodha";
 export const credentialFields = ["apiKey", "apiSecret", "accessToken"];
@@ -108,6 +109,8 @@ export async function fetchOptionChain(creds, symbol, expiry) {
     const type = row.instrument_type === "CE" ? "CE" : "PE";
     (oc[String(strike)] ||= {})[type.toLowerCase()] = buildLeg(quote, { spot, strike, daysToExpiry, type });
   }
+  // options-checklist: previous-session OI/close from NSE's bhavcopy via the dashboard → OI change works.
+  if (DASHBOARD) addPrevious(oc, await previousSession(String(symbol || "").toUpperCase(), targetExpiry));
   return { status: "success", data: { oc, last_price: spot } };
 }
 

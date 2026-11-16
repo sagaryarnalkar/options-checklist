@@ -56,6 +56,7 @@ import * as panicGate from "./server/lib/panicGate.mjs";
 import * as tradingLockState from "./server/lib/tradingLockState.mjs";
 import * as auditLog from "./server/lib/auditLog.mjs";
 import * as basketEngine from "./server/lib/basketEngine.mjs";
+import { DASHBOARD, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1483,6 +1484,7 @@ function invalidateNseSession() {
 
 /** Shared NSE session: concurrent callers wait on one warm-up instead of racing. */
 async function getNseSession(force = false) {
+  if (DASHBOARD) return ""; // options-checklist: the dashboard's NSE session does the handshake
   if (!force && nseCookie && Date.now() < nseCookieExpiry) return nseCookie;
   if (nseSessionPromise) return nseSessionPromise;
   assertNseWwwOpen();
@@ -1527,9 +1529,13 @@ async function nseJson(path, { referer = `${NSE_BASE}/option-chain`, timeoutMs =
       assertNseWwwOpen();
       const cookie = await getNseSession(attempt > 0);
       const json = await queues.nse.schedule(async () => {
-        const res = await upstreamFetch("nse", `${NSE_BASE}${path}`, {
-          headers: { "User-Agent": UA, Accept: "application/json, text/plain, */*", "Accept-Language": "en-IN,en;q=0.9", Referer: referer, Cookie: cookie },
-        }, timeoutMs);
+        // options-checklist: from the droplet NSE's bot wall refuses Node's client; the dashboard's
+        // python session is accepted, so www reads go through it (server/dashboard.mjs, #113).
+        const res = DASHBOARD
+          ? await upstreamFetch("nse", nseRelayUrl(path), { headers: feedHeaders() }, timeoutMs)
+          : await upstreamFetch("nse", `${NSE_BASE}${path}`, {
+            headers: { "User-Agent": UA, Accept: "application/json, text/plain, */*", "Accept-Language": "en-IN,en;q=0.9", Referer: referer, Cookie: cookie },
+          }, timeoutMs);
         const ct = res.headers.get("content-type") || "";
         const text = await res.text();
         if (!ct.includes("json") && !/^\s*[[{]/.test(text)) throw new UpstreamError("nse", 403, "NSE returned HTML instead of JSON (session or bot check)");

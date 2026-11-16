@@ -14,6 +14,7 @@
  */
 
 import { BrokerError, brokerFetch, BrokerInputError } from "./contract.mjs";
+import { DASHBOARD, dashboardKiteResponse } from "../dashboard.mjs";
 
 export const KITE_BASE = "https://api.kite.trade";
 export const KITE_LOGIN_URL = "https://kite.zerodha.com/connect/login";
@@ -56,11 +57,17 @@ function toForm(obj) {
  *   raw: return the Response text (CSV endpoints). auth=false: no Authorization header (session/token).
  */
 export async function kiteFetch(path, creds, { method = "GET", query, form, raw = false, auth = true } = {}) {
-  const url = new URL(`${KITE_BASE}${path}`);
-  for (const [k, v] of query ?? []) url.searchParams.append(k, v);
-  const headers = auth ? authHeaders(creds) : { "X-Kite-Version": "3" };
-  if (form) headers["Content-Type"] = "application/x-www-form-urlencoded";
-  const res = await brokerFetch(url.toString(), { method, headers, body: form ? toForm(form).toString() : undefined });
+  let res;
+  if (DASHBOARD) {
+    // options-checklist: answered by the dashboard's Kite login (server/dashboard.mjs); no token here.
+    res = await dashboardKiteResponse(method, path, query ?? [], (u, init) => brokerFetch(u, init, { label: "The dashboard" }));
+  } else {
+    const url = new URL(`${KITE_BASE}${path}`);
+    for (const [k, v] of query ?? []) url.searchParams.append(k, v);
+    const headers = auth ? authHeaders(creds) : { "X-Kite-Version": "3" };
+    if (form) headers["Content-Type"] = "application/x-www-form-urlencoded";
+    res = await brokerFetch(url.toString(), { method, headers, body: form ? toForm(form).toString() : undefined });
+  }
   if (raw && res.ok) return res.text();
   const text = await res.text().catch(() => "");
   let json = null;
@@ -68,10 +75,12 @@ export async function kiteFetch(path, creds, { method = "GET", query, form, raw 
   if (!res.ok || !json || json.status !== "success") {
     const errorType = String(json?.error_type ?? "");
     const detail = json?.message || text.slice(0, 200) || `HTTP ${res.status}`;
-    const hint = res.status === 403 || errorType === "TokenException"
-      ? " Generate a fresh access token (Kite tokens expire at 6 AM IST) and paste it in Broker Settings."
-      : "";
-    throw new KiteApiError(`Zerodha API error [${res.status}${errorType ? ` ${errorType}` : ""}]: ${detail}.${hint}`, { httpStatus: res.status, errorType });
+    const hint = DASHBOARD
+      ? (errorType === "TokenException" ? " Log in to Kite on the dashboard (header chip) — the hub uses that login." : "")
+      : res.status === 403 || errorType === "TokenException"
+        ? " Generate a fresh access token (Kite tokens expire at 6 AM IST) and paste it in Broker Settings."
+        : "";
+    throw new KiteApiError(`Zerodha API error [${res.status}${errorType ? ` ${errorType}` : ""}]: ${String(detail).replace(/[.\s]+$/, "")}.${hint}`, { httpStatus: res.status, errorType });
   }
   return json.data;
 }

@@ -1674,10 +1674,11 @@
     <details class="hub-about card">
       <summary>About this tab — what it is, where its data comes from, what to be careful of</summary>
       <p><b>What it is.</b> <a href="https://github.com/MrChartist/india-s-best-option-hub" target="_blank" rel="noopener" style="color:var(--accent)">Option Hub</a>
-        is a free, open-source options terminal by Rohit Singh (Mr. Chartist): option chain, OI analysis,
-        expiry day, volatility, gamma exposure, FII/DII positioning, strategy builder and optimizer,
-        backtester, paper trading. It is <b>his app, unchanged</b>, running on our server next to this
-        dashboard. Nothing it shows feeds our signals, paper book or Claude's call.</p>
+        is an options terminal by Rohit Singh (Mr. Chartist): option chain, OI analysis, expiry day,
+        volatility, gamma exposure, FII/DII positioning, strategy builder and optimizer, backtester, paper
+        trading. Its source is part of this dashboard's code (the optionhub/ folder, under his personal-use
+        licence) and we change it like our own; the changes are listed in optionhub/OPTIONS-CHECKLIST-CHANGES.md.
+        Nothing it shows feeds our signals, paper book or Claude's call yet.</p>
       <p><b>Only you can open it.</b> Its licence allows personal use by one individual and forbids running it
         as a website other people use, so the hub's address answers "private" unless your browser holds the
         cookie this tab sets with your app key (the same key as the Positions tab).</p>
@@ -1685,14 +1686,14 @@
         dashboard's Kite login. Each strike shows whichever is newer: our recorder's last minute (ATM±10 of the
         nearest expiry, no extra Kite calls) or a top-up of the whole expiry that our server fetches at most
         once every 30 seconds, never in the first 15 seconds of a minute when the recorder runs, and only while
-        the hub is asking. No bid/ask. His app never holds your Kite token: it keeps placeholder "Zerodha"
-        values, and its server-side Kite calls are answered by this dashboard instead of reaching Kite.</p>
+        the hub is asking. No bid/ask. The hub never holds your Kite token: Zerodha is built in as "the
+        dashboard's login", and every Kite call its server makes is answered by this dashboard. OI change comes
+        from NSE's official previous-day figures (the F&amp;O bhavcopy).</p>
       <p><b>Everything else from NSE.</b> Index prices, expiry lists, FII/DII, participant OI and the ban list come
         from NSE's public website; so does the option chain outside market hours, before the morning Kite login,
         and for SENSEX. Anything it could not fetch is labelled <em>sample</em> — treat that as "no data". NSE's bot
-        wall turns away his server code when it calls from our server, so his NSE website reads go through this
-        dashboard's own NSE connection (the one the Cash-Secured Puts tab uses); archive files go direct
-        (deploy/option_hub/nse_relay.mjs). His code is untouched.</p>
+        wall turns away the hub's server code when it calls from our server, so its NSE website reads go through
+        this dashboard's own NSE connection (the one the Cash-Secured Puts tab uses); archive files go direct.</p>
       <p><b>Read-only.</b> Orders, positions and funds through the hub are refused — nothing it sends reaches
         Kite. Trade in Kite itself. The hub unloads after 5 minutes on another tab, so a forgotten hub stops
         asking for data (it reopens at its home screen).</p>
@@ -2147,7 +2148,7 @@
       const tops = Object.values(kf.topups || {});
       const feedTxt = tops.length && Math.min(...tops) <= 90 ? " · chain from Kite via the dashboard" : "";
       sub.textContent = " · running on our server · only you can open it" + feedTxt;
-      // running an older build while the pinned update waits (market hours / memory / failure)
+      // running an older build while the update waits (market hours / memory / failure)
       hubNote(rt.detail ? `<div class="note">${esc(rt.detail)}</div>` : "");
       // Through serve.mjs's seed page: saves the placeholder Zerodha entry his app needs to ask
       // our Kite feed for the chain (once), then redirects into his app.
