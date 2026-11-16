@@ -5,7 +5,7 @@
  *
  *   1. Serves his built frontend (HUB_DIR/dist) on 127.0.0.1:4001 — SPA fallback, hashed assets
  *      cached for a year, index.html / service worker never cached.
- *   2. Supervises his data proxy (proxy-server.mjs, 127.0.0.1:4002) with nse_fetch_fix.mjs and
+ *   2. Supervises his data proxy (proxy-server.mjs, 127.0.0.1:4002) with nse_relay.mjs and
  *      kite_feed.mjs preloaded. If the proxy exits, this exits too and the app restarts both.
  *   4. Fronts his /api/broker-proxy (Caddy routes it here) and, for Zerodha option chains, adds
  *      previous_oi / previous_close_price to every leg from the dashboard's /hub/feed/prev (NSE's
@@ -214,7 +214,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     }
   }).listen(PORT, HOST, () => console.log(`option-hub static: http://${HOST}:${PORT} (${ROOT})`));
 
-  const pre = ["nse_fetch_fix.mjs", "kite_feed.mjs"].flatMap((f) => ["--import", pathToFileURL(join(HERE, f)).href]);
+  const pre = ["nse_relay.mjs", "kite_feed.mjs"].flatMap((f) => ["--import", pathToFileURL(join(HERE, f)).href]);
   const proxy = spawn(process.execPath, [...pre, "proxy-server.mjs"], {
     cwd: HUB_DIR, stdio: "inherit", env: { PROXY_HOST: "127.0.0.1", ...process.env },
   });

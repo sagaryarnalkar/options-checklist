@@ -168,8 +168,11 @@ check() {
 for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:4002/health 2>/dev/null && break; sleep 1; done
 check "frontend :4001/healthz"            200 "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4001/healthz)"
 check "proxy :4002/health"                200 "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4002/health)"
-nse="$(curl -s -m 40 -o /dev/null -w '%{http_code}' -H "Origin: https://$HUB_HOST" -H "Host: $HUB_HOST" 'http://127.0.0.1:4002/api/nse-proxy?endpoint=option-chain&symbol=NIFTY' || true)"
-check "NSE option chain via the hub proxy"  200 "$nse"
+nse_body="$(mktemp)"
+nse="$(curl -s -m 40 -o "$nse_body" -w '%{http_code}' -H "Origin: https://$HUB_HOST" -H "Host: $HUB_HOST" 'http://127.0.0.1:4002/api/nse-proxy?endpoint=option-chain&symbol=NIFTY' || true)"
+check "NSE option chain (hub proxy → app → NSE)"  200 "$nse"
+[[ "$nse" == "200" ]] || printf '      NSE said: %s\n' "$(head -c 300 "$nse_body" | tr -d '\n')"
+rm -f "$nse_body"
 for _ in $(seq 1 20); do c="$(curl -s -o /dev/null -w '%{http_code}' "https://$HUB_HOST/" || true)"; [[ "$c" == "000" ]] || break; sleep 3; done
 check "https://$HUB_HOST/ without cookie (locked)" 401 "$c"
 check "https://$HUB_HOST/ with cookie"            200 "$(curl -s -o /dev/null -w '%{http_code}' --cookie "hz_hub=$TOKEN" "https://$HUB_HOST/")"
