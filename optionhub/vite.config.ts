@@ -145,7 +145,13 @@ async function loadVitePWA(): Promise<VitePWAFactory | null> {
 const ONE_YEAR_S = 60 * 60 * 24 * 365;
 
 function pwaOptions(): Record<string, unknown> {
+  // options-checklist: built for the dashboard (VITE_DASHBOARD_KITE=1) the terminal runs WITHOUT an offline
+  // service worker — a cached app shell kept showing the previous build after every deploy. selfDestroying
+  // ships a worker that clears the caches, unregisters itself and reloads open tabs once; main.tsx then
+  // registers nothing.
+  const selfDestroying = process.env.VITE_DASHBOARD_KITE === "1";
   return {
+    selfDestroying,
     // Registered by src/main.tsx (src/lib/marketData/serviceWorker.ts) with an "Update available" toast.
     registerType: "prompt",
     injectRegister: false,
