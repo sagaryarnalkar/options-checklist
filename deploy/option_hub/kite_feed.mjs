@@ -10,8 +10,8 @@
  *
  * So the hub runs on the dashboard's Kite login without ever holding its token: the browser keeps
  * placeholder Zerodha values (seeded by serve.mjs), and the Authorization header they produce is
- * dropped here. HUB_FEED_TOKEN (the hub cookie token, written into the systemd unit by
- * deploy/option_hub.sh) authenticates these calls to the dashboard.
+ * dropped here. HUB_FEED_TOKEN (the hub cookie token, passed in by the dashboard app that runs the
+ * hub — option_hub.py serve_env) authenticates these calls to the dashboard.
  */
 const FEED = (process.env.HUB_FEED_URL || "http://127.0.0.1:8000").replace(/\/+$/, "");
 const TOKEN = process.env.HUB_FEED_TOKEN || "";

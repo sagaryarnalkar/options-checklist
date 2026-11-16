@@ -1,11 +1,12 @@
 /**
- * Runs Mr. Chartist's Option Hub on the droplet (user-systemd unit option-hub, written by
- * deploy/option_hub.sh). Our file, not his: his checkout (~/option-hub) is never edited.
+ * Runs Mr. Chartist's Option Hub on the droplet. Started and supervised by the dashboard app itself
+ * (option_hub.py RUNTIME: it builds his pinned commit into DATA_DIR/option-hub/builds/<ref> and runs
+ * this file there with HUB_DIR set). Our file, not his: his checkout is never edited.
  *
  *   1. Serves his built frontend (HUB_DIR/dist) on 127.0.0.1:4001 — SPA fallback, hashed assets
  *      cached for a year, index.html / service worker never cached.
  *   2. Supervises his data proxy (proxy-server.mjs, 127.0.0.1:4002) with nse_fetch_fix.mjs and
- *      kite_feed.mjs preloaded. If the proxy exits, this exits too and systemd restarts both.
+ *      kite_feed.mjs preloaded. If the proxy exits, this exits too and the app restarts both.
  *   4. Fronts his /api/broker-proxy (Caddy routes it here) and, for Zerodha option chains, adds
  *      previous_oi / previous_close_price to every leg from the dashboard's /hub/feed/prev (NSE's
  *      official bhavcopy). His Zerodha adapter drops those fields, so without this his chain shows
@@ -26,7 +27,7 @@
  *
  * Framing: our dashboard embeds the hub in an iframe, so no X-Frame-Options. Instead
  * Content-Security-Policy frame-ancestors limits WHO may frame it to HUB_FRAME_ANCESTORS
- * (the setup script sets https://<domain>).
+ * (the app sets https://<domain>, derived from OPTION_HUB_URL = https://hub.<domain>).
  */
 import http from "node:http";
 import { spawn } from "node:child_process";
@@ -218,7 +219,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     cwd: HUB_DIR, stdio: "inherit", env: { PROXY_HOST: "127.0.0.1", ...process.env },
   });
   proxy.on("exit", (code, signal) => {
-    console.error(`option-hub proxy exited (${signal || code}); exiting so systemd restarts both`);
+    console.error(`option-hub proxy exited (${signal || code}); exiting so the app restarts both`);
     process.exit(code || 1);
   });
   for (const sig of ["SIGTERM", "SIGINT"]) process.on(sig, () => { proxy.kill(sig); process.exit(0); });

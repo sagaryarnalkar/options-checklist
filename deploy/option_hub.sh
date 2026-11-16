@@ -1,38 +1,38 @@
 #!/usr/bin/env bash
-# Option Hub (Mr. Chartist's options terminal) on the droplet, owner-only, framed by the
-# dashboard's "Option Hub" tab. See option_hub.py for why it is locked and how.
+# ONE-TIME setup of the Option Hub tab (Mr. Chartist's options terminal, owner-only).
 #
-#   bash deploy/option_hub.sh                 # first install, or re-apply after a git pull
-#   HUB_REF=main bash deploy/option_hub.sh    # update to his latest (default: the tested commit)
+#   bash deploy/option_hub.sh
 #
-# Re-run after changing ASSISTANT_KEY (the hub's lock cookie is derived from it).
+# After this, there is nothing separate to maintain: the dashboard app itself installs, builds
+# and runs the hub (option_hub.py RUNTIME), so the usual deploy covers both:
+#   git pull && systemctl --user restart options-app
+# The hub's version is the pinned HUB_REF in option_hub.py; it is updated by a PR bumping it.
 #
-# What it does (sudo only for the Caddyfile, and optional swap):
-#   1. checks Node >= 20, memory for the build (~1.2 GB peak), ASSISTANT_KEY
-#   2. clones/updates ~/option-hub at HUB_REF — OUTSIDE this repo, his files never edited
-#   3. npm ci + vite build (frontend talks to https://hub.<domain>), prunes dev deps — skipped
-#      when that commit is already built (FORCE_BUILD=1 to redo)
-#   4. user-systemd unit option-hub → deploy/option_hub/serve.mjs (127.0.0.1:4001 + proxy :4002);
-#      its Kite calls are answered by this app (hub_feed.py) via HUB_FEED_TOKEN — read-only
-#   5. Caddy site block for hub.<domain>: 401 without the owner cookie, else route to 4001/4002
-#      (/api/broker-proxy and /api/_options-checklist/* go to serve.mjs on 4001, see there)
-#   6. OPTION_HUB_URL in .env, restarts options-app, smoke-tests the lock and the NSE data path
+# This script only does what the app cannot do for itself (sudo):
+#   1. a Caddy site block for hub.<domain> — the hub must sit at the root of its own host (his
+#      React router has no base path). 401 without the owner cookie, else routed to 4001/4002.
+#   2. an optional 2 GB swap file if the server lacks RAM headroom for the build (~1.2 GB peak).
+# plus: OPTION_HUB_URL in .env, removes the old separate `option-hub` service if an earlier
+# version of this script installed it, restarts options-app, then follows the app's first build
+# and smoke-tests the lock, the NSE path and the Kite feed.
+#
+# Re-run after changing ASSISTANT_KEY (the Caddy lock cookie is derived from it).
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HUB_DIR="${HUB_DIR:-$HOME/option-hub}"
-HUB_REPO="https://github.com/MrChartist/india-s-best-option-hub.git"
-HUB_REF="${HUB_REF:-18e1d52cd0ecdb99538fd4ca97b98c045ed89a95}"   # tested 2026-11-16
 CADDYFILE="${CADDYFILE:-/etc/caddy/Caddyfile}"
 MARK_BEGIN="# >>> option-hub (managed by options-checklist/deploy/option_hub.sh — edits here are overwritten)"
 MARK_END="# <<< option-hub"
 PY="$REPO_DIR/venv/bin/python3"; [[ -x "$PY" ]] || PY="python3"
+APP="http://127.0.0.1:8000"
+DATA_DIR="${OPTIONS_DATA_DIR:-$REPO_DIR/data}"
 
 say()  { printf '\n==> %s\n' "$*"; }
 die()  { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 ask()  { local a; read -r -p "$1 [y/N] " a; [[ "$a" =~ ^[Yy] ]]; }
 
 [[ "$EUID" -ne 0 ]] || die "run as your regular user, not root"
+command -v git >/dev/null || die "git is required: sudo apt-get install -y git"
 
 # ---- domain --------------------------------------------------------------------------
 if [[ -z "${DOMAIN:-}" && -r "$CADDYFILE" ]]; then
@@ -41,114 +41,35 @@ fi
 [[ -n "${DOMAIN:-}" ]] || read -r -p "Dashboard domain (e.g. sagy-options.duckdns.org): " DOMAIN
 [[ -n "${DOMAIN:-}" ]] || die "DOMAIN is required"
 HUB_HOST="hub.$DOMAIN"
-say "Option Hub → https://$HUB_HOST (framed by https://$DOMAIN), checkout $HUB_DIR @ ${HUB_REF:0:12}"
-
-# ---- market hours: the build is CPU/RAM heavy and the recorder runs every minute --------
-dow="$(TZ=Asia/Kolkata date +%u)"; hm="$(TZ=Asia/Kolkata date +%H%M)"
-if (( dow <= 5 )) && (( 10#$hm >= 900 && 10#$hm <= 1545 )); then
-  echo "It is market hours (IST). The build takes ~1 min of CPU and ~1.2 GB RAM next to the recorder."
-  ask "Continue anyway?" || exit 1
-fi
-
-# ---- node -------------------------------------------------------------------------------
-NODE_BIN="$(command -v node || true)"
-major="$([[ -n "$NODE_BIN" ]] && "$NODE_BIN" -p 'process.versions.node.split(".")[0]' || echo 0)"
-if (( major < 20 )); then
-  cat >&2 <<'EOF'
-
-Node.js 20+ is required (Ubuntu's apt ships 18). Install Node 22 from NodeSource, then re-run:
-
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-  sudo apt-get install -y nodejs
-EOF
-  exit 1
-fi
-echo "node $("$NODE_BIN" -v) at $NODE_BIN"
+say "Option Hub → https://$HUB_HOST, run by options-app (framed by https://$DOMAIN)"
 
 # ---- lock token -------------------------------------------------------------------------
 TOKEN="$("$PY" "$REPO_DIR/option_hub.py" token)" || die "could not derive the lock token (ASSISTANT_KEY in .env?)"
 [[ "$TOKEN" =~ ^[0-9a-f]{64}$ ]] || die "unexpected token format"
 
-# ---- checkout ---------------------------------------------------------------------------
-say "Fetching Option Hub"
-if [[ ! -d "$HUB_DIR/.git" ]]; then
-  git clone --quiet "$HUB_REPO" "$HUB_DIR"
+# ---- the old separate service (earlier version of this script) ---------------------------
+if [[ -f "$HOME/.config/systemd/user/option-hub.service" ]]; then
+  say "Removing the old separate option-hub service (the dashboard app runs the hub now)"
+  systemctl --user disable --now option-hub 2>/dev/null || true
+  rm -f "$HOME/.config/systemd/user/option-hub.service"
+  systemctl --user daemon-reload
+  [[ -d "$HOME/option-hub" ]] && echo "The old checkout $HOME/option-hub is no longer used — delete it whenever you like."
 fi
-if [[ -n "$(git -C "$HUB_DIR" status --porcelain --untracked-files=no)" ]]; then
-  die "$HUB_DIR has local edits to tracked files — this setup never edits them; stash or discard first"
-fi
-git -C "$HUB_DIR" fetch --quiet origin
-ref="$HUB_REF"; [[ "$ref" == "main" ]] && ref="origin/main"
-git -C "$HUB_DIR" checkout --quiet --detach "$ref"
-echo "at $(git -C "$HUB_DIR" log -1 --format='%h %ci %s')"
 
-# ---- build (skipped when this commit was already built for this host) -------------------
-STAMP_FILE="$HUB_DIR/.options-checklist-build"
-STAMP="$(git -C "$HUB_DIR" rev-parse HEAD) https://$HUB_HOST"
-if [[ -f "$HUB_DIR/dist/index.html" && "$(cat "$STAMP_FILE" 2>/dev/null)" == "$STAMP" && "${FORCE_BUILD:-0}" != 1 ]]; then
-  say "Build is current for this commit — skipping npm ci + vite build (FORCE_BUILD=1 to redo)"
-else
-  avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
-  swapf=$(awk '/SwapFree/ {print int($2/1024)}' /proc/meminfo)
-  echo "memory: ${avail} MB available, ${swapf} MB swap free (build peaks ~1200 MB)"
-  if (( avail + swapf < 1600 )); then
-    echo "Not enough headroom for the build. A 2 GB swap file fixes it:"
-    echo "  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
-    echo "  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
-    if ask "Create it now?"; then
-      [[ -e /swapfile ]] && die "/swapfile already exists — enable it with: sudo swapon /swapfile"
-      sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile
-      grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
-    else
-      exit 1
-    fi
+# ---- memory headroom for the build ------------------------------------------------------
+avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+swapf=$(awk '/SwapFree/ {print int($2/1024)}' /proc/meminfo)
+if (( avail + swapf < 1600 )); then
+  echo "Memory: ${avail} MB available + ${swapf} MB swap free; the hub's build peaks at ~1200 MB."
+  echo "A 2 GB swap file gives it room (the app will not build without it):"
+  echo "  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
+  echo "  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
+  if ask "Create it now?"; then
+    [[ -e /swapfile ]] && die "/swapfile already exists — enable it with: sudo swapon /swapfile"
+    sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
   fi
-  say "Installing dependencies + building (a minute or two)"
-  (
-    cd "$HUB_DIR"
-    npm ci --no-audit --no-fund --loglevel=error
-    VITE_PROXY_URL="https://$HUB_HOST" NODE_OPTIONS="--max-old-space-size=1536" nice -n 10 npm run build --silent
-    npm prune --omit=dev --no-audit --no-fund --loglevel=error
-  )
-  [[ -f "$HUB_DIR/dist/index.html" ]] || die "build produced no dist/index.html"
-  echo "$STAMP" > "$STAMP_FILE"
 fi
-
-# ---- systemd user unit ------------------------------------------------------------------
-say "Installing user service option-hub"
-mkdir -p "$HOME/.config/systemd/user"
-cat > "$HOME/.config/systemd/user/option-hub.service" <<EOF
-[Unit]
-Description=Option Hub by Mr. Chartist (owner-only; framed by options-checklist)
-After=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory=$HUB_DIR
-Environment=HUB_DIR=$HUB_DIR
-Environment=PORT=4001
-Environment=HOST=127.0.0.1
-Environment=PROXY_PORT=4002
-Environment=PROXY_HOST=127.0.0.1
-Environment=PROXY_ALLOWED_ORIGINS=https://$HUB_HOST
-Environment=PROXY_ALLOWED_HOSTS=$HUB_HOST
-Environment=HUB_FRAME_ANCESTORS=https://$DOMAIN
-Environment=HUB_FEED_URL=http://127.0.0.1:8000
-Environment=HUB_FEED_TOKEN=$TOKEN
-Environment=NODE_ENV=production
-Environment=NODE_OPTIONS=--max-old-space-size=384
-ExecStart=$NODE_BIN $REPO_DIR/deploy/option_hub/serve.mjs
-Restart=always
-RestartSec=5
-Nice=5
-
-[Install]
-WantedBy=default.target
-EOF
-chmod 600 "$HOME/.config/systemd/user/option-hub.service"   # holds HUB_FEED_TOKEN
-systemctl --user daemon-reload
-systemctl --user enable --quiet option-hub
-systemctl --user restart option-hub
 
 # ---- Caddy ------------------------------------------------------------------------------
 say "Caddy site block for $HUB_HOST (sudo)"
@@ -181,18 +102,23 @@ if b in src and e in src:
 else:
     out = src.rstrip("\n") + "\n\n" + blk + "\n"
 sys.stdout.write(out)' > "$tmp"
-backup="$CADDYFILE.bak-optionhub-$(date +%Y%m%d%H%M%S)"
-sudo cp "$CADDYFILE" "$backup"
-sudo cp "$tmp" "$CADDYFILE"; rm -f "$tmp"
-if ! sudo caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1; then
-  sudo cp "$backup" "$CADDYFILE"
-  sudo caddy validate --config "$CADDYFILE" --adapter caddyfile || true
-  die "the new Caddyfile did not validate — restored $backup"
+if sudo cmp -s "$tmp" "$CADDYFILE"; then
+  echo "Caddyfile already up to date"
+  rm -f "$tmp"
+else
+  backup="$CADDYFILE.bak-optionhub-$(date +%Y%m%d%H%M%S)"
+  sudo cp "$CADDYFILE" "$backup"
+  sudo cp "$tmp" "$CADDYFILE"; rm -f "$tmp"
+  if ! sudo caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1; then
+    sudo cp "$backup" "$CADDYFILE"
+    sudo caddy validate --config "$CADDYFILE" --adapter caddyfile || true
+    die "the new Caddyfile did not validate — restored $backup"
+  fi
+  sudo systemctl reload caddy
+  echo "Caddyfile updated (backup: $backup)"
 fi
-sudo systemctl reload caddy
-echo "Caddyfile updated (backup: $backup)"
 
-# ---- dashboard config -------------------------------------------------------------------
+# ---- dashboard config + restart ---------------------------------------------------------
 say "OPTION_HUB_URL in $REPO_DIR/.env + restart options-app"
 if grep -q '^OPTION_HUB_URL=' "$REPO_DIR/.env"; then
   sed -i "s|^OPTION_HUB_URL=.*|OPTION_HUB_URL=https://$HUB_HOST|" "$REPO_DIR/.env"
@@ -200,6 +126,36 @@ else
   printf '\nOPTION_HUB_URL=https://%s\n' "$HUB_HOST" >> "$REPO_DIR/.env"
 fi
 systemctl --user restart options-app
+
+# ---- follow the app while it installs + builds the hub ----------------------------------
+say "The app is installing Option Hub (first time: download + build, a few minutes)"
+for _ in $(seq 1 30); do curl -fsS -o /dev/null "$APP/healthz" 2>/dev/null && break; sleep 1; done
+rt_field() { curl -s "$APP/hub/status" | "$PY" -c "import json,sys; r=json.load(sys.stdin).get('runtime') or {}; print(r.get('$1') or '')" 2>/dev/null || true; }
+last=""; state=""
+for _ in $(seq 1 240); do     # up to 20 min
+  state="$(rt_field state)"; detail="$(rt_field detail)"
+  line="$state${detail:+ — $detail}"
+  [[ "$line" != "$last" ]] && { echo "  $(date +%H:%M:%S)  $line"; last="$line"; }
+  case "$state" in
+    running) break ;;
+    waiting|low_memory|failed|not_configured|other_worker|external) break ;;
+  esac
+  sleep 5
+done
+case "$state" in
+  running) ;;
+  waiting)
+    echo
+    echo "It is market hours: the app builds the hub after 15:45 IST on its own (or press 'Build now'"
+    echo "in the Option Hub tab). Re-run this script afterwards to run the smoke tests."
+    exit 0 ;;
+  *)
+    echo
+    echo "The hub is not running ($state). Last lines of its log:"
+    curl -s "$APP/hub/status" | "$PY" -c "import json,sys; [print('  '+l) for l in (json.load(sys.stdin).get('runtime') or {}).get('log_tail') or []]" 2>/dev/null || true
+    echo "Full logs: $DATA_DIR/option-hub/build.log and serve.log"
+    exit 1 ;;
+esac
 
 # ---- smoke test -------------------------------------------------------------------------
 say "Smoke test"
@@ -209,7 +165,7 @@ check() {
   if [[ "$got" == "$want" ]]; then printf '  %-50s OK (%s)\n' "$name" "$got"
   else printf '  %-50s FAIL (got %s, want %s)\n' "$name" "$got" "$want"; fails=$((fails + 1)); fi
 }
-for _ in $(seq 1 15); do curl -fsS -o /dev/null http://127.0.0.1:4002/health 2>/dev/null && break; sleep 1; done
+for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:4002/health 2>/dev/null && break; sleep 1; done
 check "frontend :4001/healthz"            200 "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4001/healthz)"
 check "proxy :4002/health"                200 "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:4002/health)"
 nse="$(curl -s -m 40 -o /dev/null -w '%{http_code}' -H "Origin: https://$HUB_HOST" -H "Host: $HUB_HOST" 'http://127.0.0.1:4002/api/nse-proxy?endpoint=option-chain&symbol=NIFTY' || true)"
@@ -218,21 +174,20 @@ for _ in $(seq 1 20); do c="$(curl -s -o /dev/null -w '%{http_code}' "https://$H
 check "https://$HUB_HOST/ without cookie (locked)" 401 "$c"
 check "https://$HUB_HOST/ with cookie"            200 "$(curl -s -o /dev/null -w '%{http_code}' --cookie "hz_hub=$TOKEN" "https://$HUB_HOST/")"
 check "https://$HUB_HOST/api/x/ban-list with cookie" 200 "$(curl -s -o /dev/null -w '%{http_code}' --cookie "hz_hub=$TOKEN" -H "Origin: https://$HUB_HOST" "https://$HUB_HOST/api/x/ban-list")"
-for _ in $(seq 1 15); do curl -fsS -o /dev/null http://127.0.0.1:8000/healthz 2>/dev/null && break; sleep 1; done
-feed="$(curl -s -o /dev/null -w '%{http_code}' -H "X-Hub-Feed: $TOKEN" http://127.0.0.1:8000/hub/feed/profile || true)"
+feed="$(curl -s -o /dev/null -w '%{http_code}' -H "X-Hub-Feed: $TOKEN" "$APP/hub/feed/profile" || true)"
 case "$feed" in
   200) printf '  %-50s OK (dashboard logged in to Kite: the chain uses Kite in market hours)\n' "Kite feed for the hub" ;;
   403) printf '  %-50s OK (dashboard not logged in to Kite today: the hub uses NSE until you log in)\n' "Kite feed for the hub" ;;
   *)   printf '  %-50s FAIL (HTTP %s)\n' "Kite feed for the hub" "$feed"; fails=$((fails + 1)) ;;
 esac
-check "dashboard /hub/status configured" true "$(curl -s http://127.0.0.1:8000/hub/status | "$PY" -c 'import json,sys; print(str(json.load(sys.stdin).get("configured")).lower())' 2>/dev/null || echo error)"
 
 echo
 if (( fails == 0 )); then
   echo "Done. Open https://$DOMAIN → Option Hub tab (same app key as Positions)."
+  echo "From now on the normal deploy updates it: git pull && systemctl --user restart options-app"
 else
-  echo "$fails check(s) failed. Logs: journalctl --user -u option-hub -n 80 --no-pager ; sudo journalctl -u caddy -n 50 --no-pager"
+  echo "$fails check(s) failed. Logs: $DATA_DIR/option-hub/serve.log ; sudo journalctl -u caddy -n 50 --no-pager"
   if [[ "$nse" != "200" ]]; then
-    echo "NSE failing alone only means the hub shows its labelled SAMPLE data until NSE answers (or you connect a broker in its Broker Settings)."
+    echo "NSE failing alone only means the hub shows its labelled SAMPLE data until NSE answers."
   fi
 fi
