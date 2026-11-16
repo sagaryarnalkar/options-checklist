@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildErrorReport, buildIssueUrl, clearLogs, formatLogs, GITHUB_ISSUES_URL, getRecentErrors, getRecentLogs, log, LOG_CAPACITY, setConsoleMirroring } from "./log";
+import { buildErrorReport, clearLogs, formatLogs, getRecentErrors, getRecentLogs, log, LOG_CAPACITY, setConsoleMirroring } from "./log";
 
 beforeEach(() => {
   clearLogs();
@@ -82,16 +82,4 @@ describe("error reports", () => {
     expect(report).toContain("feed stale");
   });
 
-  it("builds a prefilled GitHub issue URL under the length cap", () => {
-    const err = new Error("x".repeat(300));
-    err.stack = "Error\n" + "    at frame (file.js:1:1)\n".repeat(2000);
-    for (let i = 0; i < 50; i++) log.error("noise ".repeat(40));
-    const url = buildIssueUrl(err);
-    expect(url.startsWith(`${GITHUB_ISSUES_URL}?`)).toBe(true);
-    expect(url.length).toBeLessThanOrEqual(7000);
-    const params = new URL(url).searchParams;
-    expect(params.get("labels")).toBe("bug");
-    expect(params.get("title")?.length).toBeLessThanOrEqual(120);
-    expect(params.get("body")).toContain("Error report");
-  });
 });

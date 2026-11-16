@@ -18,7 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Segmented } from "@/components/strategy/Segmented";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import {
   axisProps,
   barCursor,

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { BuildupBadge } from "@/components/ui/buildup-badge";
 import { PageHeader } from "@/components/PageHeader";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { OIHeatmap } from "@/components/OIHeatmap";
 import { SupportResistance } from "@/components/SupportResistance";
 import { MultiExpiryOI } from "@/components/MultiExpiryOI";

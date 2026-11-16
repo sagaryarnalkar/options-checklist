@@ -2,7 +2,6 @@ import { useCallback, useId, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { AlertTriangle, CalendarDays, Clock, FlaskConical, Landmark, RefreshCw } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { ProductCrossLink } from "@/components/brand/ProductCrossLink";
 import { LeadLagPanel } from "@/components/participants/LeadLagPanel";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -189,7 +188,6 @@ export default function Participants() {
           </>
         }
       />
-      <ProductCrossLink id="fiiDii" campaign="participants" lead="Real-time FII and DII money flows, sector-wise FPI allocation and flow heatmaps:" />
       {snapNote ? (
         <p id={`${dateInputId}-note`} role="status" className="text-body-sm text-muted-foreground">
           {snapNote}

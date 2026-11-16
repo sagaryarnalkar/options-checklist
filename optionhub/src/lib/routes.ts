@@ -20,11 +20,10 @@ export type RouteGroup =
   | "Strategy"
   | "Trade"
   | "Portfolio"
-  | "Learn"
   | "Settings";
 
 export interface RouteDef {
-  /** React Router path, e.g. "/option-chain" or "/learn/:slug". */
+  /** React Router path, e.g. "/option-chain" or "/contract/:symbol/:expiry/:strike/:type". */
   path: string;
   /** Page title used for document.title and page headings. */
   title: string;
@@ -40,7 +39,7 @@ export interface RouteDef {
   badge?: "New" | "Beta";
   /** One-line description for the command palette and 404 page. */
   description?: string;
-  /** Hide from the sidebar and palette (detail routes such as /learn/:slug). */
+  /** Hide from the sidebar and palette (detail routes such as /contract/...). */
   hidden?: boolean;
   /** Page file name in src/pages (without .tsx). */
   page: string;
@@ -57,7 +56,6 @@ export const ROUTE_GROUPS: readonly RouteGroup[] = [
   "Strategy",
   "Trade",
   "Portfolio",
-  "Learn",
   "Settings",
 ];
 
@@ -437,33 +435,6 @@ export const ROUTES: RouteDef[] = [
     lazy: pageLoader("Alerts"),
   },
 
-  // ── Learn ───────────────────────────────────────────────────────────────
-  {
-    path: "/learn",
-    title: "Learn",
-    navLabel: "Learn",
-    group: "Learn",
-    icon: "GraduationCap",
-    shortcut: "g l",
-    keywords: ["learn", "education", "nism", "lessons", "greeks explained", "basics", "course", "guide"],
-    badge: "New",
-    description: "Plain-English lessons on options, Greeks and F&O rules.",
-    page: "Learn",
-    lazy: pageLoader("Learn"),
-  },
-  {
-    path: "/learn/:slug",
-    title: "Lesson",
-    navLabel: "Lesson",
-    group: "Learn",
-    icon: "BookOpen",
-    keywords: ["lesson"],
-    hidden: true,
-    page: "LearnLesson",
-    lazy: pageLoader("LearnLesson"),
-  },
-
-
   // ── Settings ────────────────────────────────────────────────────────────
   {
     path: "/broker-settings",
@@ -532,7 +503,7 @@ function splitPath(path: string): string[] {
   return path.split("/").filter(Boolean);
 }
 
-/** Match a pathname against a route pattern ("/learn/:slug"). Returns params or null. */
+/** Match a pathname against a route pattern ("/contract/:symbol/:expiry/:strike/:type"). Returns params or null. */
 export function matchPath(pattern: string, pathname: string): Record<string, string> | null {
   const a = splitPath(pattern.toLowerCase());
   const b = splitPath(normalizePathname(pathname));

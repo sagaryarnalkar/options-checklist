@@ -9,7 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Activity, Scale, Target, TrendingUp, Zap } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { useLiveOptionChain, type OptionChainHookData } from "@/hooks/useMarketData";
 import { formatCompactIN, formatDateIST, formatNumberIN, formatPct } from "@/lib/options";
 import { PCR_BANDS, pcrSignal } from "@/lib/oiUtils";

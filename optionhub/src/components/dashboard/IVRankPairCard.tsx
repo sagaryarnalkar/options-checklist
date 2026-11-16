@@ -7,7 +7,7 @@ import { Link } from "react-router-dom";
 import { ArrowUpRight, Gauge } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { useIvRank } from "@/components/volatility/useVolatility";
 import { formatNumberIN } from "@/lib/options";
 import { fmtVol } from "@/lib/volatility/format";

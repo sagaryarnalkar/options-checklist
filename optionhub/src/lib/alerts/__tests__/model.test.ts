@@ -245,7 +245,7 @@ describe("rule model: migration", () => {
   it("exports version 2 files that re-import losslessly", () => {
     const rules = Object.values(EXAMPLES).map((e) => createRule(e, NOW));
     const text = exportRulesJSON(rules, new Date(NOW));
-    expect(JSON.parse(text)).toMatchObject({ app: "mr-chartist-terminal", kind: "alert-rules", version: 2 });
+    expect(JSON.parse(text)).toMatchObject({ app: "herozero-terminal", kind: "alert-rules", version: 2 });
     const back = parseRulesJSON(text, NOW);
     expect(back.skipped).toBe(0);
     expect(back.rules).toEqual(rules);

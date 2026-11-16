@@ -8,7 +8,7 @@ import { DASH_LAYOUT_KEY, DEFAULT_LAYOUT, SECTION_IDS, loadLayout, sanitizeLayou
 export const WORKSPACES_KEY = "mc_dash_workspaces_v1";
 export const MAX_WORKSPACES = 8;
 export const MAX_NAME = 32;
-export const EXPORT_KIND = "mr-chartist/dashboard-workspaces";
+export const EXPORT_KIND = "herozero/dashboard-workspaces";
 
 export type PresetId = "scalper" | "writer" | "swing" | "expiry";
 

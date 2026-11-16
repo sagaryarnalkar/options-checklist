@@ -131,7 +131,7 @@ export default function Alerts() {
   };
 
   const onExport = () => {
-    const ok = downloadText(`mr-chartist-alerts-${today}.json`, engine.exportJSON());
+    const ok = downloadText(`herozero-alerts-${today}.json`, engine.exportJSON());
     if (ok) toast.success(`Exported ${rules.length} rule${rules.length === 1 ? "" : "s"}`);
     else toast.error("Could not export rules", { description: "Your browser blocked the download." });
   };

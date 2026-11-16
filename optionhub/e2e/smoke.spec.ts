@@ -25,7 +25,6 @@ const REQUIRED_PATHS = [
   "/expiry-day",
   "/calculators",
   "/paper-trading",
-  "/learn",
   "/straddles",
   "/futures",
   "/backtest",
@@ -102,7 +101,7 @@ test.describe("page smoke", () => {
 
       await expect(page.getByText("Something went wrong on this page.")).toHaveCount(0);
       expect(collected.errors, `console errors on ${path}`).toEqual([]);
-      await expect(page).toHaveTitle(/Mr\. Chartist/);
+      await expect(page).toHaveTitle(/HeroZero/);
     });
   }
 });
@@ -114,7 +113,7 @@ test.describe("404 page", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Page not found" })).toBeVisible();
     const firstSuggestion = page.locator("#main").getByRole("list").getByRole("link").first();
     await expect(firstSuggestion).toHaveAttribute("href", "/option-chain");
-    await expect(page).toHaveTitle(/Page not found · Option Hub by Mr\. Chartist/);
+    await expect(page).toHaveTitle(/Page not found · HeroZero/);
     expect(collected.errors).toEqual([]);
   });
 });

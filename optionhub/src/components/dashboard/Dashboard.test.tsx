@@ -197,15 +197,15 @@ describe("Dashboard page", () => {
     expect(sections[sections.length - 1].compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("shows a five-step tour until it is finished or skipped", () => {
+  it("shows a four-step tour until it is finished or skipped", () => {
     localStorage.removeItem(TOUR_KEY);
     const { unmount } = shell(<Index />);
-    expect(screen.getByText(/Step 1 of 5/)).toBeInTheDocument();
+    expect(screen.getByText(/Step 1 of 4/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Show me around" }));
     expect(screen.getByRole("heading", { name: "Start with the option chain" })).toHaveFocus();
     expect(screen.getByRole("link", { name: "Open option chain" })).toHaveAttribute("href", "/option-chain?symbol=NIFTY");
     fireEvent.click(screen.getByRole("button", { name: "Skip the tour" }));
-    expect(screen.queryByText(/Step 2 of 5/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Step 2 of 4/)).not.toBeInTheDocument();
     unmount();
     shell(<Index />);
     expect(screen.queryByText(/Getting started/)).not.toBeInTheDocument();

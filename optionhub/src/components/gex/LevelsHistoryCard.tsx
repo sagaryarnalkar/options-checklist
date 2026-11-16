@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ModeBadge } from "@/components/flow/FlowUi";
 import { useSessionSeries } from "@/components/flow/useSessionSeries";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import {
   axisProps,
   chartColors,

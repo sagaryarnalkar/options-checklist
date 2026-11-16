@@ -4,13 +4,13 @@
  */
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, ArrowRight, BookOpen, Compass, Layers, Map as MapIcon, TableProperties, Wallet, X, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ArrowRight, Compass, Layers, Map as MapIcon, TableProperties, Wallet, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HeroZeroMark } from "@/components/brand/HeroZeroLogo";
 import { cn } from "@/lib/utils";
 import { TOUR_STEPS, type TourAction, type TourState, type TourStep } from "./onboarding";
 
-const ICON: Record<TourStep["id"], LucideIcon> = { welcome: Compass, chain: TableProperties, builder: Layers, paper: Wallet, learn: BookOpen };
+const ICON: Record<TourStep["id"], LucideIcon> = { welcome: Compass, chain: TableProperties, builder: Layers, paper: Wallet };
 
 interface Props {
   state: TourState;

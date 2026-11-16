@@ -3,7 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BuildupBadge } from "@/components/ui/buildup-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { cn } from "@/lib/utils";
 import { expectedMoveFromIV, expectedMoveFromStraddle, formatDateIST, formatNumberIN, formatStrike, MINUS } from "@/lib/options";
 import type { BuildupCounts, ChainModel } from "./chainModel";
