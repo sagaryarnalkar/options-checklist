@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": ["e2e/**/*.spec.ts", "src/**/*.test.{ts,tsx}"],
+  "project": ["src/**/*.{ts,tsx}", "e2e/**/*.ts", "*.{ts,mjs,js}"],
+  "ignore": ["src/components/ui/**"],
+  "ignoreDependencies": [
+    "fake-indexeddb",
+    "vite-plugin-pwa"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "vite": { "config": ["vite.config.ts"] },
+  "vitest": { "config": ["vitest.config.ts"] },
+  "playwright": { "config": ["playwright.config.ts"] },
+  "eslint": { "config": ["eslint.config.js"] }
+}

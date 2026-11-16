@@ -1,12 +1,15 @@
-"""Option Hub tab — Mr. Chartist's open-source options terminal, run BY this app.
+"""Option Hub tab — Mr. Chartist's options terminal, part of this repo and run BY this app.
 
-Option Hub (https://github.com/MrChartist/india-s-best-option-hub) is a React app plus a Node data
-proxy. There is no second service to maintain: this app installs, builds and supervises it
-(the RUNTIME section below), so a normal `git pull && systemctl --user restart options-app` deploys
-both. Its version is the pinned HUB_REF in this file — bumping it in a PR is how it gets updated.
-His code is fetched from his GitHub into DATA_DIR/option-hub/ at deploy time and never committed
-here (our repo is public; his licence, s.3.3, forbids hosting it for anyone but its owner) and
-never edited (our behaviour lives in deploy/option_hub/*.mjs preloads and wrapper).
+Option Hub (upstream https://github.com/MrChartist/india-s-best-option-hub) is a React app plus a
+Node data proxy. Its source lives in optionhub/ (a git subtree; our changes are listed in
+optionhub/OPTIONS-CHECKLIST-CHANGES.md) and we edit it like our own code. There is no second service
+to maintain: this app builds and supervises it (the RUNTIME section below), so a normal
+`git pull && systemctl --user restart options-app` deploys both. A change under optionhub/ changes
+its content hash, and the next restart rebuilds it (outside market hours, or Build now).
+Taking upstream updates: git subtree pull --prefix=optionhub <upstream> <ref> --squash.
+Licence (optionhub/LICENSE, Option Hub Personal Use Licence 1.0): personal use, changes allowed,
+sharing allowed with the LICENSE file and every copyright / "Required Notice" line kept (s.2.4,
+s.3.7 — never remove them); s.3.3 forbids running it as a site used by anyone but its owner.
 
 The only one-time, root-level step is the hub's Caddy site (deploy/option_hub.sh, sudo): the hub
 must sit at the ROOT of its own host — his React router has no base path — so it lives at
@@ -61,13 +64,14 @@ _TOKEN_MSG = b"option-hub-cookie-v1"
 STATIC_PORT = int(os.environ.get("OPTION_HUB_PORT", "4001"))
 PROXY_PORT = int(os.environ.get("OPTION_HUB_PROXY_PORT", "4002"))
 
-# ---- pinned versions: bump in a PR, the next restart rebuilds (outside market hours) -------------
-HUB_REPO = "https://github.com/MrChartist/india-s-best-option-hub.git"
-HUB_REF = "18e1d52cd0ecdb99538fd4ca97b98c045ed89a95"   # tested 2026-11-16 (#110/#111)
+# ---- versions: the hub's is the content hash of optionhub/ (source_version) -----------------------
 NODE_VERSION = "v22.23.4"      # downloaded only when the server has no Node >= NODE_MIN_MAJOR
 NODE_MIN_MAJOR = 20
 
 REPO_DIR = Path(__file__).resolve().parent
+SOURCE_DIR = REPO_DIR / "optionhub"
+# not needed to build or run it (docs = 7 MB of screenshots); also never copied into a build
+SOURCE_SKIP = {"node_modules", "dist", ".cache", ".git", "docs", "e2e"}
 SERVE_MJS = REPO_DIR / "deploy" / "option_hub" / "serve.mjs"
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -152,7 +156,7 @@ def status() -> dict:
 #   * The build (npm ci + vite build) peaks at ~1.2 GB RAM and a minute of both CPUs, so it never
 #     starts in market hours (the recorder runs every minute) unless the owner presses "Build now"
 #     in the tab, and never without MEM_NEEDED_MB of RAM + swap headroom.
-#   * A new pinned ref builds BESIDE the running one; the swap is a restart of serve.mjs. The old
+#   * A changed optionhub/ builds BESIDE the running one; the swap is a restart of serve.mjs. The old
 #     build keeps serving until then, so an update never takes the hub down for the build.
 #   * One supervisor per server (flock): a second app worker leaves it alone.
 #   * serve.mjs runs in its own process group; stopping the app stops it and his proxy. systemd's
@@ -161,12 +165,47 @@ def status() -> dict:
 MEM_NEEDED_MB = 1600
 BUILD_BLOCK_IST = ((9, 0), (15, 45))          # weekday window with no automatic build
 FAILED_RETRY_S = 30 * 60
-STEP_TIMEOUT_S = {"fetch": 600, "install": 1200, "build": 1200, "prune": 600}
+STEP_TIMEOUT_S = {"install": 1200, "build": 1200, "prune": 600}
 
 
 def _home() -> Path:
     from db import DATA_DIR
     return Path(DATA_DIR) / "option-hub"
+
+
+def _source_files(src: Path = SOURCE_DIR):
+    """Every file under optionhub/ that a build needs, as (relative posix path, Path), sorted."""
+    out = []
+    for root, dirs, files in os.walk(src):
+        rel_root = Path(root).relative_to(src)
+        dirs[:] = sorted(d for d in dirs if not (rel_root == Path(".") and d in SOURCE_SKIP)
+                         and d not in ("node_modules", ".git"))
+        for f in files:
+            p = Path(root) / f
+            out.append(((rel_root / f).as_posix(), p))
+    out.sort()
+    return out
+
+
+def source_version(src: Path = SOURCE_DIR) -> str:
+    """Content hash (sha256 of paths + bytes) of the hub's source. ~24 MB → well under a second.
+    Content, not mtimes: a fresh clone or a checkout that rewrites files must not force a rebuild."""
+    if not (src / "package.json").exists():
+        raise FileNotFoundError(f"{src}/package.json missing")
+    h = hashlib.sha256()
+    for rel, p in _source_files(src):
+        h.update(rel.encode() + b"\0")
+        h.update(p.read_bytes())
+        h.update(b"\0")
+    return h.hexdigest()
+
+
+def copy_source(dst: Path, src: Path = SOURCE_DIR) -> None:
+    """Copy the files source_version() hashes into a fresh build directory."""
+    for rel, p in _source_files(src):
+        t = dst / rel
+        t.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(p, t)
 
 
 def _market_busy(now: Optional[datetime] = None) -> bool:
@@ -319,7 +358,7 @@ def _frame_ancestors(url: str) -> str:
 
 def serve_env(url: str, build: Path, node_bin: str, token: str) -> dict:
     """The environment serve.mjs + his proxy run with. Nothing else of ours leaks in (no Kite/Fyers/
-    Anthropic secrets): only the hub token, which its preload needs to reach /hub/feed/*."""
+    Anthropic secrets): only the hub token, which optionhub/server/dashboard.mjs needs to reach /hub/feed/*."""
     p = urlparse(url)
     env = {k: v for k, v in os.environ.items()
            if k in ("HOME", "USER", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR")}
@@ -352,6 +391,7 @@ class _Runtime:
         self.force = False
         self.failed_at = 0.0
         self.restarts = 0
+        self.version: Optional[str] = None   # content hash of optionhub/ this app wants running
         self.info: dict = {"state": "off", "detail": ""}
 
     # ---- status ------------------------------------------------------------------------
@@ -363,8 +403,8 @@ class _Runtime:
         with self._lock:
             out = dict(self.info)
         out["since_s"] = round(time.time() - out.pop("since", time.time()))
-        out.update({"ref": HUB_REF[:12], "pid": self.proc.pid if self.proc and self.proc.poll() is None else None,
-                    "running_ref": self.proc_dir.name if self.proc_dir and self.proc else None,
+        out.update({"version": self.version, "pid": self.proc.pid if self.proc and self.proc.poll() is None else None,
+                    "running": self.proc_dir.name if self.proc_dir and self.proc else None,
                     "restarts": self.restarts, "market_hours_block": _market_busy()})
         if out["state"] in ("failed", "restarting", "low_memory"):
             log = "build.log" if out["state"] == "failed" and out.get("phase") == "build" else "serve.log"
@@ -419,9 +459,12 @@ class _Runtime:
             self._set("failed", "ASSISTANT_KEY is not set — the hub's lock and feed are derived from it")
             return
         token = cookie_token(key)
-        if not shutil.which("git"):
-            self._set("failed", "git is not installed on the server — sudo apt-get install -y git", phase="runtime")
+        try:
+            self.version = source_version()
+        except OSError as e:
+            self._set("failed", f"cannot read the hub's source ({SOURCE_DIR}): {e}", phase="runtime")
             return
+        ver = self.version
         backoff, started = 5, time.time()
         while not self._stop.is_set():
             try:
@@ -429,15 +472,24 @@ class _Runtime:
                 if not node:
                     self._set("installing", f"downloading Node {NODE_VERSION} (one time)", phase="node")
                     node = install_node()
-                want_ready = is_built(HUB_REF, url)
+                want_ready = is_built(ver, url)
                 if want_ready:
                     self.force = False
                 else:
+                    # keep the previous build serving while this version builds (a deploy that
+                    # changes optionhub/ would otherwise take the hub down for the whole build)
+                    if not (self.proc and self.proc.poll() is None):
+                        prev = _built_dirs(url)
+                        if prev:
+                            _killpg(self.proc)
+                            _kill_stale(_home() / "serve.pid")
+                            self.proc, self.proc_dir = _spawn(prev[0][0], node, url, token)
+                            started = time.time()
                     want_ready = self._maybe_build(url, node)
                 if self._stop.is_set():
                     break
                 built = _built_dirs(url)
-                run = build_dir(HUB_REF) if want_ready else (built[0][0] if built else None)
+                run = build_dir(ver) if want_ready else (built[0][0] if built else None)
                 if run is None:
                     self._sleep(60)
                     continue
@@ -448,7 +500,7 @@ class _Runtime:
                     started = time.time()
                 pending = "" if want_ready else self.info.get("detail", "")
                 if self.info.get("state") not in ("running",) or pending:
-                    self._set("running", pending and f"running {run.name}; update to {HUB_REF[:12]} pending — {pending}",
+                    self._set("running", pending and f"running {run.name}; update to {ver[:12]} pending — {pending}",
                               node=node["source"])
                 # watch the child; re-evaluate every minute (a pending update may now be buildable)
                 for _ in range(30):
@@ -475,7 +527,7 @@ class _Runtime:
         _killpg(self.proc)
 
     def _maybe_build(self, url: str, node: dict) -> bool:
-        """Build HUB_REF if the rules allow it now. Returns True when it is built."""
+        """Build optionhub/ (this version) if the rules allow it now. Returns True when it is built."""
         have_old = bool(_built_dirs(url))
         if not self.force:
             if _market_busy():
@@ -496,41 +548,43 @@ class _Runtime:
             self._build(url, node, keep_serving=have_old)
         except Exception as e:  # noqa: BLE001
             self.failed_at = time.time()
-            self._set("failed", f"build of {HUB_REF[:12]} failed: {str(e)[:300]} (retries in 30 min, or Build now)",
+            self._set("failed", f"build of {self.version[:12]} failed: {str(e)[:300]} (retries in 30 min, or Build now)",
                       phase="build")
             return False
         return True
 
     def _build(self, url: str, node: dict, keep_serving: bool) -> None:
         home = _home()
-        final = build_dir(HUB_REF, home)
-        tmp = final.parent / f".tmp-{HUB_REF[:12]}-{os.getpid()}"
+        ver = self.version
+        final = build_dir(ver, home)
+        tmp = final.parent / f".tmp-{ver[:12]}-{os.getpid()}"
         shutil.rmtree(tmp, ignore_errors=True)
         tmp.parent.mkdir(parents=True, exist_ok=True)
         log = home / "build.log"
-        log.write_text(f"[{datetime.now(IST):%Y-%m-%d %H:%M:%S}] build {HUB_REF} for {url} "
+        log.write_text(f"[{datetime.now(IST):%Y-%m-%d %H:%M:%S}] build optionhub/ {ver} for {url} "
                        f"(node {node['source']} {node['node']})\n")
         env = {**os.environ, "PATH": node["bin"] + os.pathsep + os.environ.get("PATH", ""),
-               "VITE_PROXY_URL": url, "NODE_OPTIONS": "--max-old-space-size=1536",
+               "VITE_PROXY_URL": url, "VITE_DASHBOARD_KITE": "1", "NODE_OPTIONS": "--max-old-space-size=1536",
                "npm_config_update_notifier": "false", "CI": "1"}
         npm = str(Path(node["bin"]) / "npm")
         steps = [
-            ("fetch", ["git", "clone", "--quiet", "--filter=blob:none", "--no-checkout", HUB_REPO, str(tmp)], home),
-            ("fetch", ["git", "-C", str(tmp), "checkout", "--quiet", "--detach", HUB_REF], home),
             ("install", [npm, "ci", "--no-audit", "--no-fund", "--loglevel=error"], tmp),
             ("build", [npm, "run", "build", "--silent"], tmp),
             ("prune", [npm, "prune", "--omit=dev", "--no-audit", "--no-fund", "--loglevel=error"], tmp),
         ]
         try:
-            for i, (name, cmd, cwd) in enumerate(steps, 1):
+            self._set("building", f"copy (1/{len(steps) + 1})" +
+                      (" — the current version keeps running meanwhile" if keep_serving else ""), phase="build")
+            copy_source(tmp)
+            for i, (name, cmd, cwd) in enumerate(steps, 2):
                 if self._stop.is_set():
                     raise RuntimeError("stopped")
-                self._set("building", f"{name} ({i}/{len(steps)})" +
+                self._set("building", f"{name} ({i}/{len(steps) + 1})" +
                           (" — the current version keeps running meanwhile" if keep_serving else ""), phase="build")
                 self._run_step(name, cmd, cwd, env, log)
             if not (tmp / "dist" / "index.html").exists():
                 raise RuntimeError("the build produced no dist/index.html")
-            (tmp / ".occl-build").write_text(_stamp(HUB_REF, url) + "\n")
+            (tmp / ".occl-build").write_text(_stamp(ver, url) + "\n")
             if final.exists():
                 shutil.rmtree(final)
             tmp.rename(final)

@@ -1,9 +1,9 @@
 """Kite data for the Option Hub tab, from the dashboard's own Kite login (#111).
 
 Option Hub's Zerodha adapter builds its option chain from two Kite calls: the NFO instrument dump
-and /quote. A preload in its proxy process (deploy/option_hub/kite_feed.mjs) sends both HERE
+and /quote. In our build its Kite client (optionhub/server/dashboard.mjs, via kiteFetch) sends both HERE
 instead of api.kite.trade. Its code never holds a real Kite token, and nothing it sends reaches
-Kite: orders, positions, funds and history get a read-only refusal from the preload.
+Kite: orders, positions, funds and history get a read-only refusal there.
 
 Each contract's quote is the NEWER of
   * the recorder's latest minute (ATM±10 of the nearest expiry: zero extra Kite calls), and
@@ -30,8 +30,8 @@ NOTE the recorder's own 15:30 OI does NOT match that official EOD (same contract
 15:30:01 vs 7,008,690 official), so it is never used as the baseline.
 
 NSE website relay (nse()): outside Kite hours (and for indices, FII/DII, holidays …) his proxy reads
-www.nseindia.com itself — which refuses his Node client from the droplet. The preload
-deploy/option_hub/nse_relay.mjs sends those reads here instead; see the section below.
+www.nseindia.com itself — which refuses its Node client from the droplet. In our build
+(optionhub/server/dashboard.mjs, via nseJson) those reads come here instead; see the section below.
 """
 
 from __future__ import annotations
@@ -406,7 +406,7 @@ def prev(symbol: str, expiry: Optional[str] = None) -> dict:
 # the 16 Nov 2026 install smoke test got 502 for the NIFTY chain while, from the SAME server, our
 # python `requests` session read the ASM/GSM lists and corporate filings (#81 found the same split
 # for urllib vs requests there; from a home connection Node, urllib and requests all get 200).
-# So the hub's preload (deploy/option_hub/nse_relay.mjs) sends those reads here and we make them
+# So the hub's nseJson (optionhub/server/dashboard.mjs) sends those reads here and we make them
 # with `requests`. Read-only GETs of /api/* only; cached briefly; one call at a time, spaced, with
 # a back-off after a timeout — the IP is shared with the CSP scanner's NSE reads.
 

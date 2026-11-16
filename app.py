@@ -682,7 +682,7 @@ def hub_status():
     return JSONResponse(out)
 
 
-# Kite feed for the hub (hub_feed.py): its proxy's preload (deploy/option_hub/kite_feed.mjs) calls
+# Kite feed for the hub (hub_feed.py): its Kite client (optionhub/server/dashboard.mjs) calls
 # these instead of api.kite.trade, with X-Hub-Feed = the hub cookie token. Answers are Kite-shaped
 # ({"status": "success"|"error", ...}) because his Zerodha adapter parses them as Kite's own.
 
@@ -739,7 +739,7 @@ def hub_feed_profile(x_hub_feed: Optional[str] = Header(default=None)):
 
 @app.get("/hub/feed/nse")
 def hub_feed_nse(path: str, x_hub_feed: Optional[str] = Header(default=None)):
-    """www.nseindia.com/api/* for the hub's proxy (deploy/option_hub/nse_relay.mjs): NSE's bot wall
+    """www.nseindia.com/api/* for the hub's proxy (optionhub/server/dashboard.mjs): NSE's bot wall
     refuses his Node client from the droplet but answers our `requests` session. NSE's own status,
     content type and body are passed through."""
     _hub_feed_auth(x_hub_feed)
