@@ -63,6 +63,23 @@
       if (u.origin === location.origin && /^\/(login|fyers\/login)\b/.test(u.pathname)) el.target = "_top";
     }, true);
   }
+  // The HeroZero terminal is the main UI: the owner (app key saved in this browser) opening the dashboard
+  // lands there; the public keeps this page. ?classic=1 stays here. Only when the terminal is up — else
+  // this page shows as before (also after 4 s whatever happens).
+  var key = ""; try { key = localStorage.getItem("hz_app_key") || ""; } catch (e) {}
+  if (!embed && key && q.get("classic") !== "1" && window.top === window) {
+    d.classList.add("hz-to-terminal");
+    var shown = false, show = function(){ if (!shown) { shown = true; d.classList.remove("hz-to-terminal"); } };
+    setTimeout(show, 4000);
+    fetch("/hub/status", { cache: "no-store" }).then(function(r){ return r.json(); }).then(function(st){
+      if (!(st && st.configured && st.frontend_ok && st.proxy_ok && st.url)) return show();
+      return fetch("/hub/session", { method: "POST", headers: { "X-App-Key": key } }).then(function(r){
+        if (!r.ok) return show();
+        shown = true;
+        location.replace(st.url + "/");
+      });
+    }).catch(show);
+  }
   var qt = embed && q.get("theme"), qs = embed && q.get("skin");
   d.dataset.theme = (qt && /^[a-z-]{2,20}$/.test(qt)) ? qt : (localStorage.getItem("hz_theme") || "indigo");
   d.dataset.skin = (qs && /^[a-z]{2,20}$/.test(qs)) ? qs : (localStorage.getItem("hz_skin") || "fintech");
@@ -868,6 +885,8 @@
     --shadow-sm:0 1px 2px rgba(0,0,0,.5); --shadow-md:0 3px 10px rgba(0,0,0,.5); --shadow-lg:0 12px 32px rgba(0,0,0,.6);
   }
 
+  /* Owner opening the dashboard: hidden for the moment it takes to hand over to the terminal (boot script). */
+  :root.hz-to-terminal body{ visibility:hidden; }
   /* Embedded in the HeroZero terminal (?embed=1): its sidebar and toolbar replace our header + tab bar. */
   :root.hz-embed .hz-header{ display:none !important; }
   :root.hz-embed .wrap{ max-width:none !important; padding:14px 18px 40px !important; }
