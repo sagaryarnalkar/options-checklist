@@ -56,7 +56,7 @@ from typing import Optional
 
 from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException, Request
 from fastapi.responses import (
-    FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
+    FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response,
     StreamingResponse,
 )
 
@@ -735,6 +735,20 @@ def hub_feed_profile(x_hub_feed: Optional[str] = Header(default=None)):
     _hub_feed_auth(x_hub_feed)
     import hub_feed as _hf
     return _hub_feed_call(lambda: JSONResponse({"status": "success", "data": _hf.profile()}))
+
+
+@app.get("/hub/feed/nse")
+def hub_feed_nse(path: str, x_hub_feed: Optional[str] = Header(default=None)):
+    """www.nseindia.com/api/* for the hub's proxy (deploy/option_hub/nse_relay.mjs): NSE's bot wall
+    refuses his Node client from the droplet but answers our `requests` session. NSE's own status,
+    content type and body are passed through."""
+    _hub_feed_auth(x_hub_feed)
+    import hub_feed as _hf
+
+    def go():
+        code, ctype, body = _hf.nse(path)
+        return Response(content=body, status_code=code, media_type=ctype)
+    return _hub_feed_call(go)
 
 
 @app.post("/hub/runtime/build")

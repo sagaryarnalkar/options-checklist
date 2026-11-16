@@ -28,10 +28,15 @@ bot-walled; OpnIntrst is in UNITS like Kite — verified: 13 Nov NIFTY 17-Nov 25
 previous_close_price to his broker-proxy response — the fields his parser already reads.
 NOTE the recorder's own 15:30 OI does NOT match that official EOD (same contract: 8,715,265 at
 15:30:01 vs 7,008,690 official), so it is never used as the baseline.
+
+NSE website relay (nse()): outside Kite hours (and for indices, FII/DII, holidays …) his proxy reads
+www.nseindia.com itself — which refuses his Node client from the droplet. The preload
+deploy/option_hub/nse_relay.mjs sends those reads here instead; see the section below.
 """
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from datetime import date, datetime
@@ -394,6 +399,112 @@ def prev(symbol: str, expiry: Optional[str] = None) -> dict:
     return {"session": session.isoformat(), "expiry": expiry, "legs": out}
 
 
+# ------------------------------------------------------ NSE website relay --
+# Option Hub's proxy reads www.nseindia.com/api/* (option chain, indices, market status, FII/DII,
+# holidays, VIX history …) with Node's own fetch. From the droplet NSE's bot wall (Akamai) refuses
+# that client — it fingerprints the TLS handshake, and a datacenter IP gets the strict treatment:
+# the 16 Nov 2026 install smoke test got 502 for the NIFTY chain while, from the SAME server, our
+# python `requests` session read the ASM/GSM lists and corporate filings (#81 found the same split
+# for urllib vs requests there; from a home connection Node, urllib and requests all get 200).
+# So the hub's preload (deploy/option_hub/nse_relay.mjs) sends those reads here and we make them
+# with `requests`. Read-only GETs of /api/* only; cached briefly; one call at a time, spaced, with
+# a back-off after a timeout — the IP is shared with the CSP scanner's NSE reads.
+
+NSE_WWW = "https://www.nseindia.com"
+NSE_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
+NSE_PATH_RE = re.compile(r"/api/[A-Za-z0-9][A-Za-z0-9_\-/]*(\?[A-Za-z0-9_\-.~%&=+,:]*)?")
+NSE_CACHE_S = 5.0           # his proxy caches 15 s itself; this only folds simultaneous asks
+NSE_GAP_S = 0.3             # spacing between our NSE calls
+NSE_TIMEOUT_S = 10.0        # his client gives up at 15 s
+NSE_BACKOFF_S = 30.0        # after a timeout / connection failure, answer 503 without calling
+NSE_REPRIME_S = 240.0       # refresh the homepage cookie handshake this often
+NSE_CACHE_MAX = 200
+
+_nse_lock = threading.Lock()                  # one NSE call at a time
+_nse_cache_lock = threading.Lock()
+_nse: dict = {"session": None, "primed_at": 0.0, "last_call": 0.0, "down_until": 0.0}
+_nse_cache: dict = {}                         # path -> (at, status, content_type, body)
+nse_stats = {"calls": 0, "cache_hits": 0, "errors": 0, "last_ok_at": None, "last_error": None}
+
+
+def _nse_session(fresh: bool = False):
+    """A requests session primed on the homepage, like csp._nse_session (the path proven on the
+    droplet). A failed handshake still returns the bare session: the APIs answer without it."""
+    import requests
+    if fresh or _nse["session"] is None or time.time() - _nse["primed_at"] > NSE_REPRIME_S:
+        ses = requests.Session()
+        ses.headers.update({"User-Agent": NSE_UA, "Accept-Language": "en-US,en;q=0.9"})
+        try:
+            ses.get(NSE_WWW, timeout=NSE_TIMEOUT_S, headers={
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"})
+        except Exception:  # noqa: BLE001 — bare session below
+            pass
+        _nse.update(session=ses, primed_at=time.time())
+    return _nse["session"]
+
+
+def _nse_get(path: str, fresh: bool = False):
+    gap = NSE_GAP_S - (time.time() - _nse["last_call"])
+    if gap > 0:
+        time.sleep(gap)
+    ses = _nse_session(fresh)
+    try:
+        return ses.get(NSE_WWW + path, timeout=NSE_TIMEOUT_S, headers={
+            "Accept": "application/json, text/plain, */*", "Referer": NSE_WWW + "/option-chain"})
+    finally:
+        _nse["last_call"] = time.time()
+        nse_stats["calls"] += 1
+
+
+def _nse_refused(r) -> bool:
+    """Bot-wall answers: 401/403, or an HTML page where JSON was asked for."""
+    if r.status_code in (401, 403):
+        return True
+    return (r.ok and "json" not in (r.headers.get("content-type") or "")
+            and r.content.lstrip()[:1] not in (b"{", b"["))
+
+
+def nse(path: str) -> tuple:
+    """(status, content_type, body) of GET www.nseindia.com<path>, for the hub's proxy."""
+    if not isinstance(path, str) or len(path) > 400 or not NSE_PATH_RE.fullmatch(path):
+        raise FeedRefused(400, "Only www.nseindia.com/api/* reads are relayed.", "InputException")
+    now = time.time()
+    with _nse_cache_lock:
+        hit = _nse_cache.get(path)
+        if hit and now - hit[0] < NSE_CACHE_S:
+            nse_stats["cache_hits"] += 1
+            return hit[1:]
+    with _nse_lock:
+        with _nse_cache_lock:                 # someone may have fetched it while we waited
+            hit = _nse_cache.get(path)
+            if hit and time.time() - hit[0] < NSE_CACHE_S:
+                nse_stats["cache_hits"] += 1
+                return hit[1:]
+        if time.time() < _nse["down_until"]:
+            raise FeedRefused(503, f"NSE relay backing off after an error ({nse_stats['last_error']}).")
+        try:
+            r = _nse_get(path)
+            if _nse_refused(r):               # stale handshake? one retry on a fresh session
+                r = _nse_get(path, fresh=True)
+        except Exception as e:  # noqa: BLE001 — timeout / connection: back off, his proxy retries
+            nse_stats["errors"] += 1
+            nse_stats["last_error"] = f"{type(e).__name__}: {str(e)[:120]}"
+            _nse["down_until"] = time.time() + NSE_BACKOFF_S
+            raise FeedRefused(504, f"NSE did not answer ({type(e).__name__}).")
+        ctype = r.headers.get("content-type") or "application/octet-stream"
+        if r.status_code == 200 and not _nse_refused(r):
+            nse_stats["last_ok_at"] = time.time()
+            with _nse_cache_lock:
+                if len(_nse_cache) >= NSE_CACHE_MAX:
+                    _nse_cache.clear()
+                _nse_cache[path] = (time.time(), 200, ctype, r.content)
+        else:
+            nse_stats["errors"] += 1
+            nse_stats["last_error"] = f"HTTP {r.status_code} {path.split('?')[0]}"
+        return r.status_code, ctype, r.content
+
+
 def status() -> dict:
     """Small summary for /hub/status (public: market data plumbing only)."""
     now = time.time()
@@ -405,4 +516,9 @@ def status() -> dict:
         "topup_errors": stats["topup_errors"],
         "last_error": stats["last_error"],
         "last_call_age_s": round(now - stats["last_call_at"]) if stats["last_call_at"] else None,
+        "nse_relay": {
+            "calls": nse_stats["calls"], "cache_hits": nse_stats["cache_hits"],
+            "errors": nse_stats["errors"], "last_error": nse_stats["last_error"],
+            "last_ok_age_s": round(now - nse_stats["last_ok_at"]) if nse_stats["last_ok_at"] else None,
+        },
     }

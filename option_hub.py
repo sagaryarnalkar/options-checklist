@@ -101,7 +101,7 @@ def cookie_domain(request_host: str, hub: Optional[str]) -> Optional[str]:
 def _probe(url: str, timeout: float = 1.5) -> Optional[dict]:
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
-            body = r.read(4096)
+            body = r.read(262144)  # his /health lists brokers + risk engine: more than a few KB
             try:
                 return {"status": r.status, "json": json.loads(body)}
             except ValueError:
@@ -124,6 +124,18 @@ def status() -> dict:
     j = (px or {}).get("json") or {}
     if out["proxy_ok"]:
         out["proxy"] = {"version": j.get("version"), "uptime_s": j.get("uptime")}
+        # His own view of each data source: last success / last error (why a panel shows sample data).
+        now_ms = time.time() * 1000
+        ups = {}
+        for src in ("nse", "yahoo", "bse"):
+            h = (j.get("upstreams") or {}).get(src) or {}
+            if any(h.get(k) for k in ("lastSuccess", "lastFailure")):
+                ups[src] = {
+                    "last_ok_age_s": round((now_ms - h["lastSuccess"]) / 1000) if h.get("lastSuccess") else None,
+                    "last_fail_age_s": round((now_ms - h["lastFailure"]) / 1000) if h.get("lastFailure") else None,
+                    "last_error": h.get("lastError"),
+                }
+        out["proxy"]["upstreams"] = ups
     out["runtime"] = RUNTIME.snapshot()
     return out
 

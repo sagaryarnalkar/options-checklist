@@ -1689,9 +1689,10 @@
         values, and its server-side Kite calls are answered by this dashboard instead of reaching Kite.</p>
       <p><b>Everything else from NSE.</b> Index prices, expiry lists, FII/DII, participant OI and the ban list come
         from NSE's public website; so does the option chain outside market hours, before the morning Kite login,
-        and for SENSEX. Anything it could not fetch is labelled <em>sample</em> — treat that as "no data". NSE
-        stalls requests carrying its own bot-check cookies, so our server strips them before they leave
-        (deploy/option_hub/nse_fetch_fix.mjs); his code is untouched.</p>
+        and for SENSEX. Anything it could not fetch is labelled <em>sample</em> — treat that as "no data". NSE's bot
+        wall turns away his server code when it calls from our server, so his NSE website reads go through this
+        dashboard's own NSE connection (the one the Cash-Secured Puts tab uses); archive files go direct
+        (deploy/option_hub/nse_relay.mjs). His code is untouched.</p>
       <p><b>Read-only.</b> Orders, positions and funds through the hub are refused — nothing it sends reaches
         Kite. Trade in Kite itself. The hub unloads after 5 minutes on another tab, so a forgotten hub stops
         asking for data (it reopens at its home screen).</p>
