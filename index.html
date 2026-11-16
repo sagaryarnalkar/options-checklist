@@ -754,7 +754,7 @@
   .hz-header{ border-bottom:0; }
   .hz-tabbar{ border-top:2px solid var(--color-divider); border-bottom:2px solid var(--color-divider); }
   /* gap/align reset: .hz-header .in (brand row) also matches this element */
-  .hz-tabbar .in{ display:grid; grid-template-columns:repeat(6,1fr); max-width:1720px; margin:0 auto;
+  .hz-tabbar .in{ display:grid; grid-template-columns:repeat(7,1fr); max-width:1720px; margin:0 auto;
     padding:0; gap:0; align-items:stretch; }
   .hz-tabbar .tab{
     appearance:none; background:transparent; border:0; border-right:1px solid var(--color-divider);
@@ -893,6 +893,15 @@
   .pos-actions{ display:flex; gap:8px; flex-wrap:wrap; }
   .pos-sub{ font-size:11px; color:var(--muted); font-family:var(--mono); }
   .pos-gate{ margin-top:10px; }
+  /* Option Hub tab: Mr. Chartist's terminal, self-hosted at hub.<domain>, framed here */
+  .hub-frame-wrap{ margin-top:12px; border:1px solid var(--border); border-radius:var(--radius, 12px); overflow:hidden; background:var(--panel); }
+  .hub-frame-wrap iframe{ display:block; width:100%; height:max(640px, calc(100vh - 210px)); border:0; background:var(--panel); }
+  .hub-steps{ margin:8px 0 0; padding-left:18px; line-height:1.6; }
+  .hub-steps code, .hub-about code{ font-family:var(--mono); font-size:.92em; }
+  .hub-about{ margin-top:12px; }
+  .hub-about summary{ cursor:pointer; color:var(--muted); }
+  .hub-about p{ margin:8px 0 0; line-height:1.55; color:var(--muted); }
+  @media (max-width:640px){ .hub-frame-wrap iframe{ height:calc(100vh - 150px); } }
   .pos-gate-form{ display:flex; gap:8px; flex-wrap:wrap; }
   .pos-gate-form input{ font-family:var(--mono); padding:6px 8px; border:1px solid var(--border); background:var(--panel-2); color:var(--text); min-width:240px; }
   .pos-group{ padding:12px 14px; margin-bottom:12px; }
@@ -1125,6 +1134,7 @@
       <button class="tab active" data-tab="oiflow" role="tab">OI Flow</button>
       <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
       <button class="tab" data-tab="csp" role="tab">Cash Puts</button>
+      <button class="tab" data-tab="hub" role="tab">Option Hub</button>
     </div>
   </div>
 </header>
@@ -1636,6 +1646,50 @@
     </p>
   </div>
 
+  <div class="tab-panel" id="tabHub">
+    <div class="card pos-headcard">
+      <div class="pos-title-row">
+        <div class="strat-meta"><b style="color:var(--text)">Option Hub</b> by Mr. Chartist
+          <span id="hubSub" class="pos-sub"></span></div>
+        <div class="pos-actions">
+          <a id="hubOpen" class="live-refresh" target="_blank" rel="noopener" style="display:none;text-decoration:none">Open full screen ↗</a>
+          <button type="button" id="hubReload" class="live-refresh">Reload</button>
+        </div>
+      </div>
+      <div id="hubGate" class="pos-gate" style="display:none">
+        <div id="hubGateMsg" class="note"></div>
+        <form id="hubGateForm" class="pos-gate-form">
+          <input type="password" id="hubKeyInput" placeholder="App key (ASSISTANT_KEY)" autocomplete="off">
+          <button type="submit" class="live-refresh">Unlock</button>
+        </form>
+      </div>
+      <div id="hubNote"></div>
+    </div>
+    <div id="hubFrameWrap" class="hub-frame-wrap" style="display:none">
+      <iframe id="hubFrame" title="Option Hub by Mr. Chartist" allow="clipboard-write; fullscreen"></iframe>
+    </div>
+    <details class="hub-about card">
+      <summary>About this tab — what it is, where its data comes from, what to be careful of</summary>
+      <p><b>What it is.</b> <a href="https://github.com/MrChartist/india-s-best-option-hub" target="_blank" rel="noopener" style="color:var(--accent)">Option Hub</a>
+        is a free, open-source options terminal by Rohit Singh (Mr. Chartist): option chain, OI analysis,
+        expiry day, volatility, gamma exposure, FII/DII positioning, strategy builder and optimizer,
+        backtester, paper trading. It is <b>his app, unchanged</b>, running on our server next to this
+        dashboard. Nothing it shows feeds our signals, paper book or Claude's call.</p>
+      <p><b>Only you can open it.</b> Its licence allows personal use by one individual and forbids running it
+        as a website other people use, so the hub's address answers "private" unless your browser holds the
+        cookie this tab sets with your app key (the same key as the Positions tab).</p>
+      <p><b>Data.</b> With no broker connected it reads NSE's public website (option chain, indices, FII/DII,
+        participant OI, ban list) and labels anything it could not fetch as <em>sample</em>. Treat a "sample"
+        badge as "no data". NSE stalls requests carrying its own bot-check cookies, so our server strips them
+        before they leave (deploy/option_hub/nse_fetch_fix.mjs); his code is untouched.</p>
+      <p><b>Careful: real orders.</b> If you connect Zerodha (or any broker) in its Broker Settings, it can place
+        <b>real orders</b> on that account. The Kite access token also expires every morning there, separately
+        from this dashboard's login.</p>
+      <p><b>Numbers can differ from our tabs.</b> It computes its own Greeks, max pain and GEX from its own snapshot,
+        and NIFTY lot size, expiries and timestamps come from its feed, not our recorder.</p>
+    </details>
+  </div>
+
   <aside id="aiDrawer" class="ai-drawer" aria-label="Ask Claude">
     <div class="ai-head">
       <div><b>Ask Claude</b> <span id="aiScope" class="ai-scope"></span></div>
@@ -1861,6 +1915,7 @@
       paper: document.getElementById("tabPaper"),
       csp: document.getElementById("tabCsp"),
       positions: document.getElementById("tabPositions"),
+      hub: document.getElementById("tabHub"),
     };
     const activate = (key) => {
       tabs.forEach(x=>x.classList.toggle("active", x.dataset.tab === key));
@@ -1875,6 +1930,7 @@
       if (key === "oiflow") initOiFlowTab();
       if (key === "paper") initPaperTab();
       if (key === "csp") initCspTab();
+      if (key === "hub") initHubTab();
     };
     tabs.forEach(t => t.addEventListener("click", ()=>{
       activate(t.dataset.tab);
@@ -1952,6 +2008,81 @@
   function posStartTimer(){
     posStopTimer();
     _posTimer = setInterval(() => { if (!document.hidden) loadPositions(); }, POS_REFRESH_MS);
+  }
+
+  // ---------- Option Hub tab (Mr. Chartist's terminal, self-hosted, owner-only) ----------
+  // /hub/status says whether it is set up; POST /hub/session (same app key as Positions) sets
+  // the cookie Caddy demands at hub.<domain>; only then is the iframe pointed at it. The frame
+  // loads once per page view — switching tabs keeps its state.
+  let _hubInited = false, _hubLoaded = false, _hubBusy = false;
+
+  function hubShowGate(msg){
+    document.getElementById("hubGate").style.display = "block";
+    document.getElementById("hubGateMsg").textContent = msg ||
+      "Option Hub is locked to you alone (its licence is personal-use only, and it can place real orders once a broker is connected). Enter the app key — the same one as the Positions tab.";
+  }
+
+  function hubNote(html){ document.getElementById("hubNote").innerHTML = html || ""; }
+
+  function initHubTab(){
+    if (!_hubInited){
+      _hubInited = true;
+      document.getElementById("hubGateForm").addEventListener("submit", e => {
+        e.preventDefault();
+        const v = document.getElementById("hubKeyInput").value.trim();
+        if (!v) return;
+        posSetKey(v);
+        document.getElementById("hubKeyInput").value = "";
+        document.getElementById("hubGate").style.display = "none";
+        hubLoad();
+      });
+      document.getElementById("hubReload").addEventListener("click", () => {
+        if (_hubLoaded){ const f = document.getElementById("hubFrame"); f.src = f.src; }
+        else hubLoad();
+      });
+    }
+    if (!_hubLoaded) hubLoad();
+  }
+
+  async function hubLoad(){
+    if (_hubBusy) return;
+    _hubBusy = true;
+    const sub = document.getElementById("hubSub");
+    try {
+      let st = null;
+      try { st = await (await fetch("/hub/status", { cache: "no-store" })).json(); } catch (e) {}
+      if (!st){ hubNote(`<div class="note">Could not reach the dashboard server.</div>`); return; }
+      if (!st.configured){
+        sub.textContent = " · not set up on the server yet";
+        hubNote(`<div class="note">Option Hub is not installed on the server yet. On the droplet, from the app folder, run:
+          <ol class="hub-steps"><li><code>git pull</code></li><li><code>bash deploy/option_hub.sh</code></li></ol>
+          It builds Mr. Chartist's app outside this repo, starts it as the <code>option-hub</code> user service, adds a locked
+          <code>hub.</code> site to Caddy (it asks for sudo), sets <code>OPTION_HUB_URL</code> in .env and restarts this app.</div>`);
+        return;
+      }
+      if (!posKey()){ hubShowGate(); hubNote(""); return; }
+      const r = await fetch("/hub/session", { method: "POST", headers: { "X-App-Key": posKey() } });
+      if (r.status === 401){ posSetKey(""); hubShowGate("That key was not accepted — enter the ASSISTANT_KEY from the server's .env."); return; }
+      if (!r.ok){
+        const j = await r.json().catch(() => ({}));
+        hubNote(`<div class="note">${esc(j.detail || ("Could not unlock Option Hub (HTTP " + r.status + ")."))}</div>`);
+        return;
+      }
+      document.getElementById("hubGate").style.display = "none";
+      const down = [];
+      if (!st.frontend_ok) down.push("its web app");
+      if (!st.proxy_ok) down.push("its data proxy");
+      sub.textContent = down.length ? "" : " · running on our server · only you can open it";
+      hubNote(down.length ? `<div class="note">The server is not answering for ${down.join(" and ")}. On the droplet:
+        <code>systemctl --user status option-hub</code> · logs <code>journalctl --user -u option-hub -n 80 --no-pager</code></div>` : "");
+      const f = document.getElementById("hubFrame");
+      f.src = st.url + "/";
+      const open = document.getElementById("hubOpen");
+      open.href = st.url + "/";
+      open.style.display = "";
+      document.getElementById("hubFrameWrap").style.display = "block";
+      _hubLoaded = true;
+    } finally { _hubBusy = false; }
   }
 
   async function loadPositions(force){
