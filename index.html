@@ -3134,7 +3134,7 @@
       const r = await fetch("/oi/gaps?_=" + Date.now(), { cache: "no-store" });
       if (!r.ok) return;
       const d = await r.json();
-      const gaps = (d.gaps || []).filter(g => g.reason === "no data" || g.minutes < 340);
+      const gaps = (d.gaps || []).filter(g => g.reason === "no data" || g.reason === "frozen quotes" || g.minutes < 340);
       if (!gaps.length){ card.hidden = true; return; }
       card.hidden = false;
       body.innerHTML = `<div class="hold-note">These sessions are missing or only partly
@@ -3142,8 +3142,10 @@
         refetched while that week's option contracts are still listed; once the weekly
         expires the tokens are gone and the session cannot be reconstructed.</div>
         <div class="gap-list">${gaps.map(g => `<span class="gap-chip">
-          <b>${g.date}</b> ${g.reason === "no data" ? "no data" : g.minutes + "/376 min"}
-          ${g.needed_expiry ? `<span class="csp-sub">needs ${g.needed_expiry}</span>` : ""}
+          <b>${g.date}</b> ${g.reason === "frozen quotes"
+            ? `frozen quotes <span class="csp-sub">likely a holiday — cleared by the next sweep once Kite confirms no session</span>`
+            : `${g.reason === "no data" ? "no data" : g.minutes + "/376 min"}
+          ${g.needed_expiry ? `<span class="csp-sub">needs ${g.needed_expiry}</span>` : ""}`}
         </span>`).join("")}</div>
         <div class="hold-note">A sweep runs automatically on every login. To force one now:
           <code>POST /oi/gaps?fill=true</code></div>`;
