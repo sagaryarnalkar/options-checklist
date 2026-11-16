@@ -10,9 +10,12 @@
 # What it does (sudo only for the Caddyfile, and optional swap):
 #   1. checks Node >= 20, memory for the build (~1.2 GB peak), ASSISTANT_KEY
 #   2. clones/updates ~/option-hub at HUB_REF — OUTSIDE this repo, his files never edited
-#   3. npm ci + vite build (frontend talks to https://hub.<domain>), prunes dev deps
-#   4. user-systemd unit option-hub → deploy/option_hub/serve.mjs (127.0.0.1:4001 + proxy :4002)
+#   3. npm ci + vite build (frontend talks to https://hub.<domain>), prunes dev deps — skipped
+#      when that commit is already built (FORCE_BUILD=1 to redo)
+#   4. user-systemd unit option-hub → deploy/option_hub/serve.mjs (127.0.0.1:4001 + proxy :4002);
+#      its Kite calls are answered by this app (hub_feed.py) via HUB_FEED_TOKEN — read-only
 #   5. Caddy site block for hub.<domain>: 401 without the owner cookie, else route to 4001/4002
+#      (/api/broker-proxy and /api/_options-checklist/* go to serve.mjs on 4001, see there)
 #   6. OPTION_HUB_URL in .env, restarts options-app, smoke-tests the lock and the NSE data path
 set -euo pipefail
 
@@ -62,23 +65,6 @@ EOF
 fi
 echo "node $("$NODE_BIN" -v) at $NODE_BIN"
 
-# ---- memory for the build ---------------------------------------------------------------
-avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
-swapf=$(awk '/SwapFree/ {print int($2/1024)}' /proc/meminfo)
-echo "memory: ${avail} MB available, ${swapf} MB swap free (build peaks ~1200 MB)"
-if (( avail + swapf < 1600 )); then
-  echo "Not enough headroom for the build. A 2 GB swap file fixes it:"
-  echo "  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
-  echo "  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
-  if ask "Create it now?"; then
-    [[ -e /swapfile ]] && die "/swapfile already exists — enable it with: sudo swapon /swapfile"
-    sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile
-    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
-  else
-    exit 1
-  fi
-fi
-
 # ---- lock token -------------------------------------------------------------------------
 TOKEN="$("$PY" "$REPO_DIR/option_hub.py" token)" || die "could not derive the lock token (ASSISTANT_KEY in .env?)"
 [[ "$TOKEN" =~ ^[0-9a-f]{64}$ ]] || die "unexpected token format"
@@ -96,15 +82,37 @@ ref="$HUB_REF"; [[ "$ref" == "main" ]] && ref="origin/main"
 git -C "$HUB_DIR" checkout --quiet --detach "$ref"
 echo "at $(git -C "$HUB_DIR" log -1 --format='%h %ci %s')"
 
-# ---- build ------------------------------------------------------------------------------
-say "Installing dependencies + building (a minute or two)"
-(
-  cd "$HUB_DIR"
-  npm ci --no-audit --no-fund --loglevel=error
-  VITE_PROXY_URL="https://$HUB_HOST" NODE_OPTIONS="--max-old-space-size=1536" nice -n 10 npm run build --silent
-  npm prune --omit=dev --no-audit --no-fund --loglevel=error
-)
-[[ -f "$HUB_DIR/dist/index.html" ]] || die "build produced no dist/index.html"
+# ---- build (skipped when this commit was already built for this host) -------------------
+STAMP_FILE="$HUB_DIR/.options-checklist-build"
+STAMP="$(git -C "$HUB_DIR" rev-parse HEAD) https://$HUB_HOST"
+if [[ -f "$HUB_DIR/dist/index.html" && "$(cat "$STAMP_FILE" 2>/dev/null)" == "$STAMP" && "${FORCE_BUILD:-0}" != 1 ]]; then
+  say "Build is current for this commit — skipping npm ci + vite build (FORCE_BUILD=1 to redo)"
+else
+  avail=$(awk '/MemAvailable/ {print int($2/1024)}' /proc/meminfo)
+  swapf=$(awk '/SwapFree/ {print int($2/1024)}' /proc/meminfo)
+  echo "memory: ${avail} MB available, ${swapf} MB swap free (build peaks ~1200 MB)"
+  if (( avail + swapf < 1600 )); then
+    echo "Not enough headroom for the build. A 2 GB swap file fixes it:"
+    echo "  sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile"
+    echo "  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab"
+    if ask "Create it now?"; then
+      [[ -e /swapfile ]] && die "/swapfile already exists — enable it with: sudo swapon /swapfile"
+      sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile >/dev/null && sudo swapon /swapfile
+      grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+    else
+      exit 1
+    fi
+  fi
+  say "Installing dependencies + building (a minute or two)"
+  (
+    cd "$HUB_DIR"
+    npm ci --no-audit --no-fund --loglevel=error
+    VITE_PROXY_URL="https://$HUB_HOST" NODE_OPTIONS="--max-old-space-size=1536" nice -n 10 npm run build --silent
+    npm prune --omit=dev --no-audit --no-fund --loglevel=error
+  )
+  [[ -f "$HUB_DIR/dist/index.html" ]] || die "build produced no dist/index.html"
+  echo "$STAMP" > "$STAMP_FILE"
+fi
 
 # ---- systemd user unit ------------------------------------------------------------------
 say "Installing user service option-hub"
@@ -125,6 +133,8 @@ Environment=PROXY_HOST=127.0.0.1
 Environment=PROXY_ALLOWED_ORIGINS=https://$HUB_HOST
 Environment=PROXY_ALLOWED_HOSTS=$HUB_HOST
 Environment=HUB_FRAME_ANCESTORS=https://$DOMAIN
+Environment=HUB_FEED_URL=http://127.0.0.1:8000
+Environment=HUB_FEED_TOKEN=$TOKEN
 Environment=NODE_ENV=production
 Environment=NODE_OPTIONS=--max-old-space-size=384
 ExecStart=$NODE_BIN $REPO_DIR/deploy/option_hub/serve.mjs
@@ -135,6 +145,7 @@ Nice=5
 [Install]
 WantedBy=default.target
 EOF
+chmod 600 "$HOME/.config/systemd/user/option-hub.service"   # holds HUB_FEED_TOKEN
 systemctl --user daemon-reload
 systemctl --user enable --quiet option-hub
 systemctl --user restart option-hub
@@ -148,9 +159,11 @@ $HUB_HOST {
 	# Owner-only (licence: personal use; the hub can place real orders). The cookie is set by
 	# the dashboard POST /hub/session for holders of ASSISTANT_KEY. route = literal order.
 	@locked not header Cookie *hz_hub=$TOKEN*
+	@ours path /api/_options-checklist/* /api/broker-proxy
 	@data path /api/* /ws /health
 	route {
 		respond @locked "Option Hub is private. Open it from the Option Hub tab on https://$DOMAIN" 401
+		reverse_proxy @ours 127.0.0.1:4001
 		reverse_proxy @data 127.0.0.1:4002
 		reverse_proxy 127.0.0.1:4001
 	}
@@ -206,6 +219,12 @@ check "https://$HUB_HOST/ without cookie (locked)" 401 "$c"
 check "https://$HUB_HOST/ with cookie"            200 "$(curl -s -o /dev/null -w '%{http_code}' --cookie "hz_hub=$TOKEN" "https://$HUB_HOST/")"
 check "https://$HUB_HOST/api/x/ban-list with cookie" 200 "$(curl -s -o /dev/null -w '%{http_code}' --cookie "hz_hub=$TOKEN" -H "Origin: https://$HUB_HOST" "https://$HUB_HOST/api/x/ban-list")"
 for _ in $(seq 1 15); do curl -fsS -o /dev/null http://127.0.0.1:8000/healthz 2>/dev/null && break; sleep 1; done
+feed="$(curl -s -o /dev/null -w '%{http_code}' -H "X-Hub-Feed: $TOKEN" http://127.0.0.1:8000/hub/feed/profile || true)"
+case "$feed" in
+  200) printf '  %-50s OK (dashboard logged in to Kite: the chain uses Kite in market hours)\n' "Kite feed for the hub" ;;
+  403) printf '  %-50s OK (dashboard not logged in to Kite today: the hub uses NSE until you log in)\n' "Kite feed for the hub" ;;
+  *)   printf '  %-50s FAIL (HTTP %s)\n' "Kite feed for the hub" "$feed"; fails=$((fails + 1)) ;;
+esac
 check "dashboard /hub/status configured" true "$(curl -s http://127.0.0.1:8000/hub/status | "$PY" -c 'import json,sys; print(str(json.load(sys.stdin).get("configured")).lower())' 2>/dev/null || echo error)"
 
 echo

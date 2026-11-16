@@ -890,7 +890,21 @@ def purge_day(conn, day_iso: str, dry_run: bool = False) -> dict:
     return out
 
 
+# Start/finish of the latest scheduler tick (epoch s). hub_feed.py keeps its own Kite quote calls
+# out of a running tick so the Option Hub never competes with the recorder for Kite's 1 req/s.
+TICK = {"started": 0.0, "finished": 0.0}
+
+
 def run_snapshot(force: bool = False) -> dict:
+    """One scheduler tick (see _run_snapshot), stamped in TICK."""
+    TICK["started"] = time.time()
+    try:
+        return _run_snapshot(force)
+    finally:
+        TICK["finished"] = time.time()
+
+
+def _run_snapshot(force: bool = False) -> dict:
     """One scheduler tick. No-ops outside market hours or when not logged in.
     Returns a small per-underlying status dict; never raises."""
     now = datetime.now(IST)

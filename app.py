@@ -670,7 +670,65 @@ async def assistant_conversations(scope: Optional[str] = None,
 def hub_status():
     """Public: is the hub set up / running. Sync (two short local HTTP probes, threadpool)."""
     import option_hub as _oh
-    return JSONResponse(_oh.status())
+    import hub_feed as _hf
+    out = _oh.status()
+    out["kite_feed"] = _hf.status()
+    return JSONResponse(out)
+
+
+# Kite feed for the hub (hub_feed.py): its proxy's preload (deploy/option_hub/kite_feed.mjs) calls
+# these instead of api.kite.trade, with X-Hub-Feed = the hub cookie token. Answers are Kite-shaped
+# ({"status": "success"|"error", ...}) because his Zerodha adapter parses them as Kite's own.
+
+def _hub_feed_auth(x_hub_feed: Optional[str]) -> None:
+    import hmac
+    import option_hub as _oh
+    key = os.environ.get("ASSISTANT_KEY", "")
+    if not key:
+        raise HTTPException(status_code=503, detail="ASSISTANT_KEY is not set")
+    if not x_hub_feed or not hmac.compare_digest(x_hub_feed.encode(), _oh.cookie_token(key).encode()):
+        raise HTTPException(status_code=401, detail="hub feed token required")
+
+
+def _hub_feed_call(fn):
+    import hub_feed as _hf
+    try:
+        return fn()
+    except _hf.FeedRefused as e:
+        return JSONResponse({"status": "error", "error_type": e.error_type, "message": e.message,
+                             "data": None}, status_code=e.status)
+
+
+@app.get("/hub/feed/instruments/{exchange}")
+def hub_feed_instruments(exchange: str, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_feed_auth(x_hub_feed)
+    import hub_feed as _hf
+    return _hub_feed_call(lambda: PlainTextResponse(_hf.instruments_csv(exchange), media_type="text/csv"))
+
+
+@app.get("/hub/feed/quote")
+def hub_feed_quote(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_feed_auth(x_hub_feed)
+    import hub_feed as _hf
+    keys = request.query_params.getlist("i")[:600]
+    return _hub_feed_call(lambda: JSONResponse({"status": "success", "data": _hf.quote(keys)}))
+
+
+@app.get("/hub/feed/prev")
+def hub_feed_prev(symbol: str, expiry: Optional[str] = None, x_hub_feed: Optional[str] = Header(default=None)):
+    """Previous-session official OI/close per strike (NSE bhavcopy) for serve.mjs's enrichment."""
+    _hub_feed_auth(x_hub_feed)
+    import hub_feed as _hf
+    if expiry is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", expiry):
+        raise HTTPException(status_code=400, detail="expiry must be YYYY-MM-DD")
+    return _hub_feed_call(lambda: JSONResponse({"status": "success", "data": _hf.prev(symbol, expiry)}))
+
+
+@app.get("/hub/feed/profile")
+def hub_feed_profile(x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_feed_auth(x_hub_feed)
+    import hub_feed as _hf
+    return _hub_feed_call(lambda: JSONResponse({"status": "success", "data": _hf.profile()}))
 
 
 @app.post("/hub/session")
