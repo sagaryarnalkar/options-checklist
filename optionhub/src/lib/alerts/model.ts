@@ -22,7 +22,7 @@ export function createRule(r: NewAlertRule, now: number = Date.now()): AlertRule
 export const RULES_FILE_VERSION = 2;
 
 export interface RulesFile {
-  app: "mr-chartist-terminal";
+  app: "herozero-terminal";
   kind: "alert-rules";
   version: number;
   exportedAt: string;
@@ -31,7 +31,7 @@ export interface RulesFile {
 
 export function exportRulesJSON(rules: AlertRule[], now: Date = new Date()): string {
   const file: RulesFile = {
-    app: "mr-chartist-terminal",
+    app: "herozero-terminal",
     kind: "alert-rules",
     version: RULES_FILE_VERSION,
     exportedAt: now.toISOString(),

@@ -89,7 +89,7 @@ export function ParticipantExplainer() {
     <div>
       <div className="mb-2 flex items-center gap-2 text-muted-foreground">
         <BookOpen className="h-4 w-4" aria-hidden="true" />
-        <p className="text-label">Learn</p>
+        <p className="text-label">How to read this</p>
       </div>
       <Accordion type="multiple" className="w-full">
         {ITEMS.map((it) => (

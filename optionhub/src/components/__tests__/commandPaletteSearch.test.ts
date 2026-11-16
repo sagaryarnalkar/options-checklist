@@ -31,7 +31,6 @@ describe("command palette ranking", () => {
     ["max pain", "/max-pain-pcr"],
     ["iv", "/volatility"],
     ["charges", "/calculators"],
-    ["nism", "/learn"],
     ["fii", "/participants"],
     ["option chain", "/option-chain"],
     ["oc", "/option-chain"],

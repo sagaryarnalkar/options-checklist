@@ -7,7 +7,7 @@
 export const TOUR_KEY = "mc_onboarding_tour_v1";
 
 export interface TourStep {
-  id: "welcome" | "chain" | "builder" | "paper" | "learn";
+  id: "welcome" | "chain" | "builder" | "paper";
   title: string;
   body: string;
   /** Where the step's main button goes; the welcome step stays on the dashboard. */
@@ -41,13 +41,6 @@ export const TOUR_STEPS: readonly TourStep[] = [
     body: "Send the strategy to Paper Trading to place orders at mid price with slippage, set stop-loss and target, and see expiry settlement with exercise STT. No real money is involved.",
     to: "/paper-trading",
     cta: "Open Paper Trading",
-  },
-  {
-    id: "learn",
-    title: "Learn as you go",
-    body: "Every metric has an info icon with the formula and an Indian example. The Learn hub walks through options from the basics to Greeks and expiry-day risk.",
-    to: "/learn",
-    cta: "Open Learn",
   },
 ];
 

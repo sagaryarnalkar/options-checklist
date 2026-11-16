@@ -10,7 +10,7 @@ import { formatDateIST, formatTimeIST } from "@/lib/options";
 import { PCR_BANDS, pcrSignal, percentileRank, quantile, snapshotSeries } from "@/lib/oiUtils";
 import { getDailyStats } from "@/lib/snapshotStore";
 import { cn } from "@/lib/utils";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { ChartCaption, EmptyState, ModuleHeader, SessionBadge, StatTile } from "./shared";
 import { fmtRatio, fmtStrike } from "./format";
 

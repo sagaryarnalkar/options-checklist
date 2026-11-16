@@ -4,7 +4,7 @@ import { Area, CartesianGrid, ComposedChart, Legend, Line, ReferenceDot, Referen
 import { ArrowUpRight, Magnet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { Card, CardContent } from "@/components/ui/card";
 import { axisProps, chartColors, compactAxisTick, gridProps, legendStyle, tokenColor, tooltipCursor, tooltipStyle } from "@/lib/chartTheme";
 import { inferOiUnit } from "@/lib/gexData";

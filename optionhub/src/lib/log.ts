@@ -110,10 +110,7 @@ export function formatLogs(entries: readonly LogEntry[] = getRecentLogs(30)): st
 
 // ── Error reports (used by ErrorBoundary) ────────────────────────────────
 
-export const GITHUB_ISSUES_URL = "https://github.com/MrChartist/india-s-best-option-hub/issues/new";
 
-/** Upper bound for a prefilled GitHub issue URL (browsers and GitHub cap around 8 KB). */
-const MAX_ISSUE_URL_LENGTH = 7000;
 
 /** Current path and query, or "unknown" outside a browser. */
 export function currentPath(): string {
@@ -148,21 +145,3 @@ export function buildErrorReport(error: Error, componentStack?: string | null): 
   return lines.join("\n");
 }
 
-/** Prefilled "new issue" URL, trimmed to stay under browser URL limits. */
-export function buildIssueUrl(error: Error, componentStack?: string | null): string {
-  const title = `[Bug] ${error.message || error.name}`.slice(0, 120);
-  const fence = "```";
-  let report = buildErrorReport(error, componentStack);
-  const make = (body: string) =>
-    `${GITHUB_ISSUES_URL}?${new URLSearchParams({
-      title,
-      labels: "bug",
-      body: `**What happened**\n\n<!-- What were you doing when this appeared? -->\n\n**Error report**\n\n${fence}text\n${body}\n${fence}\n`,
-    }).toString()}`;
-  let url = make(report);
-  while (url.length > MAX_ISSUE_URL_LENGTH && report.length > 200) {
-    report = `${report.slice(0, Math.floor(report.length * 0.75))}\n…(trimmed)`;
-    url = make(report);
-  }
-  return url;
-}

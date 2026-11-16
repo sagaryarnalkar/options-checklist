@@ -119,7 +119,7 @@ export function LayoutCustomizer({ state, onChange, showContext, onShowContext, 
   };
 
   const onExport = () => {
-    const ok = downloadText(`mr-chartist-workspaces-${istDateString()}.json`, exportWorkspaces(state));
+    const ok = downloadText(`herozero-workspaces-${istDateString()}.json`, exportWorkspaces(state));
     setNote(ok ? "Exported all workspaces as JSON." : "Could not start the download in this browser.");
   };
   const onCopy = async () => {
@@ -406,7 +406,7 @@ function ImportDialog({ open, onOpenChange, onImport }: { open: boolean; onOpenC
             className="font-mono text-body-sm"
             aria-invalid={!!error}
             aria-describedby={error ? `${areaId}-err` : undefined}
-            placeholder='{"kind":"mr-chartist/dashboard-workspaces", …}'
+            placeholder='{"kind":"herozero/dashboard-workspaces", …}'
           />
           {error ? (
             <p id={`${areaId}-err`} role="alert" className="text-body-sm text-bearish">

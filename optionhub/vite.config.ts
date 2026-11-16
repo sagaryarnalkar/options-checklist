@@ -74,7 +74,7 @@ function siteMetaPlugin(siteUrl: string): Plugin {
   const paths = staticPaths(ROUTES);
   const robots = buildRobotsTxt(site);
   return {
-    name: "mr-chartist-site-meta",
+    name: "herozero-site-meta",
     transformIndexHtml(html) {
       // Without VITE_SITE_URL, canonical and og:url point at the project page on mrchartist.com and
       // og:image at the copy of public/og-image.png on GitHub.
@@ -121,7 +121,7 @@ function siteMetaPlugin(siteUrl: string): Plugin {
         const lastmod = new Date().toISOString().slice(0, 10);
         this.emitFile({ type: "asset", fileName: "sitemap.xml", source: buildSitemapXml(site, paths, lastmod) });
       } else {
-        this.warn("VITE_SITE_URL is not set: sitemap.xml was skipped; canonical and og:url point at the mrchartist.com project page.");
+        this.warn("VITE_SITE_URL is not set: sitemap.xml was skipped; canonical and og:url fall back to "/".");
       }
     },
   };

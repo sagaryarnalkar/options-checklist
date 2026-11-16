@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { dteLabel, formatDateIST } from "@/lib/options";
 import type { ExpirySummary } from "@/lib/oiUtils";
 import { cn } from "@/lib/utils";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { EmptyState, ModuleHeader } from "./shared";
 import { fmtStrike } from "./format";
 

@@ -1,10 +1,9 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Link, useInRouterContext } from "react-router-dom";
-import { ArrowRight, Info } from "lucide-react";
+import { Info } from "lucide-react";
 import { HoverCardPortal } from "@radix-ui/react-hover-card";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
-import { formatMetricValue, getMetric } from "@/content/learn/metrics";
-import type { MetricInfo } from "@/content/learn/types";
+import { formatMetricValue, getMetric } from "@/content/metrics/metrics";
+import type { MetricInfo } from "@/content/metrics/types";
 import { cn } from "@/lib/utils";
 
 /** Look up a metric explainer by key or alias ("ivr", "IV Rank", "call-wall"). */
@@ -13,26 +12,8 @@ export function useMetric(metric: string): MetricInfo | undefined {
   return useMemo(() => getMetric(metric), [metric]);
 }
 
-function LearnMoreLink({ to, children }: { to: string; children: ReactNode }) {
-  const inRouter = useInRouterContext();
-  const cls =
-    "inline-flex items-center gap-1 rounded-chip text-body-sm font-semibold text-primary-ink underline-offset-4 hover:underline focus-visible:shadow-focus focus-visible:outline-none";
-  if (inRouter) {
-    return (
-      <Link to={to} className={cls}>
-        {children}
-      </Link>
-    );
-  }
-  return (
-    <a href={to} className={cls}>
-      {children}
-    </a>
-  );
-}
-
 export interface MetricHelpProps {
-  /** Metric key from src/content/learn/metrics.ts, e.g. "ivr", "maxPain", "callWall". */
+  /** Metric key from src/content/metrics/metrics.ts, e.g. "ivr", "maxPain", "callWall". */
   metric: string;
   /** Optional live value from the host page, shown as "Now: …" and formatted by the metric's unit. */
   value?: number | string;
@@ -106,12 +87,6 @@ export default function MetricHelp({ metric, value, className, children }: Metri
                   {info.pitfalls[0]}
                 </p>
               ) : null}
-              <div className="flex items-center justify-between gap-2 border-t border-separator pt-2">
-                <span className="text-micro text-muted-foreground">HeroZero Learn</span>
-                <LearnMoreLink to={`/learn/${info.lessonSlug}`}>
-                  Learn more <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                </LearnMoreLink>
-              </div>
             </div>
           </HoverCardContent>
         </HoverCardPortal>

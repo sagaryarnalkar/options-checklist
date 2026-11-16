@@ -1,5 +1,4 @@
 import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
 import { Infinity as InfinityIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -51,8 +50,6 @@ function Unlimited({ tone }: { tone: "profit" | "loss" }) {
   );
 }
 
-const POP_LESSON = "/learn/probability-of-profit";
-
 const pct = (p: number) => (Number.isFinite(p) ? formatPct(p * 100, { decimals: 1 }) : "—");
 const levels = (xs: number[]) => (xs.length ? xs.map((x) => formatStrike(Math.round(x))).join(" · ") : "None");
 
@@ -87,15 +84,11 @@ export function StatsPanel({ a, p50, spot, roundTrip }: StatsPanelProps) {
       </Tile>
       <Tile
         label="Chance to hit 50% profit"
-        helpHref={POP_LESSON}
         badge={<span className="rounded-chip bg-control-track px-1 font-num text-micro text-muted-foreground">P50</span>}
         help="Also called P50: the chance of touching 50% of max profit at any day-end before expiry (Monte-Carlo, 1,200 lognormal paths). Useful for take-profit rules; higher than POP for most credit trades."
         sub={
           <>
-            {a.multiExpiry ? "Single expiry only" : !Number.isFinite(a.maxProfit) ? "Needs capped profit" : "Touch 50% of max profit"} ·{" "}
-            <Link to={POP_LESSON} className="text-primary-ink underline underline-offset-2">
-              Lesson
-            </Link>
+            {a.multiExpiry ? "Single expiry only" : !Number.isFinite(a.maxProfit) ? "Needs capped profit" : "Touch 50% of max profit"}
           </>
         }
       >

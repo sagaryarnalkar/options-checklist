@@ -1,5 +1,5 @@
 /**
- * Metric explainers used by <MetricHelp metric="…"/> across the terminal and by the Learn hub.
+ * Metric explainers used by <MetricHelp metric="…"/> (the ⓘ popovers) across the terminal.
  * Worked examples that quote numbers compute them with @/lib/options, so the copy can never
  * drift from the maths the terminal actually uses.
  */
@@ -56,7 +56,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
       "Deep OTM strikes often show inflated IV from wide bid-ask spreads; prefer mid prices.",
       "On expiry day ATM IV can jump around because a ₹1 move in premium is a big IV change when little time is left.",
     ],
-    lessonSlug: "implied-volatility",
     unit: "pct",
   },
   ivr: {
@@ -71,7 +70,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
       "One extreme day (an election result, say) sets the high and squashes IVR for the next 12 months.",
       "Needs at least about 20 observations; the terminal shows no value with less history.",
     ],
-    lessonSlug: "implied-volatility",
     unit: "score",
   },
   ivp: {
@@ -83,7 +81,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "IVP 80 means IV was lower on 80% of days. It is robust to one-off spikes, so it is usually a better 'rich or cheap' gauge than IVR.",
     indiaExample: "If NIFTY's 30-day IV was below 13% on 140 of the last 250 sessions, IVP = 56: today's IV is about average.",
     pitfalls: ["Percentile says nothing about how far IV is from the extremes; read it next to IVR.", "Regime changes (a new lot size, weekly expiry rules) can make old history less comparable."],
-    lessonSlug: "implied-volatility",
     unit: "score",
   },
   hv: {
@@ -95,7 +92,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "HV is the realised move; IV is the forecast. When IV is far above HV, options are priced for more movement than the market has been delivering.",
     indiaExample: "If NIFTY's daily log returns over 20 sessions have a standard deviation of 0.65%, HV20 = 0.65% × √252 ≈ 10.3%.",
     pitfalls: ["Window choice matters: HV10 reacts fast, HV60 is smooth.", "Gaps at the open are missed by close-to-close HV; use Yang-Zhang for gap-heavy stocks."],
-    lessonSlug: "implied-volatility",
     unit: "pct",
   },
   vrp: {
@@ -107,7 +103,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Positive VRP is normal: sellers demand a premium for taking crash risk. A very wide VRP favours selling premium; a negative VRP means options are cheap relative to actual movement.",
     indiaExample: "NIFTY IV 13% vs HV20 10% gives a VRP of +3 points. Sellers are being paid for about 30% more movement than recent history.",
     pitfalls: ["VRP is positive on average but sellers still lose heavily on the rare days the move exceeds it.", "Compare matching horizons: 7-day IV with recent realised, not 30-day HV."],
-    lessonSlug: "implied-volatility",
     unit: "points",
   },
   pop: {
@@ -123,7 +118,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
       "Real index returns have fatter tails than the lognormal model, so far-OTM short options are riskier than POP suggests.",
       "Charges shift breakevens and lower the true POP slightly.",
     ],
-    lessonSlug: "probability-of-profit",
     unit: "pct",
   },
   p50: {
@@ -135,7 +129,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Credit sellers who book profits early care more about P50 than POP. P50 is usually higher than POP for short-premium trades.",
     indiaExample: "An iron condor collecting ₹6,000 per lot might show POP 62% but P50 75%, because there is time for the position to decay to ₹3,000 before any adverse move.",
     pitfalls: ["Depends on the path model and its volatility input.", "Ignores slippage on exit, which can be large in illiquid strikes."],
-    lessonSlug: "probability-of-profit",
     unit: "pct",
   },
   ev: {
@@ -147,7 +140,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "With option prices at fair value, EV is close to zero before costs, and negative after charges. A strongly positive EV usually means your volatility input disagrees with the market's.",
     indiaExample: "A NIFTY bull call spread priced off the same IV used for EV will show EV of a few rupees either side of zero per lot; subtract roughly ₹100–₹150 of charges per round trip.",
     pitfalls: ["High POP and negative EV often go together: frequent small wins, rare large losses.", "EV says nothing about the size of the worst case."],
-    lessonSlug: "probability-of-profit",
     unit: "inr",
   },
   em: {
@@ -159,7 +151,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "In the model the index finishes inside the 1σ band about 68% of the time. The popular 0.85 × straddle rule gives a narrower band (about 0.68σ) that holds roughly half the time, because the straddle prices the average move, which is only about 0.8σ.",
     indiaExample: `NIFTY ${n0(EX_SPOT)}, IV ${formatPct(EX_IV * 100, { decimals: 0 })}, ${EX_DAYS} days: EM ≈ ±${n0(exEmIv.move)} points (${formatNumberIN(exEmIv.lower, 0)} to ${formatNumberIN(exEmIv.upper, 0)}). The 0.85 × straddle rule gives a tighter ±${n0(exEmStraddle.move)}.`,
     pitfalls: ["Know which version you are reading: the 1σ band is missed about one time in three, the straddle-rule band about one time in two.", "Event days (RBI policy, Budget, US CPI) can make the realised move much larger."],
-    lessonSlug: "expected-move",
     unit: "points",
   },
   straddle: {
@@ -171,7 +162,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "A falling straddle on a quiet day is theta at work. A rising straddle while spot is flat means IV is being bid up, often ahead of an event.",
     indiaExample: `NIFTY ${n0(EX_SPOT)}, ${EX_DAYS} days to expiry, IV ${formatPct(EX_IV * 100, { decimals: 0 })}: CE ≈ ₹${n2(exCe)} + PE ≈ ₹${n2(exPe)} = ₹${n2(exStraddle)} (${formatPct((exStraddle / EX_SPOT) * 100, { decimals: 2 })} of spot), or ${inr0(exStraddle * NIFTY_LOT)} per lot of ${NIFTY_LOT}.`,
     pitfalls: ["Use mid prices: last-traded prices of the two legs can be minutes apart.", "The ATM strike changes as spot moves, which makes intraday straddle charts jumpy."],
-    lessonSlug: "expected-move",
     unit: "inr",
   },
   gex: {
@@ -186,7 +176,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
       "In India a large share of option writing is by proprietary traders and retail sellers, not just dealers, so the sign convention is an assumption.",
       "OI updates only a few times a day on NSE, so intraday GEX is stale between updates.",
     ],
-    lessonSlug: "gamma-exposure",
     unit: "inrCompact",
   },
   flip: {
@@ -198,7 +187,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Above the flip: a calmer, mean-reverting tape is more likely. Below it: moves can extend as hedging adds fuel.",
     indiaExample: "If NIFTY trades at 25,150 and the flip is 24,900, a break below 24,900 would put the market in a negative-gamma zone.",
     pitfalls: ["Only as good as the GEX sign assumption.", "Moves as OI changes; treat it as a zone, not a line."],
-    lessonSlug: "gamma-exposure",
     unit: "points",
   },
   callWall: {
@@ -210,7 +198,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Heavy call writing at a strike makes sellers defend it. In Indian convention CE OI is read as resistance (shown in red).",
     indiaExample: "NIFTY with 1.2 crore contracts of call OI at 25,500 vs under 50 lakh at nearby strikes: 25,500 is the call wall.",
     pitfalls: ["Walls shift as writers roll. A decisive break above a wall can trigger short covering."],
-    lessonSlug: "gamma-exposure",
     unit: "points",
   },
   putWall: {
@@ -222,7 +209,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Put writers defend the strike, so it often acts as support. PE OI is read as support (shown in green).",
     indiaExample: "Heavy NIFTY 24,500 PE writing ahead of expiry makes 24,500 the put wall and a common bounce area.",
     pitfalls: ["When the put wall breaks, writers cover by selling futures, which can speed up the fall."],
-    lessonSlug: "gamma-exposure",
     unit: "points",
   },
   absGamma: {
@@ -234,7 +220,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Acts like a magnet near expiry: hedging flows are heaviest here, so price often gravitates to it on expiry day.",
     indiaExample: "On a NIFTY Tuesday expiry with 25,000 the biggest combined OI strike, the index often closes within 50 points of it.",
     pitfalls: ["Pinning is a tendency, not a rule; news overrides it easily."],
-    lessonSlug: "gamma-exposure",
     unit: "points",
   },
   dex: {
@@ -246,7 +231,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Shows how much underlying the option book is effectively long or short. Big shifts in DEX force hedging in futures.",
     indiaExample: "If NIFTY options carry net call delta worth ₹8,000 crore, a dealer short that book needs about ₹8,000 crore of long futures to stay hedged.",
     pitfalls: ["Assumes who is long and who is short each strike; NSE does not publish that split by strike."],
-    lessonSlug: "gamma-exposure",
     unit: "inrCompact",
   },
   vanna: {
@@ -258,7 +242,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Explains why OTM put deltas shrink when IV collapses after an event, which can force dealers to buy back hedges and lift the market.",
     indiaExample: "After an RBI policy day IV crush, NIFTY OTM puts lose delta fast; hedgers buy futures back, a common 'vanna rally'.",
     pitfalls: ["Small per contract, large in aggregate; matters most around events and expiry."],
-    lessonSlug: "volatility-skew",
     unit: "greek",
   },
   charm: {
@@ -270,7 +253,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "OTM option deltas fall towards zero and ITM deltas rise towards one as expiry nears. On expiry day charm is very strong.",
     indiaExample: "A NIFTY 25,200 CE with spot at 25,000 might have delta 0.25 on Friday and 0.08 by Tuesday morning if spot stays put.",
     pitfalls: ["Weekends: calendar-day charm counts Saturday and Sunday; trading-day models do not."],
-    lessonSlug: "volatility-skew",
     unit: "greek",
   },
   rr25: {
@@ -282,7 +264,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Negative RR25 (normal for NIFTY) means puts are dearer than calls: demand for crash protection. A move towards zero or positive means upside demand.",
     indiaExample: "NIFTY 25Δ put IV 14.5%, 25Δ call IV 11.5%: RR25 = −3.0 points, a typical put skew.",
     pitfalls: ["Weekly expiries can show noisy skew because the 25Δ strikes sit close to the money."],
-    lessonSlug: "volatility-skew",
     unit: "points",
   },
   bf25: {
@@ -294,7 +275,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "A higher BF25 means the market is paying up for tail moves in both directions.",
     indiaExample: "Wings at 14.5% and 11.5% with ATM 12.4%: BF25 = 13.0 − 12.4 = +0.6 points.",
     pitfalls: ["Very sensitive to the quality of OTM quotes; use mid prices."],
-    lessonSlug: "volatility-skew",
     unit: "points",
   },
   maxPain: {
@@ -306,7 +286,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Treat it as a gravity zone for expiry day, most useful in the last day or two and when OI is concentrated.",
     indiaExample: "If NIFTY max pain is 25,000 and spot is 25,180 on Monday, some traders expect a drift towards 25,000 into Tuesday expiry.",
     pitfalls: ["It is not a forecast: trending markets ignore it.", "Changes through the day as OI changes; earlier in the week it means little."],
-    lessonSlug: "max-pain-pcr",
     unit: "points",
   },
   pcr: {
@@ -318,7 +297,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "In India puts are mostly written as support, so a rising PCR is usually read as bullish. Above about 1.3 can mean over-confidence; below 0.7 means heavy call writing.",
     indiaExample: "NIFTY put OI 9.6 crore vs call OI 8.0 crore: PCR = 1.20, a moderately bullish reading.",
     pitfalls: ["Volume PCR and OI PCR say different things; know which one you are reading.", "Extreme readings are contrarian signals more often than trend signals."],
-    lessonSlug: "max-pain-pcr",
     unit: "ratio",
   },
   pcrChg: {
@@ -330,7 +308,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Above 1 means more puts than calls are being written today (support building). Negative values mean one side is unwinding.",
     indiaExample: "By noon 1.5 crore NIFTY puts and 0.6 crore calls added: change PCR = 2.5, strong fresh put writing.",
     pitfalls: ["Unstable early in the session when the denominator is small.", "A negative denominator flips the reading; check the raw changes."],
-    lessonSlug: "max-pain-pcr",
     unit: "ratio",
   },
   span: {
@@ -342,7 +319,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "SPAN plus exposure margin is what your broker blocks. Hedged positions get a large SPAN benefit.",
     indiaExample: "One lot of naked short NIFTY ATM call might need around ₹1.2–1.6 lakh total margin; buying a 300-point-away call as a hedge can cut it by more than half.",
     pitfalls: ["SPAN files update several times a day; margins can rise intraday on volatile days.", "Estimates in this terminal are approximations, not the exchange's file."],
-    lessonSlug: "margin-span-elm",
     unit: "inr",
   },
   elm: {
@@ -354,7 +330,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Explains why the margin on the same short straddle rises on expiry day.",
     indiaExample: `One NIFTY lot (${NIFTY_LOT} × ${n0(EX_SPOT)} = ${formatINR(NIFTY_LOT * EX_SPOT, { decimals: 0 })} notional): the extra 2% expiry-day ELM adds about ${formatINR(NIFTY_LOT * EX_SPOT * 0.02, { decimals: 0 })}.`,
     pitfalls: ["Applies to short options on the expiry day of that contract only."],
-    lessonSlug: "margin-span-elm",
     unit: "inr",
   },
   stt: {
@@ -366,7 +341,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "STT does not depend on profit; it applies even to losing trades. For short-premium scalpers it is often the largest cost after brokerage.",
     indiaExample: `Selling one NIFTY lot (${NIFTY_LOT}) at ₹100: STT = ${formatPct(sttSell * 100, { decimals: 2 })} × ₹100 × ${NIFTY_LOT} = ${formatINR(sttSell * 100 * NIFTY_LOT)}.`,
     pitfalls: ["Exercised ITM options pay STT on intrinsic value; for stock options exercise also means physical delivery.", "Rates change with the Budget; this terminal uses a dated table marked for verification."],
-    lessonSlug: "charges-and-stt-trap",
     unit: "inr",
   },
   delta: {
@@ -378,7 +352,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Calls 0 to 1, puts −1 to 0. ATM is near ±0.5. Also a rough probability of finishing in the money and the futures-equivalent position.",
     indiaExample: `NIFTY ${n0(EX_SPOT)}, 25,200 CE, ${EX_DAYS} days, IV ${formatPct(EX_IV * 100, { decimals: 0 })}: Δ ≈ ${formatGreek("delta", exOtmCall.delta)}. One lot behaves like ${n2(exOtmCall.delta * NIFTY_LOT)} units of NIFTY.`,
     pitfalls: ["Delta changes as spot, time and IV change (gamma, charm, vanna).", "Treating delta as an exact probability ignores skew and drift."],
-    lessonSlug: "delta-gamma",
     unit: "greek",
   },
   gamma: {
@@ -390,7 +363,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Highest for ATM options close to expiry. Long gamma profits from big moves; short gamma loses on them.",
     indiaExample: `ATM NIFTY ${EX_DAYS}-day option: Γ ≈ ${formatGreek("gamma", exAtmCall.gamma)}, so a 100-point move shifts delta by about ${n2(exAtmCall.gamma * 100)}.`,
     pitfalls: ["Expiry-day gamma on ATM strikes is extreme: deltas can swing from 0.2 to 0.8 within minutes."],
-    lessonSlug: "delta-gamma",
     unit: "greek",
   },
   theta: {
@@ -402,7 +374,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Negative for buyers, positive for sellers. Theta accelerates sharply in the last few days and hours before expiry.",
     indiaExample: `ATM NIFTY ${EX_DAYS}-day call: Θ ≈ ${formatINR(exAtmCall.theta)} per day per unit, about ${formatINR(exAtmCall.theta * NIFTY_LOT, { decimals: 0 })} per lot of ${NIFTY_LOT}.`,
     pitfalls: ["Weekends: premiums usually price in weekend decay by Friday afternoon.", "Theta income is compensation for gamma risk, not free money."],
-    lessonSlug: "theta-vega-rho",
     unit: "inr",
   },
   vega: {
@@ -414,7 +385,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Largest for ATM, longer-dated options. Long options are long vega; an IV crush after an event hurts buyers even if spot moves their way.",
     indiaExample: `ATM NIFTY ${EX_DAYS}-day option: ν ≈ ${formatINR(exAtmCall.vega)} per vol point. A 3-point IV crush costs about ${formatINR(exAtmCall.vega * 3 * NIFTY_LOT, { decimals: 0 })} per lot.`,
     pitfalls: ["Weekly options have small vega but huge gamma; monthly options are the opposite."],
-    lessonSlug: "theta-vega-rho",
     unit: "inr",
   },
   rho: {
@@ -426,7 +396,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Usually negligible for weekly index options; matters for long-dated options and futures pricing.",
     indiaExample: "A 25 bp RBI rate cut barely moves a weekly NIFTY option (a few paise); it shifts the fair value of a 3-month future by about 0.06%.",
     pitfalls: ["Use a rate close to the T-bill yield, not the repo rate, for fair values."],
-    lessonSlug: "theta-vega-rho",
     unit: "inr",
   },
   buildup: {
@@ -438,7 +407,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Buildups with rising OI show fresh conviction; covering and unwinding show positions being closed and often run out of steam.",
     indiaExample: "NIFTY futures up 0.8% with OI up 6%: long buildup. Up 0.8% with OI down 4%: short covering, a weaker signal.",
     pitfalls: ["For options, rising OI with rising price on a call can be buyers or writers being forced to hold; context matters.", "Day-end OI only; intraday OI updates are periodic."],
-    lessonSlug: "open-interest-buildup",
     unit: "text",
   },
   mwpl: {
@@ -450,7 +418,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Above 95% the stock enters the ban period: only position-reducing trades are allowed until usage falls below 80%.",
     indiaExample: "A mid-cap stock at 92% MWPL usage is close to the ban; fresh positions carry the risk of being stuck if it crosses 95%.",
     pitfalls: ["Opening a new position in a banned stock attracts penalties even if accidental."],
-    lessonSlug: "open-interest-buildup",
     unit: "pct",
   },
   basis: {
@@ -462,7 +429,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "A premium above fair suggests long demand; a discount (negative basis) suggests short-heavy positioning or dividend effects.",
     indiaExample: `NIFTY spot ${n0(EX_SPOT)}, one month to expiry, r 6.5%, dividend yield 1.3%: fair basis ≈ ${formatSigned(EX_SPOT * (Math.exp((0.065 - 0.013) * (30 / 365)) - 1), 0)} points.`,
     pitfalls: ["Basis converges to zero at expiry, which is not a signal.", "Large dividends cause temporary discounts in stock futures."],
-    lessonSlug: "open-interest-buildup",
     unit: "points",
   },
   rollover: {
@@ -474,7 +440,6 @@ export const METRICS: Record<MetricKey, MetricInfo> = {
     howToRead: "Higher than average rollover with a rising basis suggests longs are being carried forward; with a falling basis, shorts.",
     indiaExample: "NIFTY rollover of 78% vs a three-month average of 72%, with rollover cost rising: traders are carrying longs into the next series.",
     pitfalls: ["Compare with the stock's own history; rollover levels differ a lot across stocks."],
-    lessonSlug: "open-interest-buildup",
     unit: "pct",
   },
 };

@@ -126,7 +126,7 @@ export function validateWebhookUrl(raw: string): { ok: true; url: string } | { o
 }
 
 export interface WebhookPayload {
-  source: "mr-chartist-terminal";
+  source: "herozero-terminal";
   kind: "alert";
   test: boolean;
   ruleId: string;
@@ -145,7 +145,7 @@ export interface WebhookPayload {
 
 export function webhookPayload(e: AlertEvent, test = false): WebhookPayload {
   return {
-    source: "mr-chartist-terminal",
+    source: "herozero-terminal",
     kind: "alert",
     test,
     ruleId: e.ruleId,

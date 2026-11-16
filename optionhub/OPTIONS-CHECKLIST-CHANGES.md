@@ -31,6 +31,12 @@ This copy is rebranded as **HeroZero** and is the main shell for the options-che
 | Brand removal | Sidebar "More from …" block and socials, footer site/GitHub links, command-palette brand actions, the ecosystem page (deleted) and its route and redirects, cross-promotion links and the partner banner (render nothing), NISMExams co-branding in Learn, the "Report on GitHub" error link, page titles (`· HeroZero`), HTML head and manifest name, JSON-LD author/publisher/repository. His "Dashboard" is now "Market dashboard" and "Positions" is "Position tracker" (ours take the plain names). |
 | Tests | `brand.test.tsx`, `seo.test.ts` and `learn.test.tsx` updated for HeroZero; new `src/lib/desk.test.ts`. |
 
+### Learn and Ecosystem removed (#116)
+
+- **Learn section deleted:** the `/learn` and `/learn/:slug` pages, lessons, quizzes, simulators, glossary, progress tracker, the sidebar group and the onboarding step. The ⓘ metric popovers stay, without "Learn more" links, at `components/metrics/MetricHelp.tsx` and `content/metrics/*`. The strategy panel lost its "Lesson" link.
+- **Ecosystem code deleted:** the cross-promotion component and its call sites, the social and outbound link components, and his product/ecosystem/social link data. `lib/brand/links.ts` is now just the HeroZero names.
+- Exports and alerts are tagged `herozero-*`. The "report on GitHub" helper is gone. Participants' FAQ heading is now "How to read this".
+
 `LICENSE`, `NOTICE.md` and `COMMERCIAL-LICENSE.md` are kept in this folder, along with the copyright notes in source comments.
 
 Taking upstream updates:

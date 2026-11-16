@@ -77,7 +77,7 @@ describe("canonicalHome", () => {
   it("prefers the configured site and falls back to the project page", () => {
     expect(canonicalHome("https://x.in")).toBe("https://x.in/");
     expect(canonicalHome("")).toBe(PROJECT_PAGE_URL);
-    expect(PROJECT_PAGE_URL).toBe("https://mrchartist.com/open-source/india-s-best-option-hub");
+    expect(PROJECT_PAGE_URL).toBe("/");
     expect(SITE_NAME).toBe("HeroZero Trader Terminal");
   });
 });

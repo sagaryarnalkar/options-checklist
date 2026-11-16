@@ -31,7 +31,7 @@ describe("ROUTES registry", () => {
     const expected = [
       "/", "/option-chain", "/oi-analysis", "/watchlist", "/strategy-builder", "/position-tracker", "/broker-settings",
       "/optimizer", "/volatility", "/gex", "/max-pain-pcr", "/flow", "/screener", "/participants", "/expiry-day",
-      "/calculators", "/paper-trading", "/learn", "/learn/:slug",
+      "/calculators", "/paper-trading",
       "/straddles", "/contract/:symbol/:expiry/:strike/:type", "/futures", "/backtest", "/journal", "/alerts", "/events",
       "/one-cliq", "/orders",
     ];
@@ -60,7 +60,6 @@ describe("ROUTES registry", () => {
       "g f": "/flow",
       "g t": "/one-cliq",
       "g p": "/position-tracker",
-      "g l": "/learn",
     });
   });
 
@@ -79,15 +78,15 @@ describe("path helpers", () => {
   });
 
   it("matches params", () => {
-    expect(matchPath("/learn/:slug", "/learn/what-is-delta")).toEqual({ slug: "what-is-delta" });
-    expect(matchPath("/learn/:slug", "/learn")).toBeNull();
+    expect(matchPath("/contract/:symbol", "/contract/nifty")).toEqual({ symbol: "nifty" });
+    expect(matchPath("/contract/:symbol", "/contract")).toBeNull();
     expect(matchPath("/", "/")).toEqual({});
     expect(matchPath("/gex", "/gexx")).toBeNull();
   });
 
   it("finds routes and titles", () => {
-    expect(findRoute("/learn")?.path).toBe("/learn");
-    expect(findRoute("/learn/iv-crush")?.path).toBe("/learn/:slug");
+    expect(findRoute("/learn")?.path).toBeUndefined();
+    expect(findRoute("/contract/NIFTY/2026-11-17/25000/CE")?.path).toBe("/contract/:symbol/:expiry/:strike/:type");
     expect(routeTitle("/option-chain/")).toBe("Option Chain");
     expect(routeTitle("/")).toBe("Dashboard");
     expect(routeTitle("/does-not-exist")).toBe("Page not found");

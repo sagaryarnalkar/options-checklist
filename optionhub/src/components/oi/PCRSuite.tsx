@@ -5,7 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { formatDateIST } from "@/lib/options";
 import { PCR_BANDS, pcrSignal, type PCRResult } from "@/lib/oiUtils";
 import { cn } from "@/lib/utils";
-import MetricHelp from "@/components/learn/MetricHelp";
+import MetricHelp from "@/components/metrics/MetricHelp";
 import { EmptyState, ModuleHeader, StatTile } from "./shared";
 import { fmtOI, fmtRatio } from "./format";
 import type { ExpiryRow } from "./MaxPainTable";

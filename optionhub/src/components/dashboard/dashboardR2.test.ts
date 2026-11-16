@@ -251,8 +251,8 @@ describe("workspaces", () => {
 });
 
 describe("onboarding tour", () => {
-  it("has five steps covering chain, builder, paper and learn", () => {
-    expect(TOUR_STEPS.map((s) => s.id)).toEqual(["welcome", "chain", "builder", "paper", "learn"]);
+  it("has four steps covering chain, builder and paper", () => {
+    expect(TOUR_STEPS.map((s) => s.id)).toEqual(["welcome", "chain", "builder", "paper"]);
     expect(TOUR_STEPS.slice(1).every((s) => s.to && s.cta)).toBe(true);
   });
 
@@ -260,12 +260,12 @@ describe("onboarding tour", () => {
     let t = INITIAL_TOUR;
     t = tourReducer(t, { type: "back" });
     expect(t.step).toBe(0);
-    for (let i = 0; i < 4; i++) t = tourReducer(t, { type: "next" });
-    expect(t).toEqual({ step: 4, done: false });
+    for (let i = 0; i < 3; i++) t = tourReducer(t, { type: "next" });
+    expect(t).toEqual({ step: 3, done: false });
     t = tourReducer(t, { type: "next" });
     expect(t.done).toBe(true);
     expect(tourReducer(t, { type: "restart" })).toEqual(INITIAL_TOUR);
-    expect(tourReducer(INITIAL_TOUR, { type: "goto", step: 99 }).step).toBe(4);
+    expect(tourReducer(INITIAL_TOUR, { type: "goto", step: 99 }).step).toBe(3);
     expect(tourReducer(INITIAL_TOUR, { type: "dismiss" })).toEqual({ step: 0, done: true });
   });
 

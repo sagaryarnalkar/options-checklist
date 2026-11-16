@@ -34,7 +34,7 @@ describe("webhook", () => {
   it("builds a payload with an IST time and a chat-friendly text", () => {
     const p = webhookPayload(event, true);
     expect(p).toMatchObject({
-      source: "mr-chartist-terminal",
+      source: "herozero-terminal",
       test: true,
       ruleId: "r1",
       symbol: "NIFTY",
