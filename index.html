@@ -1678,13 +1678,20 @@
       <p><b>Only you can open it.</b> Its licence allows personal use by one individual and forbids running it
         as a website other people use, so the hub's address answers "private" unless your browser holds the
         cookie this tab sets with your app key (the same key as the Positions tab).</p>
-      <p><b>Data.</b> With no broker connected it reads NSE's public website (option chain, indices, FII/DII,
-        participant OI, ban list) and labels anything it could not fetch as <em>sample</em>. Treat a "sample"
-        badge as "no data". NSE stalls requests carrying its own bot-check cookies, so our server strips them
-        before they leave (deploy/option_hub/nse_fetch_fix.mjs); his code is untouched.</p>
-      <p><b>Careful: real orders.</b> If you connect Zerodha (or any broker) in its Broker Settings, it can place
-        <b>real orders</b> on that account. The Kite access token also expires every morning there, separately
-        from this dashboard's login.</p>
+      <p><b>Option chain from Kite.</b> In market hours, the NIFTY and BANKNIFTY option chains come from this
+        dashboard's Kite login. Each strike shows whichever is newer: our recorder's last minute (ATM±10 of the
+        nearest expiry, no extra Kite calls) or a top-up of the whole expiry that our server fetches at most
+        once every 30 seconds, never in the first 15 seconds of a minute when the recorder runs, and only while
+        the hub is asking. No bid/ask. His app never holds your Kite token: it keeps placeholder "Zerodha"
+        values, and its server-side Kite calls are answered by this dashboard instead of reaching Kite.</p>
+      <p><b>Everything else from NSE.</b> Index prices, expiry lists, FII/DII, participant OI and the ban list come
+        from NSE's public website; so does the option chain outside market hours, before the morning Kite login,
+        and for SENSEX. Anything it could not fetch is labelled <em>sample</em> — treat that as "no data". NSE
+        stalls requests carrying its own bot-check cookies, so our server strips them before they leave
+        (deploy/option_hub/nse_fetch_fix.mjs); his code is untouched.</p>
+      <p><b>Read-only.</b> Orders, positions and funds through the hub are refused — nothing it sends reaches
+        Kite. Trade in Kite itself. The hub unloads after 5 minutes on another tab, so a forgotten hub stops
+        asking for data (it reopens at its home screen).</p>
       <p><b>Numbers can differ from our tabs.</b> It computes its own Greeks, max pain and GEX from its own snapshot,
         and NIFTY lot size, expiries and timestamps come from its feed, not our recorder.</p>
     </details>
@@ -1931,6 +1938,7 @@
       if (key === "paper") initPaperTab();
       if (key === "csp") initCspTab();
       if (key === "hub") initHubTab();
+      hubTabChanged(key);
     };
     tabs.forEach(t => t.addEventListener("click", ()=>{
       activate(t.dataset.tab);
@@ -2014,7 +2022,23 @@
   // /hub/status says whether it is set up; POST /hub/session (same app key as Positions) sets
   // the cookie Caddy demands at hub.<domain>; only then is the iframe pointed at it. The frame
   // loads once per page view — switching tabs keeps its state.
-  let _hubInited = false, _hubLoaded = false, _hubBusy = false;
+  let _hubInited = false, _hubLoaded = false, _hubBusy = false, _hubAwayTimer = null;
+  const HUB_UNLOAD_AFTER_MS = 5 * 60 * 1000;
+
+  // Called on every tab switch. Away from this tab for 5 min → unload the frame: his app keeps
+  // polling chains in the background (it records history every 15 s on any screen), and each
+  // poll in market hours can cost a Kite top-up on our server.
+  function hubTabChanged(key){
+    if (key === "hub"){ clearTimeout(_hubAwayTimer); _hubAwayTimer = null; return; }
+    if (!_hubLoaded || _hubAwayTimer) return;
+    _hubAwayTimer = setTimeout(() => {
+      _hubAwayTimer = null;
+      const f = document.getElementById("hubFrame");
+      f.src = "about:blank";
+      document.getElementById("hubFrameWrap").style.display = "none";
+      _hubLoaded = false;
+    }, HUB_UNLOAD_AFTER_MS);
+  }
 
   function hubShowGate(msg){
     document.getElementById("hubGate").style.display = "block";
@@ -2072,13 +2096,19 @@
       const down = [];
       if (!st.frontend_ok) down.push("its web app");
       if (!st.proxy_ok) down.push("its data proxy");
-      sub.textContent = down.length ? "" : " · running on our server · only you can open it";
+      const kf = st.kite_feed || {};
+      const tops = Object.values(kf.topups || {});
+      const feedTxt = tops.length && Math.min(...tops) <= 90 ? " · chain from Kite via the dashboard" : "";
+      sub.textContent = down.length ? "" : " · running on our server · only you can open it" + feedTxt;
       hubNote(down.length ? `<div class="note">The server is not answering for ${down.join(" and ")}. On the droplet:
         <code>systemctl --user status option-hub</code> · logs <code>journalctl --user -u option-hub -n 80 --no-pager</code></div>` : "");
+      // Through serve.mjs's seed page: saves the placeholder Zerodha entry his app needs to ask
+      // our Kite feed for the chain (once), then redirects into his app.
+      const start = st.url + "/api/_options-checklist/seed?next=%2F";
       const f = document.getElementById("hubFrame");
-      f.src = st.url + "/";
+      f.src = start;
       const open = document.getElementById("hubOpen");
-      open.href = st.url + "/";
+      open.href = start;
       open.style.display = "";
       document.getElementById("hubFrameWrap").style.display = "block";
       _hubLoaded = true;
