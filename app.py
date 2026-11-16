@@ -54,7 +54,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException, Request
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse,
     StreamingResponse,
@@ -658,6 +658,36 @@ async def assistant_conversations(scope: Optional[str] = None,
     import assistant as _as
     with db.get_conn() as conn:
         return JSONResponse({"ok": True, "conversations": _as.list_convs(conn, scope)})
+
+
+# ---------------------------------------------------------- Option Hub tab --
+# Mr. Chartist's Option Hub, self-hosted at hub.<domain> (option_hub.py, deploy/option_hub.sh).
+# Its licence allows personal use only and its UI can place real orders once a broker is
+# connected, so Caddy answers 401 there unless the hz_hub cookie is present. This app only
+# hands that cookie out — to whoever holds ASSISTANT_KEY, same as the Positions tab.
+
+@app.get("/hub/status")
+def hub_status():
+    """Public: is the hub set up / running. Sync (two short local HTTP probes, threadpool)."""
+    import option_hub as _oh
+    return JSONResponse(_oh.status())
+
+
+@app.post("/hub/session")
+def hub_session(request: Request, x_app_key: Optional[str] = Header(default=None)):
+    _require_app_key(x_app_key)
+    import option_hub as _oh
+    url = _oh.hub_url()
+    if not url:
+        raise HTTPException(status_code=503, detail="Option Hub is not set up on this server — "
+                                                    "run deploy/option_hub.sh on the droplet")
+    resp = JSONResponse({"ok": True, "url": url})
+    secure = (request.headers.get("x-forwarded-proto") or request.url.scheme) == "https"
+    resp.set_cookie(_oh.COOKIE, _oh.cookie_token(os.environ["ASSISTANT_KEY"]),
+                    max_age=_oh.COOKIE_MAX_AGE, path="/",
+                    domain=_oh.cookie_domain(request.headers.get("host", ""), url),
+                    secure=secure, httponly=True, samesite="lax")
+    return resp
 
 
 # ---------------------------------------------------------------- forecast --
