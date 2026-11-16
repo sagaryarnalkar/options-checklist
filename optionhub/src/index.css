@@ -1,0 +1,601 @@
+/*
+ * Mr. Chartist design language, macOS-inspired: "paper + ink-wine" (light) and graphite + orange (dark).
+ * Translucent sidebar/toolbar materials, an inset content window, hairline separators, 13px UI text.
+ * Every colour token is a raw HSL channel triple consumed as hsl(var(--x) / <alpha>); material,
+ * separator and selection tokens carry their own alpha and are consumed as hsl(var(--x)).
+ * Fonts are loaded from index.html (preconnect + <link>), not via @import here.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* ───────────────────────── PRIMITIVES + LIGHT MODE ───────────────────────── */
+  :root {
+    /* Primitives */
+    --paper-0: 0 0% 99.6%;
+    --paper-1: 72 20% 95.1%;
+    --paper-2: 53 23.5% 93.3%;
+    --paper-3: 54 20% 90.2%;
+    --paper-4: 51 16.5% 84.5%;
+    /* Graphite (macOS dark is neutral grey, not near-black) */
+    --void-0: 220 6% 9%;
+    --void-1: 220 5% 11.5%;
+    --void-2: 220 5% 14%;
+    --void-3: 220 4% 17.5%;
+    --void-4: 220 4% 20%;
+    --void-5: 220 4% 25%;
+    --ink-wine: 336.7 41% 8.6%;
+    --orange-100: 23.5 86.4% 88.4%;
+    --orange-300: 23 89% 69%;
+    --orange-400: 18 87.6% 62%;
+    --orange-500: 17.9 85.5% 53.9%;
+    --orange-900: 15.8 86.1% 22.5%;
+
+    /* Window structure: the content "window" sits on a backdrop beside the sidebar material */
+    --window: var(--paper-1);
+    --window-backdrop: var(--paper-2);
+    --grouped: var(--paper-1);
+    --grouped-row: var(--paper-0);
+
+    /* Materials (alpha included) */
+    --material-sidebar: 54 18% 91% / 0.78;
+    --material-toolbar: 72 20% 96% / 0.8;
+    --material-menu: 0 0% 99.6% / 0.9;
+    --material-sheet-scrim: 337 41% 8.6% / 0.2;
+
+    /* Separators (alpha included) */
+    --separator: 337 20% 12% / 0.11;
+    --separator-strong: 337 20% 12% / 0.18;
+    --hairline: 1px;
+
+    /* Selection */
+    --selection-focused: var(--orange-500);
+    --selection-focused-foreground: var(--ink-wine);
+    --selection-unfocused: 337 10% 12% / 0.08;
+    --zebra: 54 20% 40% / 0.05;
+
+    /* Controls */
+    --control: 0 0% 100%;
+    --control-track: 337 10% 12% / 0.07;
+    --switch-off: 337 8% 12% / 0.16;
+    --knob: 0 0% 100%;
+
+    /* Focus ring (macOS: ~3.5px accent at 50%, outside the control) */
+    --focus-ring: 0 0 0 3px hsl(var(--orange-500) / 0.5);
+
+    /* Semantic surfaces: background is the window surface pages draw on */
+    --background: var(--window);
+    --foreground: var(--ink-wine);
+    --card: var(--paper-0);
+    --card-foreground: var(--ink-wine);
+    --popover: var(--paper-0);
+    --popover-foreground: var(--ink-wine);
+    --surface: var(--paper-2);
+
+    /* Brand */
+    --primary: var(--orange-500);
+    --primary-foreground: var(--ink-wine);
+    --primary-hover: var(--orange-400);
+    /* ≈ #A93B0C: 5.6:1 on the active-nav wash, 5.8:1 on paper */
+    --primary-ink: 18 87% 35.5%;
+
+    --secondary: var(--paper-2);
+    --secondary-foreground: var(--ink-wine);
+    --muted: var(--paper-2);
+    --muted-foreground: 337 10% 40%;
+    /* Quieter than muted-foreground but still ≥ 4.5:1 on paper-0/1/2 */
+    --muted-foreground-subtle: 337 6% 42%;
+    --accent: var(--paper-3);
+    --accent-foreground: var(--ink-wine);
+
+    --destructive: 0.5 46.4% 49%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 54 12% 85%;
+    --input: var(--paper-4);
+    --ring: var(--orange-500);
+
+    --radius: 0.625rem;
+
+    /* Sidebar (source list): labels near-primary, selection is a filled pill */
+    --sidebar-background: var(--paper-2);
+    --sidebar-foreground: 337 14% 22%;
+    --sidebar-accent: var(--paper-3);
+    --sidebar-accent-foreground: var(--ink-wine);
+    --sidebar-border: 54 12% 85%;
+    --sidebar-ring: var(--orange-500);
+
+    /* Trading */
+    --bullish: 152 48% 29%;
+    --bullish-foreground: 0 0% 100%;
+    --bearish: 1 55% 42%;
+    --bearish-foreground: 0 0% 100%;
+    --warning: 37 57.5% 31.4%;
+    --info: 212.6 80% 33.3%;
+    --product: 212.6 80% 33.3%;
+
+    /* Washes (tinted backgrounds) */
+    --wash-profit: 144.5 35.5% 87.8%;
+    --wash-loss: 4.4 62.8% 91.6%;
+    --wash-warning: 39 63.6% 89.2%;
+    --wash-brand: var(--orange-100);
+    --wash-info: 215 89.5% 96.3%;
+    /* In-the-money strike shading on option chains */
+    --wash-itm: 40 30% 95%;
+
+
+    /* Charts */
+    --chart-grid: 54 14% 89%;
+    --chart-axis: 337 10% 40%;
+    --chart-1: var(--orange-500);
+    --chart-2: 212.6 80% 33.3%;
+    --chart-3: 38 46.9% 47.3%;
+    --chart-4: 253 60% 56%;
+    --chart-5: 178.6 70% 30%;
+    --chart-6: 340 48% 40%;
+    /* Text ink for chart-4/chart-5 on their 10% wash: same hue, darker so it keeps 4.5:1. */
+    --chart-4-ink: 253 55% 45%;
+    --chart-5-ink: 178.6 70% 23%;
+    --chart-fii: 209 57% 32%;
+    --chart-call: var(--bearish);
+    --chart-put: var(--bullish);
+
+    /* Elevation: macOS is subtle; group boxes are a hairline plus a whisper of shadow */
+    --shadow-1: 0 0.5px 1px rgb(28 22 16 / 0.08);
+    --shadow-2: 0 1px 2px rgb(28 22 16 / 0.06), 0 4px 12px rgb(28 22 16 / 0.07);
+    --shadow-3: 0 0 0 0.5px rgb(28 22 16 / 0.1), 0 10px 30px rgb(28 22 16 / 0.16), 0 2px 6px rgb(28 22 16 / 0.06);
+    --shadow-card: var(--shadow-1);
+    --shadow-card-hover: var(--shadow-2);
+    --shadow-float: var(--shadow-3);
+    --shadow-control: 0 0 0 0.5px rgb(28 22 16 / 0.14), 0 0.5px 1.5px rgb(28 22 16 / 0.16);
+    --shadow-window: 0 0 0 0.5px hsl(var(--separator-strong)), 0 1px 3px rgb(28 22 16 / 0.05);
+    /* Legacy name kept for the many focus-visible:shadow-ember call sites */
+    --shadow-ember: var(--focus-ring);
+
+    /* Motion */
+    --ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-out: cubic-bezier(0.2, 0, 0, 1);
+    --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+    --dur-fast: 120ms;
+    --dur-page: 140ms;
+
+    color-scheme: light;
+  }
+
+  /* ───────────────────────── DARK MODE (void + orange) ───────────────────────── */
+  .dark {
+    --window: var(--void-2);
+    --window-backdrop: var(--void-0);
+    --grouped: var(--void-1);
+    --grouped-row: var(--void-3);
+
+    --material-sidebar: 220 5% 12% / 0.72;
+    --material-toolbar: 220 5% 15% / 0.82;
+    --material-menu: 220 4% 19% / 0.9;
+    --material-sheet-scrim: 0 0% 0% / 0.45;
+
+    --separator: 0 0% 100% / 0.09;
+    --separator-strong: 0 0% 100% / 0.15;
+
+    --selection-unfocused: 0 0% 100% / 0.1;
+    --zebra: 0 0% 100% / 0.03;
+
+    --control: var(--void-5);
+    --control-track: 0 0% 100% / 0.07;
+    --switch-off: 0 0% 100% / 0.16;
+
+    --background: var(--window);
+    --foreground: var(--paper-1);
+    --card: var(--void-3);
+    --card-foreground: var(--paper-1);
+    --popover: var(--void-3);
+    --popover-foreground: var(--paper-1);
+    --surface: var(--void-2);
+
+    --primary: var(--orange-500);
+    --primary-foreground: var(--ink-wine);
+    --primary-hover: var(--orange-400);
+    --primary-ink: var(--orange-300);
+
+    --secondary: var(--void-4);
+    --secondary-foreground: var(--paper-1);
+    --muted: var(--void-4);
+    /* Graphite surfaces are lighter than the old void, so text tokens are lifted to keep
+       ≥ 4.5:1 on window (void-2), card (void-3), muted (void-4), zebra rows and control faces. */
+    --muted-foreground: 220 6% 71%;
+    --muted-foreground-subtle: 220 5% 67%;
+    --accent: var(--void-4);
+    --accent-foreground: var(--paper-1);
+
+    --destructive: 3 80% 73%;
+    --destructive-foreground: var(--ink-wine);
+
+    --border: 220 4% 25%;
+    --input: var(--void-4);
+    --ring: var(--orange-500);
+
+    --sidebar-background: var(--void-1);
+    --sidebar-foreground: 220 6% 84%;
+    --sidebar-accent: var(--void-3);
+    --sidebar-accent-foreground: var(--paper-1);
+    --sidebar-border: 220 4% 20%;
+    --sidebar-ring: var(--orange-500);
+
+    --bullish: 148.9 45.5% 63.3%;
+    --bullish-foreground: var(--void-0);
+    --bearish: 3 80% 73%;
+    --bearish-foreground: var(--ink-wine);
+    --warning: 40 56.5% 71.2%;
+    --info: 211 78% 68%;
+    --product: 211 78% 68%;
+
+    --wash-profit: 147.5 30% 15.7%;
+    --wash-loss: 1.3 43.7% 20.2%;
+    --wash-warning: 38 40% 12%;
+    --wash-brand: var(--orange-900);
+    --wash-info: 214 34% 10%;
+    --wash-itm: 220 6% 18%;
+
+
+    --chart-grid: 220 4% 20%;
+    --chart-axis: 220 6% 71%;
+    --chart-1: var(--orange-500);
+    --chart-2: 211 78% 68%;
+    --chart-3: 40 56.5% 71.2%;
+    --chart-4: 255 68% 80%;
+    --chart-5: 178 55% 70%;
+    --chart-6: 340 40% 68%;
+    --chart-4-ink: var(--chart-4);
+    --chart-5-ink: var(--chart-5);
+    --chart-fii: 209 54.8% 81.8%;
+    --chart-call: var(--bearish);
+    --chart-put: var(--bullish);
+
+    /* Graphite elevation: only floating surfaces get the 0.5px top highlight */
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.3);
+    --shadow-2: 0 2px 6px rgb(0 0 0 / 0.35), 0 10px 28px rgb(0 0 0 / 0.4);
+    --shadow-3: inset 0 0.5px 0 rgb(255 255 255 / 0.1), 0 0 0 0.5px rgb(0 0 0 / 0.6), 0 10px 30px rgb(0 0 0 / 0.5);
+    --shadow-control: inset 0 0.5px 0 rgb(255 255 255 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.5), 0 1px 1.5px rgb(0 0 0 / 0.35);
+    --shadow-window: 0 0 0 0.5px rgb(255 255 255 / 0.08), 0 1px 3px rgb(0 0 0 / 0.4);
+    --shadow-card: var(--shadow-1);
+    --shadow-card-hover: var(--shadow-2);
+    --shadow-float: var(--shadow-3);
+
+    color-scheme: dark;
+  }
+
+  /* ── Colour-vision-deficiency palette: bullish blue, bearish orange ── */
+  html[data-palette="cvd"] {
+    --bullish: 212 80% 36%;
+    --bearish: 24 90% 33%;
+    --wash-profit: 212 70% 93%;
+    --wash-loss: 26 85% 91%;
+  }
+  html.dark[data-palette="cvd"] {
+    --bullish: 211 85% 70%;
+    --bearish: 28 90% 62%;
+    --bullish-foreground: var(--void-0);
+    --bearish-foreground: var(--void-0);
+    --wash-profit: 214 40% 16%;
+    --wash-loss: 26 45% 16%;
+  }
+}
+
+/* Retina: separators drop to a true 0.5px hairline */
+@media (min-resolution: 2dppx) {
+  :root {
+    --hairline: 0.5px;
+  }
+}
+
+/* Reduce transparency: materials become opaque */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --material-sidebar: var(--paper-2);
+    --material-toolbar: var(--paper-1);
+    --material-menu: var(--paper-0);
+  }
+  .dark {
+    --material-sidebar: var(--void-1);
+    --material-toolbar: var(--void-2);
+    --material-menu: var(--void-3);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  *:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    transition: box-shadow var(--dur-fast) var(--ease-out);
+  }
+
+  html {
+    font-size: 16px;
+    text-rendering: optimizeLegibility;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply text-foreground antialiased;
+    background-color: hsl(var(--window-backdrop));
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-feature-settings: "cv11" 1, "ss01" 1;
+    font-optical-sizing: auto;
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 400;
+    letter-spacing: -0.003em;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.28);
+    color: hsl(var(--foreground));
+  }
+
+  kbd,
+  code,
+  pre,
+  samp,
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    font-feature-settings: "liga" 0, "zero" 1;
+  }
+
+  /* ── Typography: Plus Jakarta for page and card titles only; sizes come from the scale ── */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-family: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+    line-height: 1.2;
+    font-weight: 700;
+  }
+  h1 {
+    font-size: 1.375rem;
+    letter-spacing: -0.01em;
+  }
+  h2 {
+    font-size: 1.0625rem;
+  }
+  h3 {
+    font-size: 0.9375rem;
+  }
+  h4 {
+    font-size: 0.8125rem;
+  }
+  h2,
+  h3,
+  h4,
+  [data-card-title] {
+    letter-spacing: -0.005em;
+  }
+  /* Plus Jakarta Sans has a narrow word space that nearly vanishes at bold weights ("Openpositions",
+     "ATMstraddle"). Open it up wherever the display face is used. */
+  h1,
+  h2,
+  h3,
+  h4,
+  [data-card-title],
+  .font-display {
+    word-spacing: 0.14em;
+  }
+
+  /* ── Numbers: tabular, slashed zero ── */
+  .font-num,
+  table,
+  td,
+  input[type="number"] {
+    font-feature-settings: "tnum" 1, "zero" 1, "cv11" 1;
+    font-variant-numeric: tabular-nums slashed-zero;
+  }
+
+  /* ── Data tables (Activity Monitor): sentence-case headers, compact cells ── */
+  table {
+    font-size: 0.8125rem;
+    line-height: 1.35;
+  }
+  thead th,
+  th[scope="col"] {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: hsl(var(--muted-foreground));
+    padding: 0.375rem 0.625rem;
+    white-space: nowrap;
+  }
+  /* Row headers read like body cells, not column labels */
+  tbody th[scope="row"] {
+    font: inherit;
+    font-weight: 600;
+    color: hsl(var(--foreground));
+    white-space: normal;
+    text-align: left;
+    padding: 0.375rem 0.625rem;
+  }
+  td {
+    padding: 0.375rem 0.625rem;
+    white-space: nowrap;
+  }
+
+  /* ── Scrollbars: thin overlay-style thumbs ── */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--foreground) / 0.18) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--foreground) / 0.18);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--foreground) / 0.32);
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* ── Icons ── */
+  svg.lucide {
+    shape-rendering: geometricPrecision;
+    flex-shrink: 0;
+    vertical-align: middle;
+  }
+}
+
+@layer components {
+  /* Source-list sidebar: translucent material, no right border (the inset window separates it) */
+  [data-sidebar="sidebar"] {
+    background: hsl(var(--material-sidebar));
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    backdrop-filter: blur(30px) saturate(180%);
+  }
+  [data-sidebar="sidebar"][data-mobile="true"] {
+    background: hsl(var(--material-menu));
+  }
+
+  /* Unified toolbar */
+  .mac-toolbar {
+    background: hsl(var(--material-toolbar));
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    backdrop-filter: blur(30px) saturate(180%);
+    box-shadow: inset 0 calc(-1 * var(--hairline)) 0 hsl(var(--separator));
+  }
+
+  /* Menus, popovers, select lists, command palette */
+  .mac-menu {
+    background: hsl(var(--material-menu));
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    backdrop-filter: blur(30px) saturate(180%);
+    box-shadow: var(--shadow-3);
+  }
+
+  /* Activity Monitor zebra rows. Zero specificity, so any row shading a page sets still wins. */
+  :where(.zebra-rows > tr:nth-child(even)) {
+    background-color: hsl(var(--zebra));
+  }
+
+  /* Skip link: hidden until focused */
+  .skip-link {
+    position: absolute;
+    left: 0.75rem;
+    top: 0.5rem;
+    z-index: 100;
+    transform: translateY(-150%);
+    border-radius: 6px;
+    padding: 0.375rem 0.75rem;
+    background: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    font-size: 0.8125rem;
+    font-weight: 600;
+    transition: transform var(--dur-fast) var(--ease-out);
+  }
+  .skip-link:focus,
+  .skip-link:focus-visible {
+    transform: translateY(0);
+  }
+}
+
+@layer utilities {
+  /* ── Hairlines (0.5px on Retina) ── */
+  .hairline-b {
+    box-shadow: inset 0 calc(-1 * var(--hairline)) 0 hsl(var(--separator));
+  }
+  .hairline-t {
+    box-shadow: inset 0 var(--hairline) 0 hsl(var(--separator));
+  }
+  .hairline-l {
+    box-shadow: inset var(--hairline) 0 0 hsl(var(--separator));
+  }
+  .hairline {
+    box-shadow: 0 0 0 var(--hairline) hsl(var(--separator));
+  }
+
+  /* ── Translucent material for ad-hoc surfaces (sticky table headers) ── */
+  .material {
+    -webkit-backdrop-filter: blur(30px) saturate(180%);
+    backdrop-filter: blur(30px) saturate(180%);
+  }
+
+  /* ── Animations: macOS fades, it does not slide content in ── */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
+  }
+
+  .animate-fade-in,
+  .page-transition {
+    animation: fade-in var(--dur-page) var(--ease-out) both;
+  }
+
+  .skeleton-shimmer {
+    position: relative;
+    overflow: hidden;
+    background: hsl(var(--control-track));
+    border-radius: 5px;
+  }
+  .skeleton-shimmer::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 25%, hsl(var(--foreground) / 0.05) 50%, transparent 75%);
+    background-size: 200% 100%;
+    animation: shimmer 2s ease-in-out infinite;
+  }
+}
+
+/* No backdrop blur support: materials fall back to opaque grouped surfaces */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  [data-sidebar="sidebar"],
+  .mac-toolbar,
+  .mac-menu {
+    background: hsl(var(--grouped)) !important;
+  }
+}
+
+/* ── Reduced motion: global kill-switch ── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
