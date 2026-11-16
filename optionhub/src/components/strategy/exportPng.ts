@@ -3,23 +3,44 @@
  * to concrete colours, serialise it, draw it onto a canvas with a title band and save the PNG.
  */
 
-import { MARK_PATHS, MARK_VIEWBOX } from "@/lib/brand/logo";
 
-export const EXPORT_WATERMARK = "Option Hub by Mr. Chartist · mrchartist.com · For education, not investment advice";
+export const EXPORT_WATERMARK = "HeroZero · For education, not investment advice";
 
 /**
  * Draw the official Mr. Chartist mark (monochrome, in `fill`) as a `size`-px square at (x, y).
  * Returns false when the canvas has no Path2D support, so the caller can skip the mark.
  */
-export function drawBrandMark(ctx: CanvasRenderingContext2D, x: number, y: number, size: number, fill: string): boolean {
-  if (typeof Path2D === "undefined") return false;
-  const k = size / MARK_VIEWBOX.size;
+/** HeroZero mark (crosshair in a square): `fill` = the square, `ring` = ring + side ticks, `accent` = centre +
+ *  vertical ticks. Geometry of components/brand/HeroZeroLogo.tsx (viewBox 38). Always drawn (no Path2D needed). */
+export function drawBrandMark(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  size: number,
+  fill: string,
+  ring = "#f3f4ee",
+  accent = "#ee6b2d",
+): boolean {
+  const k = size / 38;
   ctx.save();
   ctx.translate(x, y);
   ctx.scale(k, k);
-  ctx.translate(-MARK_VIEWBOX.x, -MARK_VIEWBOX.y);
   ctx.fillStyle = fill;
-  for (const d of MARK_PATHS) ctx.fill(new Path2D(d));
+  ctx.fillRect(0, 0, 38, 38);
+  ctx.lineWidth = 2.4;
+  ctx.strokeStyle = ring;
+  ctx.beginPath();
+  ctx.arc(19, 19, 10.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.beginPath();
+  ctx.arc(19, 19, 4, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(17.9, 2.5, 2.2, 5);
+  ctx.fillRect(17.9, 30.5, 2.2, 5);
+  ctx.fillStyle = ring;
+  ctx.fillRect(2.5, 17.9, 5, 2.2);
+  ctx.fillRect(30.5, 17.9, 5, 2.2);
   ctx.restore();
   return true;
 }
@@ -114,7 +135,7 @@ export async function renderChartPng(container: HTMLElement | null, opts: ChartI
   }
   ctx.fillText(sub, pad, 48);
   const markSize = 14;
-  const hasMark = drawBrandMark(ctx, pad, H - 12 - markSize + 3, markSize, hsl("foreground"));
+  const hasMark = drawBrandMark(ctx, pad, H - 12 - markSize + 3, markSize, hsl("foreground"), hsl("window"), hsl("primary"));
   ctx.fillStyle = hsl("muted-foreground");
   ctx.fillText(EXPORT_WATERMARK, pad + (hasMark ? markSize + 6 : 0), H - 12);
 

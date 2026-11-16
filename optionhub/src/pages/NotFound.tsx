@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { ArrowLeft, ChevronRight, Home } from "lucide-react";
-import { MrChartistMark } from "@/components/brand/MrChartistLogo";
+import { HeroZeroMark } from "@/components/brand/HeroZeroLogo";
 import { routeIcon } from "@/lib/routeIcons";
 import { Button } from "@/components/ui/button";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -65,9 +65,9 @@ const NotFound = () => {
       <div className="mx-auto w-full max-w-xl">
         <div className="mb-6 flex items-center gap-3">
           <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-tile border border-separator bg-card text-foreground shadow-card">
-            <MrChartistMark size={24} title="Mr. Chartist" />
+            <HeroZeroMark size={24} title="HeroZero" />
           </span>
-          <p className="text-body font-medium text-muted-foreground">Error 404 · Option Hub</p>
+          <p className="text-body font-medium text-muted-foreground">Error 404 · HeroZero</p>
         </div>
 
         <h1 className="font-display text-display text-foreground">Page not found</h1>
@@ -111,11 +111,7 @@ const NotFound = () => {
         <p className="mt-8 text-body-sm text-muted-foreground">
           {ROUTES.filter((r) => !r.hidden).length} pages available. Press{" "}
           <kbd className="rounded-chip bg-control-track px-1 font-mono text-micro">g</kbd> then a letter to jump
-          between pages once you are back in the terminal. Looking for another Mr. Chartist product? See{" "}
-          <Link to="/ecosystem" className="font-semibold text-primary-ink underline-offset-4 hover:underline">
-            More from Mr. Chartist
-          </Link>
-          .
+          between pages once you are back in the terminal.
         </p>
       </div>
     </div>

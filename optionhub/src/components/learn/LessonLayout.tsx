@@ -129,7 +129,6 @@ export default function LessonLayout({ lesson }: { lesson: Lesson }) {
 
         <footer className="hairline-t mt-8 space-y-1 pt-3 text-body-sm text-muted-foreground">
           <p>Data for education and research. Not investment advice. Simulator prices come from a model; lot sizes, charge rates and expiry rules come from dated tables marked for verification.</p>
-          <p>Educational content in partnership with NISMExams.com.</p>
         </footer>
       </div>
     </SimSpotProvider>

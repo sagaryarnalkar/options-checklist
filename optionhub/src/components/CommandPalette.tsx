@@ -12,8 +12,7 @@ import {
 } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { ExternalLink, Keyboard, Search, Star, TrendingDown, TrendingUp } from "lucide-react";
-import { MrChartistMark } from "@/components/brand/MrChartistLogo";
-import { BRAND, withUtm } from "@/lib/brand/links";
+import { HeroZeroMark } from "@/components/brand/HeroZeroLogo";
 import { useLiveIndices } from "@/hooks/useMarketData";
 import { routesByGroup, type RouteDef } from "@/lib/routes";
 import { routeIcon } from "@/lib/routeIcons";
@@ -45,25 +44,8 @@ const STOCK_ENTRIES: PaletteEntry[] = STATIC_FNO_STOCKS.map((s) => ({
   group: "F&O stock",
 }));
 const GITHUB_ID = "action:github-star";
-const SITE_ID = "action:mrchartist-site";
 const ACTION_ENTRIES: PaletteEntry[] = [
   { id: SHORTCUTS_ID, kind: "action", label: "Keyboard shortcuts", keywords: ["help", "keys", "hotkeys"], group: "Help" },
-  {
-    id: GITHUB_ID,
-    kind: "action",
-    label: "Star Option Hub on GitHub",
-    keywords: ["github", "star", "source", "source code", "repo", "contribute"],
-    href: withUtm(BRAND.repo, "command-palette"),
-    group: "Mr. Chartist",
-  },
-  {
-    id: SITE_ID,
-    kind: "action",
-    label: "Visit mrchartist.com",
-    keywords: ["mr chartist", "website", "site", "products", "ecosystem"],
-    href: withUtm(BRAND.site, "command-palette"),
-    group: "Mr. Chartist",
-  },
 ];
 
 /** Spotlight-style panel: translucent menu material, high on the screen, no close-button chrome (Esc closes). */
@@ -186,7 +168,7 @@ export function CommandPalette({ open, onOpenChange, onShowShortcuts }: CommandP
           {entry.id === GITHUB_ID ? (
             <Star className="mr-2 h-4 w-4" aria-hidden="true" />
           ) : (
-            <MrChartistMark size={16} decorative className="mr-2" />
+            <HeroZeroMark size={16} decorative className="mr-2" />
           )}
           <span>{entry.label}</span>
           <span className="ml-auto flex items-center gap-1 pl-2 text-body-sm text-muted-foreground group-data-[selected=true]:text-primary-foreground/80">
@@ -259,15 +241,6 @@ export function CommandPalette({ open, onOpenChange, onShowShortcuts }: CommandP
                     <CommandItem key={e.id} value={e.id} onSelect={() => runEntry(e)}>
                       <Search className="mr-2 h-4 w-4" aria-hidden="true" />
                       {e.label}
-                    </CommandItem>
-                  ))}
-                </CommandGroup>
-
-                <CommandSeparator />
-                <CommandGroup heading="Mr. Chartist">
-                  {ACTION_ENTRIES.filter((e) => e.group === "Mr. Chartist").map((e) => (
-                    <CommandItem key={e.id} value={e.id} onSelect={() => runEntry(e)}>
-                      {renderEntry(e)}
                     </CommandItem>
                   ))}
                 </CommandGroup>

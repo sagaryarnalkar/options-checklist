@@ -25,8 +25,6 @@ import LessonCard from "@/components/learn/LessonCard";
 import { buttonVariants } from "@/components/ui/button";
 import MetricHelp from "@/components/learn/MetricHelp";
 import NismBanner from "@/components/learn/NismBanner";
-import { BrandCrossLink } from "@/components/brand/ProductCrossLink";
-import { ECOSYSTEM_PAGES } from "@/lib/brand/links";
 import ProgressTracker from "@/components/learn/ProgressTracker";
 import { useLearnProgress } from "@/components/learn/useLearnProgress";
 import { GLOSSARY } from "@/content/learn/glossary";
@@ -51,7 +49,7 @@ function firstLessonWithSim(sim: SimId): string {
 }
 
 export default function Learn() {
-  useDocumentTitle("Learn options with NISMExams.com");
+  useDocumentTitle("Learn options");
   const { progress, reset } = useLearnProgress();
   const location = useLocation();
   const [filter, setFilter] = useState("");
@@ -76,8 +74,8 @@ export default function Learn() {
     <div className="mx-auto w-full max-w-[1400px] space-y-6 px-1.5 py-1 sm:px-0">
       <PageHeader
         icon={GraduationCap}
-        eyebrow="Free course · In partnership"
-        title="Learn options with NISMExams.com"
+        eyebrow="Free course"
+        title="Learn options"
         description="Plain-English lessons on Indian F&O, from calls and puts to GEX, with interactive simulators that use the same maths as the terminal. Every lesson ends with a short quiz."
         actions={
           <div className="flex w-full flex-col items-stretch gap-1.5 sm:w-auto sm:items-end">
@@ -190,14 +188,6 @@ export default function Learn() {
       </div>
 
       <NismBanner />
-      <BrandCrossLink
-        name="Learn options on mrchartist.com"
-        url={ECOSYSTEM_PAGES.learnOptions}
-        campaign="learn-hub"
-        tag="learn-options"
-        lead="More lessons from Mr. Chartist:"
-        className="-mt-3"
-      />
 
       {/* Simulators */}
       <section aria-labelledby="sims-h">
@@ -250,7 +240,7 @@ export default function Learn() {
 
       <footer className="hairline-t space-y-1 pt-3 text-body-sm text-muted-foreground">
         <p>Data for education and research. Not investment advice. Examples and simulators are illustrative; lot sizes, charge rates and expiry rules come from dated tables marked for verification against NSE, BSE and SEBI circulars.</p>
-        <p>Educational content in partnership with NISMExams.com. Progress is stored only in this browser.</p>
+        <p>Progress is stored only in this browser.</p>
       </footer>
     </div>
   );

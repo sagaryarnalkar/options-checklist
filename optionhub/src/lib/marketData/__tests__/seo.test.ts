@@ -65,7 +65,8 @@ describe("JSON-LD", () => {
     expect(ld.offers).toMatchObject({ price: "0", priceCurrency: "INR" });
     expect(softwareApplicationJsonLd("")).toHaveProperty("url", PROJECT_PAGE_URL);
     expect(softwareApplicationJsonLd("")).toHaveProperty("image", OG_IMAGE_FALLBACK);
-    expect(ld).toHaveProperty("image", "https://x.in/og-image.png");
+    expect(ld).toHaveProperty("image", "https://x.in/pwa-512x512.png");
+    expect(JSON.stringify(ld)).not.toMatch(/Chartist|mrchartist/i);
   });
   it("cannot close the script tag early", () => {
     expect(jsonLdScriptBody({ a: "</script><script>" })).not.toContain("</script>");
@@ -73,10 +74,10 @@ describe("JSON-LD", () => {
 });
 
 describe("canonicalHome", () => {
-  it("prefers the configured site and falls back to the mrchartist.com project page", () => {
+  it("prefers the configured site and falls back to the project page", () => {
     expect(canonicalHome("https://x.in")).toBe("https://x.in/");
     expect(canonicalHome("")).toBe(PROJECT_PAGE_URL);
     expect(PROJECT_PAGE_URL).toBe("https://mrchartist.com/open-source/india-s-best-option-hub");
-    expect(SITE_NAME).toBe("Option Hub by Mr. Chartist");
+    expect(SITE_NAME).toBe("HeroZero Trader Terminal");
   });
 });

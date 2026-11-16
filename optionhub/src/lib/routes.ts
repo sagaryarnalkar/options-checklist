@@ -9,8 +9,10 @@
  * factories are not called until a route is rendered.
  */
 import type { ComponentType } from "react";
+import { DESK_TABS, DESK_URL } from "./desk";
 
 export type RouteGroup =
+  | "HeroZero"
   | "Markets"
   | "Chain & OI"
   | "Volatility"
@@ -47,6 +49,7 @@ export interface RouteDef {
 
 /** Sidebar group order. */
 export const ROUTE_GROUPS: readonly RouteGroup[] = [
+  "HeroZero",
   "Markets",
   "Chain & OI",
   "Volatility",
@@ -58,8 +61,8 @@ export const ROUTE_GROUPS: readonly RouteGroup[] = [
   "Settings",
 ];
 
-/** Appended to every page title: "Option Chain · Option Hub by Mr. Chartist". */
-export const APP_NAME = "Option Hub by Mr. Chartist";
+/** Appended to every page title: "Option Chain · HeroZero". */
+export const APP_NAME = "HeroZero";
 
 // ── Page loaders ──────────────────────────────────────────────────────────
 //
@@ -101,12 +104,28 @@ export function pageLoader(name: string): () => Promise<{ default: ComponentType
   };
 }
 
+/** The dashboard's own tabs (lib/desk.ts), first in the sidebar; only when VITE_DASHBOARD_URL is set. */
+const DESK_ROUTES: RouteDef[] = DESK_URL
+  ? DESK_TABS.map((t) => ({
+      path: t.path,
+      title: t.title,
+      navLabel: t.label,
+      group: "HeroZero" as const,
+      icon: t.icon,
+      keywords: t.keywords,
+      description: t.description,
+      page: "Desk",
+      lazy: pageLoader("Desk"),
+    }))
+  : [];
+
 export const ROUTES: RouteDef[] = [
+  ...DESK_ROUTES,
   // ── Markets ─────────────────────────────────────────────────────────────
   {
     path: "/",
     title: "Dashboard",
-    navLabel: "Dashboard",
+    navLabel: "Market dashboard",
     group: "Markets",
     icon: "LayoutDashboard",
     shortcut: "g d",
@@ -372,7 +391,7 @@ export const ROUTES: RouteDef[] = [
   {
     path: "/position-tracker",
     title: "Position Tracker",
-    navLabel: "Positions",
+    navLabel: "Position tracker",
     group: "Portfolio",
     icon: "Briefcase",
     shortcut: "g p",
@@ -422,7 +441,7 @@ export const ROUTES: RouteDef[] = [
   {
     path: "/learn",
     title: "Learn",
-    navLabel: "Learn (NISMExams)",
+    navLabel: "Learn",
     group: "Learn",
     icon: "GraduationCap",
     shortcut: "g l",
@@ -444,17 +463,6 @@ export const ROUTES: RouteDef[] = [
     lazy: pageLoader("LearnLesson"),
   },
 
-  {
-    path: "/ecosystem",
-    title: "Mr. Chartist ecosystem",
-    navLabel: "Mr. Chartist ecosystem",
-    group: "Learn",
-    icon: "Blocks",
-    keywords: ["mr chartist", "ecosystem", "products", "fii dii data", "ipo decode", "tradebook", "optionsdesk", "fundadesk", "chartbook", "nism", "books", "socials", "github", "sebi"],
-    description: "More from Mr. Chartist: products, courses, socials and the SEBI RA details.",
-    page: "Ecosystem",
-    lazy: pageLoader("Ecosystem"),
-  },
 
   // ── Settings ────────────────────────────────────────────────────────────
   {
@@ -500,8 +508,6 @@ export const LEGACY_REDIRECTS: Readonly<Record<string, string>> = {
   "/calendar": "/events",
   "/rollover": "/futures",
   "/alert": "/alerts",
-  "/more": "/ecosystem",
-  "/products": "/ecosystem",
   "/1cliq": "/one-cliq",
   "/oneclick": "/one-cliq",
   "/one-click": "/one-cliq",

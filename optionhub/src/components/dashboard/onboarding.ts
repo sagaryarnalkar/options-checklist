@@ -18,8 +18,8 @@ export interface TourStep {
 export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "welcome",
-    title: "Welcome to Option Hub by Mr. Chartist",
-    body: "A free options terminal for NSE and BSE, for personal use. Every number carries a source tag: Live, Delayed, Last saved or Sample. Without the local proxy you see labelled sample data, so you can explore safely.",
+    title: "Welcome to HeroZero",
+    body: "Your options terminal for NSE and BSE, with the HeroZero desk (dashboard, positions, strategies, OI flow, paper trades, cash puts) at the top of the sidebar. Every number carries a source tag: Live, Delayed, Last saved or Sample.",
   },
   {
     id: "chain",
@@ -45,7 +45,7 @@ export const TOUR_STEPS: readonly TourStep[] = [
   {
     id: "learn",
     title: "Learn as you go",
-    body: "Every metric has an info icon with the formula and an Indian example. The Learn hub, by NISMExams.com, walks through options from the basics to Greeks and expiry-day risk.",
+    body: "Every metric has an info icon with the formula and an Indian example. The Learn hub walks through options from the basics to Greeks and expiry-day risk.",
     to: "/learn",
     cta: "Open Learn",
   },

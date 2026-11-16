@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { ArrowUpRight } from "lucide-react";
 import { product, type ProductId } from "@/lib/brand/links";
 import { cn } from "@/lib/utils";
-import { MrChartistMark } from "./MrChartistLogo";
+import { HeroZeroMark } from "./HeroZeroLogo";
 import { OutboundLink } from "./OutboundLink";
 
 export interface BrandCrossLinkProps {
@@ -24,10 +24,14 @@ export interface BrandCrossLinkProps {
  * One quiet line pointing to something else from Mr. Chartist. Never a banner: muted text, the
  * monochrome mark, and one link.
  */
-export function BrandCrossLink({ name, url, campaign, lead = "Also from Mr. Chartist:", blurb, className, tag }: BrandCrossLinkProps) {
+const DISABLED = true;
+
+export function BrandCrossLink({ name, url, campaign, lead = "", blurb, className, tag }: BrandCrossLinkProps) {
+  // HeroZero: no cross-promotion links (kept as a no-op so callers stay untouched).
+  if (DISABLED) return null;
   return (
     <p className={cn("flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-body-sm text-muted-foreground", className)} data-cross-link={tag ?? campaign}>
-      <MrChartistMark size={14} decorative className="text-foreground" />
+      <HeroZeroMark size={14} decorative />
       {lead ? <span>{lead}</span> : null}
       <OutboundLink
         url={url}
