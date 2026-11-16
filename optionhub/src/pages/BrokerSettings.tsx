@@ -465,7 +465,7 @@ export default function BrokerSettings() {
           <div className="space-y-1 text-body">
             <p className="font-medium text-foreground">How your keys are handled</p>
             <ul className="list-disc space-y-0.5 pl-4 text-body-sm text-muted-foreground">
-              <li>Keys stay in this browser. Mr. Chartist has no server and never receives them.</li>
+              <li>Keys stay in this browser and travel only with each request to this terminal's own server, which never stores them.</li>
               <li>
                 When the terminal needs broker data, the keys go to the proxy running on your own machine (127.0.0.1),
                 which forwards them to that broker over HTTPS.

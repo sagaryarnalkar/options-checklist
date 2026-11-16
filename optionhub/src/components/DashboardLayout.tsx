@@ -3,8 +3,10 @@ import { useNavigate } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { MrChartistMark } from "@/components/brand/MrChartistLogo";
-import { BRAND } from "@/lib/brand/links";
+import { HeroZeroMark } from "@/components/brand/HeroZeroLogo";
+import { DeskFrame } from "@/components/desk/DeskFrame";
+import { DeskAccountChip } from "@/components/desk/DeskAccountChip";
+import { deskTabFromPath } from "@/lib/desk";
 import { Button } from "@/components/ui/button";
 import { StatusFooter } from "@/components/StatusFooter";
 import { SampleBanner } from "@/components/SampleBanner";
@@ -231,6 +233,7 @@ export default function DashboardLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const queryClient = useQueryClient();
+  const deskTab = deskTabFromPath(location.pathname);
   const [searchOpen, setSearchOpen] = useState(false);
   const [paletteMounted, setPaletteMounted] = useState(false);
   const [alertsOpen, setAlertsOpen] = useState(false);
@@ -349,10 +352,10 @@ export default function DashboardLayout() {
             {/* Phones: the sidebar (and its logo) is a drawer, so show the mark in the toolbar. */}
             <Link
               to="/"
-              aria-label={`${BRAND.productFull}: dashboard`}
+              aria-label="HeroZero: dashboard"
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-pill text-foreground focus-visible:shadow-focus focus-visible:outline-none md:hidden"
             >
-              <MrChartistMark size={20} decorative />
+              <HeroZeroMark size={20} decorative />
             </Link>
 
             {/* Title block: fades in once the page header scrolls away, so the title is never shown twice. */}
@@ -499,6 +502,8 @@ export default function DashboardLayout() {
                 </PopoverContent>
               </Popover>
 
+              <DeskAccountChip className="hidden lg:flex" />
+
               <ExpiryCountdown />
 
               {/* Refresh */}
@@ -551,12 +556,17 @@ export default function DashboardLayout() {
             id="main"
             ref={mainRef}
             tabIndex={-1}
-            className="flex-1 overflow-auto px-3 py-3 focus:outline-none focus-visible:shadow-none sm:px-4 lg:px-5 lg:py-4"
+            className={cn(
+              "flex-1 overflow-auto px-3 py-3 focus:outline-none focus-visible:shadow-none sm:px-4 lg:px-5 lg:py-4",
+              deskTab && "hidden",
+            )}
           >
             <div className="page-transition" key={location.pathname}>
               <Outlet />
             </div>
           </main>
+          {/* The dashboard's own tabs (/desk/*): one persistent frame in place of the page area. */}
+          <DeskFrame tab={deskTab} />
 
           <StatusFooter />
         </div>

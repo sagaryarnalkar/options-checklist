@@ -39,15 +39,15 @@ function renderAt(url: string) {
 }
 
 describe("Learn hub", () => {
-  it("renders the NISMExams hero, paths, glossary and disclaimers", () => {
+  it("renders the hub (no partner promotion), paths, glossary and disclaimers", () => {
     renderAt("/learn");
-    expect(screen.getByRole("heading", { level: 1, name: /learn options with nismexams\.com/i })).toBeInTheDocument();
-    expect(document.title).toMatch(/Learn options with NISMExams\.com/);
+    expect(screen.getByRole("heading", { level: 1, name: /^learn options$/i })).toBeInTheDocument();
+    expect(document.title).toMatch(/^Learn options/);
+    expect(screen.queryByText(/NISMExams/i)).toBeNull();
     expect(screen.getByRole("heading", { name: "Options 101" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Glossary" })).toBeInTheDocument();
     expect(screen.getAllByText(/Not investment advice/i).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Educational content in partnership with NISMExams\.com/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: /Series VIII prep/i })[0]).toHaveAttribute("href", expect.stringMatching(/^https:\/\/nismexams\.com\/courses/));
+    expect(screen.queryByRole("link", { name: /Series VIII prep/i })).toBeNull();
     expect(screen.getByRole("link", { name: /Start with Options 101/i })).toHaveAttribute("href", `/learn/${LESSONS[0].slug}`);
   });
 
@@ -77,7 +77,7 @@ describe("Lesson page", () => {
       const { unmount } = renderAt(`/learn/${l.slug}`);
       expect(screen.getByRole("heading", { level: 1, name: l.title })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: /check your understanding/i })).toBeInTheDocument();
-      expect(screen.getByText(/Educational content in partnership with NISMExams\.com/i)).toBeInTheDocument();
+      expect(screen.queryByText(/NISMExams/i)).toBeNull();
       expect(document.title).toContain(l.title);
       unmount();
     }

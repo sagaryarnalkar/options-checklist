@@ -32,7 +32,6 @@ const REQUIRED_PATHS = [
   "/journal",
   "/alerts",
   "/events",
-  "/ecosystem",
   // 1Cliq Trade (PR #11)
   "/one-cliq",
   "/orders",

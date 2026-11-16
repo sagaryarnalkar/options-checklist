@@ -315,7 +315,8 @@ def install_node(home: Optional[Path] = None) -> dict:
 
 
 def _stamp(ref: str, url: str) -> str:
-    return f"{ref} {url}"
+    # the dashboard URL is compiled into the frontend too (HeroZero desk), so it is part of the identity
+    return f"{ref} {url} {dashboard_url(url)}".rstrip()
 
 
 def build_dir(ref: str, home: Optional[Path] = None) -> Path:
@@ -343,6 +344,19 @@ def _built_dirs(url: str, home: Optional[Path] = None) -> list:
         if u == url and (d / "dist" / "index.html").exists():
             out.append((d.stat().st_mtime, d, ref))
     return [(d, ref) for _, d, ref in sorted(out, reverse=True)]
+
+
+def dashboard_url(url: str) -> str:
+    """The dashboard's origin, compiled into the hub's frontend: its HeroZero desk (our tabs in its
+    sidebar), the account chip's Kite-login link. OPTION_HUB_DASHBOARD_URL, else hub.X → X; "" = off."""
+    env = (os.environ.get("OPTION_HUB_DASHBOARD_URL") or "").strip().rstrip("/")
+    if env:
+        return env
+    p = urlparse(url)
+    host = p.hostname or ""
+    if host.startswith("hub."):
+        return f"{p.scheme}://{host[4:]}" + (f":{p.port}" if p.port else "")
+    return ""
 
 
 def _frame_ancestors(url: str) -> str:
@@ -564,7 +578,8 @@ class _Runtime:
         log.write_text(f"[{datetime.now(IST):%Y-%m-%d %H:%M:%S}] build optionhub/ {ver} for {url} "
                        f"(node {node['source']} {node['node']})\n")
         env = {**os.environ, "PATH": node["bin"] + os.pathsep + os.environ.get("PATH", ""),
-               "VITE_PROXY_URL": url, "VITE_DASHBOARD_KITE": "1", "NODE_OPTIONS": "--max-old-space-size=1536",
+               "VITE_PROXY_URL": url, "VITE_DASHBOARD_KITE": "1", "VITE_SITE_URL": url,
+               "VITE_DASHBOARD_URL": dashboard_url(url), "NODE_OPTIONS": "--max-old-space-size=1536",
                "npm_config_update_notifier": "false", "CI": "1"}
         npm = str(Path(node["bin"]) / "npm")
         steps = [

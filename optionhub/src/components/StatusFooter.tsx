@@ -1,14 +1,11 @@
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Circle, Clock, Github } from "lucide-react";
+import { Circle, Clock } from "lucide-react";
 import { useLiveIndices } from "@/hooks/useMarketData";
 import { useProxyStatus } from "@/lib/api/proxyClient";
 import { formatTimeIST } from "@/lib/options";
-import { BRAND, withUtm } from "@/lib/brand/links";
 import { modKeyLabel } from "@/hooks/useKeyboardShortcuts";
 import { cn } from "@/lib/utils";
 
-const GITHUB_URL = withUtm(BRAND.repo, "status-footer");
-const SITE_URL = withUtm(BRAND.site, "status-footer");
 
 interface SnapshotStats {
   count: number;
@@ -132,26 +129,6 @@ export const StatusFooter = () => {
           <kbd className="rounded-chip bg-control-track px-1 font-sans">R</kbd> Refresh
         </span>
         <MinuteClock />
-        <a
-          href={SITE_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="hidden items-center gap-0.5 rounded-sm transition-colors duration-fast hover:text-foreground sm:flex"
-        >
-          mrchartist.com
-          <ArrowUpRight className="h-3 w-3" aria-hidden="true" />
-          <span className="sr-only">(opens in a new tab)</span>
-        </a>
-        <a
-          href={GITHUB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="flex items-center gap-1 rounded-sm transition-colors duration-fast hover:text-foreground"
-          aria-label="Source code on GitHub (opens in a new tab)"
-        >
-          <Github className="h-3 w-3" aria-hidden="true" />
-          <span className="hidden md:inline">GitHub</span>
-        </a>
       </div>
 
       <p className="w-full lg:hidden">Data for education and research. Not investment advice.</p>

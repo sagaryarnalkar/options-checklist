@@ -31,6 +31,12 @@ import {
   ChartSpline,
   History,
   ListOrdered,
+  Gauge,
+  BriefcaseBusiness,
+  ListChecks,
+  Radar,
+  NotebookPen,
+  HandCoins,
   type LucideIcon,
 } from "lucide-react";
 
@@ -62,6 +68,12 @@ export const ROUTE_ICONS: Record<string, LucideIcon> = {
   ChartSpline,
   History,
   ListOrdered,
+  Gauge,
+  BriefcaseBusiness,
+  ListChecks,
+  Radar,
+  NotebookPen,
+  HandCoins,
 };
 
 /** Icon component for a registry icon name; falls back to an arrow for unknown names. */

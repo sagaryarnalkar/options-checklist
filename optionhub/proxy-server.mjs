@@ -56,7 +56,7 @@ import * as panicGate from "./server/lib/panicGate.mjs";
 import * as tradingLockState from "./server/lib/tradingLockState.mjs";
 import * as auditLog from "./server/lib/auditLog.mjs";
 import * as basketEngine from "./server/lib/basketEngine.mjs";
-import { DASHBOARD, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
+import { DASHBOARD, dashboardAccount, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -3346,6 +3346,11 @@ export const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req, SESSION_LOGIN_BODY_LIMIT);
       const out = await handleSessionLogin({ registry: brokerRegistry, brokerId, body, rateKey: clientIp(req), limiter: sessionLoginLimiter, ipLimiter: sessionLoginIpLimiter });
       return send(res, out.status, out.body);
+    }
+    if (DASHBOARD && path === "/api/dashboard/account") {
+      // options-checklist: the dashboard's Kite account for the header chip (server/dashboard.mjs)
+      const { status, body } = await dashboardAccount();
+      return send(res, status, body);
     }
     if (path === "/api/dhan-proxy") {
       const { status, body } = await handleDhanProxy(params, creds());

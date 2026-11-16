@@ -1,10 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Blocks, ChevronRight, Monitor, Moon, Sun } from "lucide-react";
-import { MrChartistLogo, MrChartistMark } from "@/components/brand/MrChartistLogo";
-import { OutboundLink } from "@/components/brand/OutboundLink";
-import { SocialIcon } from "@/components/brand/SocialIcon";
-import { BRAND, SOCIALS, type SocialId } from "@/lib/brand/links";
+import { Monitor, Moon, Sun } from "lucide-react";
+import { HeroZeroLogo, HeroZeroMark } from "@/components/brand/HeroZeroLogo";
 import { NavLink } from "@/components/NavLink";
 import {
   Sidebar,
@@ -109,55 +106,6 @@ function NavItem({ route, collapsed, seen }: { route: RouteDef; collapsed: boole
   );
 }
 
-/** Socials shown in the expanded sidebar footer (the rest are on the ecosystem page). */
-const SIDEBAR_SOCIALS: readonly SocialId[] = ["x", "youtube", "telegram", "instagram", "linkedin", "github"];
-
-/** Compact "More from Mr. Chartist" link to /ecosystem, plus social icons when expanded. */
-function EcosystemLink({ collapsed }: { collapsed: boolean }) {
-  if (collapsed) {
-    return (
-      <NavLink
-        to="/ecosystem"
-        aria-label="More from Mr. Chartist"
-        title="More from Mr. Chartist"
-        className="flex h-9 w-9 items-center justify-center rounded-pill text-primary-ink transition-colors hover:bg-control-track focus-visible:shadow-focus focus-visible:outline-none"
-        activeClassName={SELECTED_ROW}
-      >
-        <Blocks className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
-      </NavLink>
-    );
-  }
-  const socials = SIDEBAR_SOCIALS.map((id) => SOCIALS.find((s) => s.id === id)).filter((s): s is (typeof SOCIALS)[number] => Boolean(s));
-  return (
-    <div className="space-y-1">
-      <NavLink
-        to="/ecosystem"
-        className="group flex h-7 items-center gap-2 rounded-pill px-2 text-body text-sidebar-foreground focus-visible:shadow-focus focus-visible:outline-none"
-        activeClassName={SELECTED_ROW}
-      >
-        <MrChartistMark size={16} decorative />
-        <span className="min-w-0 flex-1 truncate">More from Mr. Chartist</span>
-        <ChevronRight className="h-3 w-3 text-muted-foreground" aria-hidden="true" />
-      </NavLink>
-      <ul className="flex items-center justify-between px-1" aria-label="Mr. Chartist on social media">
-        {socials.map((s) => (
-          <li key={s.id}>
-            <OutboundLink
-              url={s.url}
-              campaign="sidebar"
-              label={`Mr. Chartist on ${s.label}`}
-              title={s.label}
-              className="flex h-6 w-6 items-center justify-center rounded-pill text-muted-foreground transition-colors hover:bg-control-track hover:text-foreground focus-visible:shadow-focus focus-visible:outline-none"
-            >
-              <SocialIcon id={s.id} className="h-3.5 w-3.5" />
-            </OutboundLink>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function ThemeSwitch({ collapsed }: { collapsed: boolean }) {
   const { mode, setMode, isDark, toggle } = useTheme();
   if (collapsed) {
@@ -229,16 +177,16 @@ export function AppSidebar() {
       <SidebarHeader className={cn("shrink-0 px-4 pb-2 pt-4", collapsed && "items-center px-0 pt-3")}>
         <Link
           to="/"
-          // Must start with the visible lockup text ("Mr. Chartist" / "Option Hub") so the
-          // accessible name matches what sighted voice-control users read (WCAG 2.5.3).
-          aria-label={`${BRAND.name} ${BRAND.product}, go to dashboard`}
-          title={collapsed ? BRAND.productFull : undefined}
+          // Starts with the visible lockup text so the accessible name matches what sighted
+          // voice-control users read (WCAG 2.5.3).
+          aria-label="HeroZero Trader Terminal, go to dashboard"
+          title={collapsed ? "HeroZero" : undefined}
           className={cn(
             "flex min-w-0 items-center rounded-pill text-foreground focus-visible:shadow-focus focus-visible:outline-none",
             collapsed ? "h-9 w-9 justify-center" : "-mx-1 px-1 py-0.5",
           )}
         >
-          {collapsed ? <MrChartistMark size={24} decorative /> : <MrChartistLogo size={30} />}
+          {collapsed ? <HeroZeroMark size={24} decorative /> : <HeroZeroLogo size={30} />}
         </Link>
       </SidebarHeader>
 
@@ -277,7 +225,6 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className={cn("hairline-t shrink-0 gap-2 px-2.5 py-2.5", collapsed && "items-center px-0")}>
-        <EcosystemLink collapsed={collapsed} />
         <ThemeSwitch collapsed={collapsed} />
         <PaletteToggle collapsed={collapsed} />
         {/* Keyboard hints are noise on touch screens; hide them on mobile and when collapsed. */}

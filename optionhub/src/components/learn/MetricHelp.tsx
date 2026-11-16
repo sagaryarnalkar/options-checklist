@@ -107,7 +107,7 @@ export default function MetricHelp({ metric, value, className, children }: Metri
                 </p>
               ) : null}
               <div className="flex items-center justify-between gap-2 border-t border-separator pt-2">
-                <span className="text-micro text-muted-foreground">Learn with NISMExams.com</span>
+                <span className="text-micro text-muted-foreground">HeroZero Learn</span>
                 <LearnMoreLink to={`/learn/${info.lessonSlug}`}>
                   Learn more <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
                 </LearnMoreLink>

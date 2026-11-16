@@ -1,49 +1,33 @@
+// HeroZero branding (options-checklist): the lockup, cross-links switched off, the export watermark.
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
-import Ecosystem from "@/pages/Ecosystem";
-import { BRAND, PRODUCTS } from "@/lib/brand/links";
-import { MARK_PATHS } from "@/lib/brand/logo";
+import { cleanup, render, screen } from "@testing-library/react";
 import { drawBrandMark, EXPORT_WATERMARK } from "@/components/strategy/exportPng";
-import { MrChartistLogo, MrChartistMark } from "./MrChartistLogo";
+import { HeroZeroLogo, HeroZeroMark } from "./HeroZeroLogo";
 import { BrandCrossLink, ProductCrossLink } from "./ProductCrossLink";
 import { OutboundLink } from "./OutboundLink";
 import { SocialIcon } from "./SocialIcon";
 
 afterEach(cleanup);
 
-describe("MrChartistMark", () => {
-  it("is a titled image filled with currentColor", () => {
-    render(<MrChartistMark size={20} />);
-    const svg = screen.getByRole("img", { name: "Mr. Chartist" });
-    expect(svg).toHaveAttribute("fill", "currentColor");
+describe("HeroZeroMark", () => {
+  it("is a titled image", () => {
+    render(<HeroZeroMark size={20} />);
+    const svg = screen.getByRole("img", { name: "HeroZero" });
     expect(svg).toHaveAttribute("width", "20");
-    expect(svg.querySelectorAll("path")).toHaveLength(MARK_PATHS.length);
+    expect(svg.querySelectorAll("circle")).toHaveLength(2);
   });
 
   it("hides itself from assistive tech when decorative", () => {
-    const { container } = render(<MrChartistMark decorative />);
-    const svg = container.querySelector("svg");
-    expect(svg).toHaveAttribute("aria-hidden", "true");
-    expect(svg?.querySelector("title")).toBeNull();
+    const { container } = render(<HeroZeroMark decorative />);
+    expect(container.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
   });
 });
 
-describe("MrChartistLogo", () => {
-  it("renders the wordmark and product label in the lockup", () => {
-    render(<MrChartistLogo />);
-    expect(screen.getByText("Mr. Chartist")).toBeInTheDocument();
-    expect(screen.getByText("Option Hub")).toBeInTheDocument();
-  });
-
-  it("renders only the mark, named with the product", () => {
-    render(<MrChartistLogo variant="mark" />);
-    expect(screen.getByRole("img", { name: "Mr. Chartist Option Hub" })).toBeInTheDocument();
-  });
-
-  it("can hide the product label", () => {
-    render(<MrChartistLogo product={null} />);
-    expect(screen.queryByText("Option Hub")).toBeNull();
+describe("HeroZeroLogo", () => {
+  it("renders the HEROZERO wordmark and the Trader · Terminal line", () => {
+    const { container } = render(<HeroZeroLogo />);
+    expect(container.textContent).toContain("HEROZERO");
+    expect(screen.getByText("Trader · Terminal")).toBeInTheDocument();
   });
 });
 
@@ -71,17 +55,11 @@ describe("OutboundLink", () => {
 });
 
 describe("cross-links", () => {
-  it("links a product with UTM tags in one line", () => {
+  it("render nothing in HeroZero", () => {
     const { container } = render(<ProductCrossLink id="fiiDii" campaign="participants" blurb="Flows." />);
-    const link = screen.getByRole("link", { name: /FII\/DII Data/ });
-    expect(link.getAttribute("href")).toMatch(/^https:\/\/fii-diidata\.mrchartist\.com\/\?utm_source=option-hub&utm_medium=app&utm_campaign=participants$/);
-    expect(container.querySelector("[data-cross-link='fiiDii']")).not.toBeNull();
-    expect(screen.getByText("Flows.")).toBeInTheDocument();
-  });
-
-  it("supports links that are not products", () => {
-    render(<BrandCrossLink name="Learn options" url="https://mrchartist.com/learn/options" campaign="learn-hub" lead={null} />);
-    expect(screen.getByRole("link", { name: /Learn options/ }).getAttribute("href")).toContain("utm_campaign=learn-hub");
+    expect(container.innerHTML).toBe("");
+    const { container: c2 } = render(<BrandCrossLink name="Learn options" url="https://example.com" campaign="learn-hub" lead={null} />);
+    expect(c2.innerHTML).toBe("");
   });
 });
 
@@ -95,68 +73,20 @@ describe("SocialIcon", () => {
   });
 });
 
-describe("Ecosystem page", () => {
-  const renderPage = () =>
-    render(
-      <MemoryRouter>
-        <Ecosystem />
-      </MemoryRouter>,
-    );
-
-  it("has one h1 and sets the page title", () => {
-    renderPage();
-    expect(screen.getByRole("heading", { level: 1, name: "More from Mr. Chartist" })).toBeInTheDocument();
-    expect(document.title).toBe("Mr. Chartist ecosystem · Option Hub by Mr. Chartist");
-  });
-
-  it("opens every outbound link in a new tab with noopener", () => {
-    renderPage();
-    // mailto: links open the mail client, not a tab, so only web links are checked.
-    const links = screen.getAllByRole("link").filter((a) => /^https?:/.test(a.getAttribute("href") ?? ""));
-    expect(links.length).toBeGreaterThan(10);
-    for (const a of links) {
-      expect(a).toHaveAttribute("target", "_blank");
-      expect(a).toHaveAttribute("rel", "noopener noreferrer");
-    }
-  });
-
-  it("never adds UTM tags to the SEBI verification link", () => {
-    renderPage();
-    const sebi = screen.getByRole("link", { name: /Verify on sebi\.gov\.in/ });
-    expect(sebi).toHaveAttribute("href", BRAND.sebiVerifyUrl);
-    expect(screen.getByText(/SEBI Registered Research Analyst — INH000015297/)).toBeInTheDocument();
-    expect(screen.getByText(BRAND.disclaimer)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: BRAND.licenceEmail })).toHaveAttribute("href", expect.stringMatching(/^mailto:rohit@mrchartist\.com\?subject=/));
-  });
-
-  it("shows Scanner Pro as returning soon without an Open link", () => {
-    renderPage();
-    const card = screen.getByRole("heading", { level: 3, name: /Scanner Pro/ }).closest("li") as HTMLElement;
-    expect(within(card).getByText("Returning soon")).toBeInTheDocument();
-    expect(within(card).queryByRole("link")).toBeNull();
-    const live = PRODUCTS.filter((p) => p.status === "live" && p.id !== "nismExams" && p.id !== "books");
-    for (const p of live) expect(screen.getByRole("link", { name: `Open ${p.name} (opens in a new tab)` })).toBeInTheDocument();
-  });
-});
-
 describe("PNG export watermark", () => {
-  it("names the product", () => {
-    expect(EXPORT_WATERMARK).toMatch(/^Option Hub by Mr\. Chartist/);
+  it("names HeroZero", () => {
+    expect(EXPORT_WATERMARK).toMatch(/^HeroZero/);
+    expect(EXPORT_WATERMARK).not.toMatch(/Chartist/);
   });
 
-  it("skips the mark without Path2D and draws every path with it", () => {
-    const ctx = { save: vi.fn(), restore: vi.fn(), translate: vi.fn(), scale: vi.fn(), fill: vi.fn(), fillStyle: "" } as unknown as CanvasRenderingContext2D;
-    const had = "Path2D" in globalThis;
-    const original = (globalThis as { Path2D?: unknown }).Path2D;
-    delete (globalThis as { Path2D?: unknown }).Path2D;
-    expect(drawBrandMark(ctx, 0, 0, 14, "black")).toBe(false);
-    (globalThis as { Path2D?: unknown }).Path2D = class {
-      constructor(public d: string) {}
-    };
-    expect(drawBrandMark(ctx, 4, 4, 14, "black")).toBe(true);
-    expect(ctx.fill).toHaveBeenCalledTimes(MARK_PATHS.length);
-    expect(ctx.fillStyle).toBe("black");
-    if (had) (globalThis as { Path2D?: unknown }).Path2D = original;
-    else delete (globalThis as { Path2D?: unknown }).Path2D;
+  it("draws the crosshair mark with canvas primitives", () => {
+    const ctx = {
+      save: vi.fn(), restore: vi.fn(), translate: vi.fn(), scale: vi.fn(), fillRect: vi.fn(), beginPath: vi.fn(),
+      arc: vi.fn(), stroke: vi.fn(), fill: vi.fn(), fillStyle: "", strokeStyle: "", lineWidth: 0,
+    } as unknown as CanvasRenderingContext2D;
+    expect(drawBrandMark(ctx, 4, 4, 14, "black", "white", "orange")).toBe(true);
+    expect(ctx.fillRect).toHaveBeenCalledWith(0, 0, 38, 38);
+    expect(ctx.arc).toHaveBeenCalledTimes(2);
+    expect(ctx.restore).toHaveBeenCalled();
   });
 });

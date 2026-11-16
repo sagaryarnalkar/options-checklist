@@ -1,8 +1,8 @@
 import React from "react";
-import { AlertTriangle, Check, ChevronRight, Copy, ExternalLink, RefreshCw, RotateCcw } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Copy, RefreshCw, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { buildErrorReport, buildIssueUrl, currentPath, log } from "@/lib/log";
+import { buildErrorReport, currentPath, log } from "@/lib/log";
 import { isChunkLoadError, reloadOnceForChunkError } from "@/lib/lazyWithRetry";
 
 type ResetKeys = ReadonlyArray<unknown>;
@@ -204,12 +204,6 @@ export class ErrorBoundary extends React.Component<InternalProps, State> {
                 <RefreshCw className="h-3.5 w-3.5" aria-hidden /> Reload page
               </Button>
               <CopyErrorButton getText={this.reportText} />
-              <Button asChild type="button" size="sm" variant="ghost" className="gap-1.5">
-                <a href={buildIssueUrl(error, componentStack)} target="_blank" rel="noopener noreferrer">
-                  <ExternalLink className="h-3.5 w-3.5" aria-hidden /> Report on GitHub
-                  <span className="sr-only"> (opens in a new tab)</span>
-                </a>
-              </Button>
             </div>
             <div className="mt-5">
               <ErrorDetails error={error} componentStack={componentStack} />

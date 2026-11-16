@@ -14,7 +14,11 @@ const NISM_COURSES = `${NISM_HOME}/courses`;
 /**
  * NISMExams.com partner banner. "full" for the hub, "compact" for lesson sidebars.
  */
+const HIDDEN = true;
+
 export default function NismBanner({ variant = "full", className }: { variant?: "full" | "compact"; className?: string }) {
+  // HeroZero: no cross-promotion banner.
+  if (HIDDEN) return null;
   if (variant === "compact") {
     return (
       <aside aria-label="NISM certification prep" className={cn("rounded-card border border-product/25 bg-product-wash p-4", className)}>

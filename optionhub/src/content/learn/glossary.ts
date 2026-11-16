@@ -47,7 +47,7 @@ export const GLOSSARY: GlossaryTerm[] = [
   { term: "Max pain", definition: "The expiry price where option holders in total lose the most.", metric: "maxPain", lessonSlug: "max-pain-pcr" },
   { term: "Moneyness", definition: "Where a strike sits relative to spot: ITM, ATM or OTM.", lessonSlug: "moneyness-and-premium" },
   { term: "Market-wide position limit (MWPL)", aka: ["MWPL"], definition: "Exchange cap on total open interest in a stock's derivatives.", metric: "mwpl", lessonSlug: "open-interest-buildup" },
-  { term: "NISM Series VIII", aka: ["NISM", "equity derivatives certification"], definition: "The NISM Equity Derivatives certification for people dealing in F&O. Prepare with mock tests at NISMExams.com.", lessonSlug: "risk-disclosure" },
+  { term: "NISM Series VIII", aka: ["NISM", "equity derivatives certification"], definition: "The NISM Equity Derivatives certification for people dealing in F&O.", lessonSlug: "risk-disclosure" },
   { term: "Open interest (OI)", aka: ["OI"], definition: "The number of contracts outstanding at a point in time.", lessonSlug: "open-interest-buildup" },
   { term: "Out of the money (OTM)", aka: ["OTM"], definition: "A call with strike above spot or a put with strike below spot. All of its premium is time value.", lessonSlug: "moneyness-and-premium" },
   { term: "P50", definition: "Probability of touching 50% of max profit before expiry.", metric: "p50", lessonSlug: "probability-of-profit" },

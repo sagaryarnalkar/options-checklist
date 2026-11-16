@@ -48,8 +48,24 @@
    palette. Axis values live in localStorage; defaults per the v2 handoff. */
 (function(){
   var d = document.documentElement;
-  d.dataset.theme = localStorage.getItem("hz_theme") || "indigo";
-  d.dataset.skin = localStorage.getItem("hz_skin") || "fintech";
+  // ?embed=1: shown inside the HeroZero terminal (optionhub/, its left menu = our tabs). No header or
+  // tab bar; ?tab= picks the tab, ?theme=/?skin= match the terminal's look without touching the saved
+  // choice. Tabs then switch by postMessage {type:"hz:tab"} from the terminal.
+  var q = new URLSearchParams(location.search), embed = q.get("embed") === "1";
+  window.HZ_EMBED = embed;
+  if (embed) {
+    d.classList.add("hz-embed");
+    // Kite's / Fyers' login pages refuse to be framed: their links open in the whole window.
+    document.addEventListener("click", function(e){
+      var el = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+      if (!el) return;
+      var u = new URL(el.getAttribute("href"), location.href);
+      if (u.origin === location.origin && /^\/(login|fyers\/login)\b/.test(u.pathname)) el.target = "_top";
+    }, true);
+  }
+  var qt = embed && q.get("theme"), qs = embed && q.get("skin");
+  d.dataset.theme = (qt && /^[a-z-]{2,20}$/.test(qt)) ? qt : (localStorage.getItem("hz_theme") || "indigo");
+  d.dataset.skin = (qs && /^[a-z]{2,20}$/.test(qs)) ? qs : (localStorage.getItem("hz_skin") || "fintech");
   d.dataset.density = "comfortable"; d.dataset.corners = "square";
   d.dataset.numerals = "mono"; d.dataset.tint = "off";
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) d.dataset.rm = "true";
@@ -835,11 +851,27 @@
     --neutral-100:#1b2822; --neutral-200:#22302a; --neutral-500:#7f9188;
     --pos:#35c98b; --pos-bg:rgba(53,201,139,0.16); --neg:#ff6a4d; --neg-bg:rgba(255,106,77,0.15);
     --amber:#e0a83a; --on-accent:#0f1613; }
+  /* hub-dark / hub-light: the HeroZero terminal's own palette (optionhub/src/index.css), used when this
+     page is embedded there (?embed=1&theme=hub-dark|hub-light) so the tabs look native. */
+  :root[data-theme="hub-dark"]{ --color-bg:#222325; --color-surface:#2b2c2e; --color-text:#f3f4ee;
+    --color-divider:rgba(243,244,238,0.16); --color-accent:#ee6b2d; --color-accent-600:#f07d45; --color-accent-700:#f3925f;
+    --neutral-100:#2b2c2e; --neutral-200:#323336; --neutral-500:#9a9da3;
+    --pos:#3fc48a; --pos-bg:rgba(63,196,138,0.15); --neg:#f2796b; --neg-bg:rgba(242,121,107,0.15);
+    --amber:#e3b25a; --on-accent:#ffffff; }
+  :root[data-theme="hub-light"]{ --color-bg:#f3f4ee; --color-surface:#fefefe; --color-text:#1f0d14;
+    --color-divider:rgba(31,13,20,0.16); --color-accent:#e2611f; --color-accent-600:#c9541a; --color-accent-700:#aa400c;
+    --neutral-100:#f7f7f2; --neutral-200:#ebebe3; --neutral-500:#82767a;
+    --pos:#1f7a4d; --pos-bg:#e7f2ec; --neg:#c22a10; --neg-bg:#fff0ec; --amber:#a86a12; --on-accent:#ffffff; }
   /* Dark themes: accent tint derives from the accent so it never goes pastel-on-dark */
-  :root[data-theme="midnight"], :root[data-theme="slate"], :root[data-theme="emerald"]{
+  :root[data-theme="midnight"], :root[data-theme="slate"], :root[data-theme="emerald"], :root[data-theme="hub-dark"]{
     --color-accent-100:color-mix(in srgb, var(--color-accent) 16%, var(--color-bg));
     --shadow-sm:0 1px 2px rgba(0,0,0,.5); --shadow-md:0 3px 10px rgba(0,0,0,.5); --shadow-lg:0 12px 32px rgba(0,0,0,.6);
   }
+
+  /* Embedded in the HeroZero terminal (?embed=1): its sidebar and toolbar replace our header + tab bar. */
+  :root.hz-embed .hz-header{ display:none !important; }
+  :root.hz-embed .wrap{ max-width:none !important; padding:14px 18px 40px !important; }
+  :root.hz-embed body{ background:var(--color-bg); }
 
   /* ---------- Axis 2: data-skin (FORM only; modernist = base) ---------- */
   :root[data-skin="fintech"] .wrap{ padding:34px; }
@@ -1137,7 +1169,7 @@
       <button class="tab active" data-tab="oiflow" role="tab">OI Flow</button>
       <button class="tab" data-tab="paper" role="tab">Paper Trades</button>
       <button class="tab" data-tab="csp" role="tab">Cash Puts</button>
-      <button class="tab" data-tab="hub" role="tab">Option Hub</button>
+      <button class="tab" data-tab="hub" role="tab">Terminal</button>
     </div>
   </div>
 </header>
@@ -1652,7 +1684,7 @@
   <div class="tab-panel" id="tabHub">
     <div class="card pos-headcard">
       <div class="pos-title-row">
-        <div class="strat-meta"><b style="color:var(--text)">Option Hub</b> by Mr. Chartist
+        <div class="strat-meta"><b style="color:var(--text)">HeroZero Terminal</b>
           <span id="hubSub" class="pos-sub"></span></div>
         <div class="pos-actions">
           <a id="hubOpen" class="live-refresh" target="_blank" rel="noopener" style="display:none;text-decoration:none">Open full screen ↗</a>
@@ -1669,18 +1701,15 @@
       <div id="hubNote"></div>
     </div>
     <div id="hubFrameWrap" class="hub-frame-wrap" style="display:none">
-      <iframe id="hubFrame" title="Option Hub by Mr. Chartist" allow="clipboard-write; fullscreen"></iframe>
+      <iframe id="hubFrame" title="HeroZero Terminal" allow="clipboard-write; fullscreen"></iframe>
     </div>
     <details class="hub-about card">
       <summary>About this tab — what it is, where its data comes from, what to be careful of</summary>
-      <p><b>What it is.</b> <a href="https://github.com/MrChartist/india-s-best-option-hub" target="_blank" rel="noopener" style="color:var(--accent)">Option Hub</a>
-        is an options terminal by Rohit Singh (Mr. Chartist): option chain, OI analysis, expiry day,
-        volatility, gamma exposure, FII/DII positioning, strategy builder and optimizer, backtester, paper
-        trading. Its source is part of this dashboard's code (the optionhub/ folder, under his personal-use
-        licence) and we change it like our own; the changes are listed in optionhub/OPTIONS-CHECKLIST-CHANGES.md.
-        Nothing it shows feeds our signals, paper book or Claude's call yet.</p>
-      <p><b>Only you can open it.</b> Its licence allows personal use by one individual and forbids running it
-        as a website other people use, so the hub's address answers "private" unless your browser holds the
+      <p><b>What it is.</b> The full HeroZero terminal: option chain, OI analysis, expiry day, volatility,
+        gamma exposure, FII/DII positioning, strategy builder and optimizer, backtester, paper trading — with this
+        dashboard's own tabs in its left menu (HeroZero section) and the Kite margin and P&amp;L in its toolbar.
+        Its source is the optionhub/ folder of this repository. Open it full screen for the best view.</p>
+      <p><b>Only you can open it.</b> The terminal's address answers "private" unless your browser holds the
         cookie this tab sets with your app key (the same key as the Positions tab).</p>
       <p><b>Option chain from Kite.</b> In market hours, the NIFTY and BANKNIFTY option chains come from this
         dashboard's Kite login. Each strike shows whichever is newer: our recorder's last minute (ATM±10 of the
@@ -1951,7 +1980,20 @@
       window.scrollTo({top:0, behavior:"smooth"});
     }));
     const savedTab = localStorage.getItem("tab");
-    activate(panels[savedTab] ? savedTab : "oiflow");
+    if (window.HZ_EMBED) {
+      // Inside the HeroZero terminal: ?tab= first, then {type:"hz:tab"} messages from it. Never the
+      // Option Hub tab (that is the terminal itself) and never saved, so a direct visit keeps its own tab.
+      const embedOk = (k) => !!panels[k] && k !== "hub";
+      const qTab = new URLSearchParams(location.search).get("tab");
+      activate(embedOk(qTab) ? qTab : "dashboard");
+      window.addEventListener("message", (e) => {
+        if (e.source !== window.parent) return;
+        const m = e.data || {};
+        if (m.type === "hz:tab" && embedOk(m.tab)) { activate(m.tab); window.scrollTo(0, 0); }
+      });
+    } else {
+      activate(panels[savedTab] ? savedTab : "oiflow");
+    }
     // Theme / skin settings (header selects): persist + reload so the charts
     // (canvas colors are resolved at build time) pick up the new palette.
     const themeSel = document.getElementById("hzTheme"), skinSel = document.getElementById("hzSkin");
@@ -2125,7 +2167,7 @@
         hubNote(`<div class="note">One-time setup. On the droplet, from the app folder, run
           <ol class="hub-steps"><li><code>bash deploy/option_hub.sh</code></li></ol>
           It adds the hub's locked <code>hub.</code> address to Caddy (asks for sudo once), sets <code>OPTION_HUB_URL</code>
-          and restarts this app, which then downloads, builds and runs Mr. Chartist's app by itself. After that there is
+          and restarts this app, which then builds and runs the terminal by itself. After that there is
           nothing separate to maintain: the usual <code>git pull</code> + restart updates both.</div>`);
         return;
       }
@@ -2140,7 +2182,7 @@
       if (r.status === 401){ posSetKey(""); hubShowGate("That key was not accepted — enter the ASSISTANT_KEY from the server's .env."); return; }
       if (!r.ok){
         const j = await r.json().catch(() => ({}));
-        hubNote(`<div class="note">${esc(j.detail || ("Could not unlock Option Hub (HTTP " + r.status + ")."))}</div>`);
+        hubNote(`<div class="note">${esc(j.detail || ("Could not unlock the terminal (HTTP " + r.status + ")."))}</div>`);
         return;
       }
       document.getElementById("hubGate").style.display = "none";
@@ -5257,6 +5299,7 @@
   function _todayLocal(){ return new Date().toLocaleDateString("en-CA"); }
   function maybeAutoLogin(loggedIn){
     if (loggedIn !== false) return;                       // logged in / unknown
+    if (window.HZ_EMBED) return;                          // Kite's login page refuses to be framed
     if (localStorage.getItem("hz_autologin_day") === _todayLocal()) return;
     localStorage.setItem("hz_autologin_day", _todayLocal());
     window.location.href = "/login";

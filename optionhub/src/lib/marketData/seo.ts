@@ -49,11 +49,11 @@ function xmlEscape(s: string): string {
 }
 
 /** Social preview image committed in public/og-image.png, served from GitHub when no site URL is set. */
-export const OG_IMAGE_FALLBACK = "https://raw.githubusercontent.com/MrChartist/india-s-best-option-hub/main/public/og-image.png";
+export const OG_IMAGE_FALLBACK = "/pwa-512x512.png";
 
 /** Absolute og:image URL: the deployed copy when the site URL is known, else the GitHub copy. */
 export function ogImageUrl(site: string): string {
-  return absoluteUrl(site, "/og-image.png") || OG_IMAGE_FALLBACK;
+  return absoluteUrl(site, "/pwa-512x512.png") || OG_IMAGE_FALLBACK;
 }
 
 /** Canonical URL for the app's home: the configured site, else the mrchartist.com project page. */
@@ -100,19 +100,14 @@ export function softwareApplicationJsonLd(site: string): Record<string, unknown>
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     name: SITE_NAME,
-    alternateName: ["Option Hub", "Mr. Chartist Option Hub"],
     description: SITE_DESCRIPTION,
     applicationCategory: "FinanceApplication",
     applicationSubCategory: "Options analytics",
     operatingSystem: "Any (web browser)",
     inLanguage: "en-IN",
     isAccessibleForFree: true,
-    license: "https://github.com/MrChartist/india-s-best-option-hub/blob/main/LICENSE",
-    codeRepository: "https://github.com/MrChartist/india-s-best-option-hub",
     offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
     image: ogImageUrl(site),
-    author: { "@type": "Person", name: BRAND.owner, alternateName: BRAND.name, url: BRAND.site },
-    publisher: { "@type": "Organization", name: BRAND.name, url: BRAND.site },
     featureList: [
       "NSE option chain with Greeks and IV",
       "Open interest, max pain and PCR",

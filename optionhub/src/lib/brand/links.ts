@@ -7,13 +7,13 @@
  */
 
 export const BRAND = {
-  name: "Mr. Chartist",
+  name: "HeroZero",
   owner: "Rohit Singh",
   tagline: "A clearer view of the markets.",
   site: "https://mrchartist.com",
-  product: "Option Hub",
+  product: "HeroZero",
   /** Full product name used in titles, the manifest and the README. */
-  productFull: "Option Hub by Mr. Chartist",
+  productFull: "HeroZero Trader Terminal",
   projectPage: "https://mrchartist.com/open-source/india-s-best-option-hub",
   repo: "https://github.com/MrChartist/india-s-best-option-hub",
   xHandle: "@Mr_Chartist",

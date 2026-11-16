@@ -83,7 +83,7 @@ $HUB_HOST {
 	@ours path /api/_options-checklist/* /api/broker-proxy
 	@data path /api/* /ws /health
 	route {
-		respond @locked "Option Hub is private. Open it from the Option Hub tab on https://$DOMAIN" 401
+		respond @locked "HeroZero Terminal is private. Open it from the Terminal tab on https://$DOMAIN" 401
 		reverse_proxy @ours 127.0.0.1:4001
 		reverse_proxy @data 127.0.0.1:4002
 		reverse_proxy 127.0.0.1:4001
