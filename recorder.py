@@ -622,6 +622,10 @@ def missing_sessions(conn, lookback_days: int = 10) -> list:
         if d.weekday() < 5 and iso not in known_closed:
             if iso not in have:
                 out.append({"date": iso, "reason": "no data", "minutes": 0})
+            elif frozen_day(conn, iso):
+                # quotes replayed on a closed day (#109) - not a session at all
+                out.append({"date": iso, "reason": "frozen quotes",
+                            "minutes": counts.get(iso, 0)})
             elif counts.get(iso, 0) < PARTIAL_SESSION_FLOOR:
                 out.append({"date": iso, "reason": "partial",
                             "minutes": counts.get(iso, 0)})
@@ -646,7 +650,7 @@ def backfill_gaps(kite, lookback_days: int = 10) -> dict:
     instruments = _get_instruments(kite)
     live_expiries = {str(i["expiry"]) for i in instruments
                      if i.get("expiry") and i.get("instrument_type") in ("CE", "PE")}
-    filled, lost, closed = [], [], []
+    filled, lost, closed, purged = [], [], [], []
     for g in gaps:
         day_iso = g["date"]
         # One cheap index-only call decides whether there was a session at all.
@@ -658,6 +662,28 @@ def backfill_gaps(kite, lookback_days: int = 10) -> dict:
                              "VALUES (?,?)", (day_iso, datetime.now(IST).isoformat()))
                 conn.commit()
             closed.append(day_iso)
+            continue
+        # Frozen quotes = a holiday the recorder wrote on (2026-11-10, before
+        # #109). Two independent checks must agree before anything is deleted:
+        # every stored minute carries one unchanging spot (missing_sessions)
+        # AND Kite has no index bars for the day. If Kite says the day DID
+        # trade, our rows are junk on a real session: report, never delete,
+        # and don't pretend a backfill can fix it (it never overwrites
+        # live minutes).
+        if g["reason"] == "frozen quotes":
+            if _session_existed(kite, day_iso):
+                lost.append({"date": day_iso, "underlying": "ALL",
+                             "reason": "stored quotes are frozen but Kite shows a session: "
+                                       "needs a rebuild from the Fyers archive"})
+                continue
+            with db.get_conn() as conn:
+                removed = purge_day(conn, day_iso)
+                conn.execute("INSERT OR REPLACE INTO non_trading_day (d, checked_ts) "
+                             "VALUES (?,?)", (day_iso, datetime.now(IST).isoformat()))
+                conn.commit()
+            print(f"[recorder] {day_iso}: no session; frozen quotes removed {removed}")
+            closed.append(day_iso)
+            purged.append({"date": day_iso, "removed": removed})
             continue
         for name, conf in UNDERLYINGS.items():
             with db.get_conn() as conn:
@@ -676,7 +702,7 @@ def backfill_gaps(kite, lookback_days: int = 10) -> dict:
                 filled.append({"date": day_iso, "underlying": name,
                                "ok": False, "error": f"{type(e).__name__}: {e}"})
     return {"gaps": len(gaps), "detail": gaps, "filled": filled,
-            "unrecoverable": lost, "non_trading": closed}
+            "unrecoverable": lost, "non_trading": closed, "purged": purged}
 
 
 def _session_existed(kite, day_iso: str) -> bool:
@@ -756,6 +782,114 @@ def _maybe_backfill_today(kite) -> None:
     backfill_gaps_async(kite)
 
 
+# ---- Session guard (#109) ----
+# On 2026-11-10, an NSE holiday, the user logged in at 10:37 and this loop
+# wrote 294 minutes of FROZEN quotes (one distinct spot all day, 12,348 rows
+# per underlying): Kite keeps answering quotes on a holiday with the last
+# session's values, and is_market_hours() only knows weekends. The gap check
+# then listed the holiday as a "partial" session to backfill.
+#
+# Rule: nothing is written until the index itself has traded TODAY. Evidence,
+# cheapest first: the index quote's exchange timestamp is today's, or Kite
+# has index minute bars for today. Either check failing (an exception) counts
+# as "can't tell" and we record anyway — losing a real session is worse than
+# a few junk minutes, which the gap sweep below can still remove. Once seen,
+# the answer is cached for the day (one extra call per day on a normal day).
+# A late or delayed open is NOT a holiday: we simply keep checking each tick,
+# and today's morning backfill only starts once the session is seen.
+_session_seen: dict = {}
+
+
+def _index_traded_today(kite, now: datetime) -> Optional[bool]:
+    """True = the NIFTY index printed today; False = it has not (both checks
+    answered); None = could not tell."""
+    today = now.date()
+    conf = UNDERLYINGS["NIFTY"]
+    key = f"{conf['exchange']}:{conf['tradingsymbol']}"
+    errors = 0
+    try:
+        q = (kite.quote([key]) or {}).get(key) or {}
+        ts = q.get("timestamp") or q.get("last_trade_time")
+        if isinstance(ts, str):
+            ts = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if isinstance(ts, datetime):
+            if (ts.astimezone(IST) if ts.tzinfo else ts).date() == today:
+                return True
+        else:
+            errors += 1                     # no usable timestamp: no evidence either way
+    except Exception:
+        errors += 1
+    try:
+        start = datetime(today.year, today.month, today.day, 9, 15)
+        bars = kite.historical_data(conf["instrument_token"],
+                                    start.strftime("%Y-%m-%d %H:%M:%S"),
+                                    now.strftime("%Y-%m-%d %H:%M:%S"), "minute")
+        if bars:
+            return True
+    except Exception:
+        errors += 1
+    return None if errors >= 2 else False
+
+
+def session_open_today(kite, now: Optional[datetime] = None) -> bool:
+    """Should this tick write anything? Fails open (True) when unsure."""
+    now = now or datetime.now(IST)
+    d = now.date().isoformat()
+    if _session_seen.get(d):
+        return True
+    try:
+        with db.get_conn() as conn:
+            if conn.execute("SELECT 1 FROM non_trading_day WHERE d=?", (d,)).fetchone():
+                return False
+    except Exception:
+        pass
+    seen = _index_traded_today(kite, now)
+    if seen:
+        _session_seen.clear()
+        _session_seen[d] = True
+        return True
+    return seen is None
+
+
+# Tables a no-session day can have polluted, and the column that dates them.
+_DAY_TABLES = (("chain_snapshot", "ts"), ("underlying_candle", "ts"),
+               ("futures_minute", "ts"), ("recorder_log", "ts"), ("llt_prints", "ts"),
+               ("score_marker_outcomes", "ts"), ("oi_builds", "ts"),
+               ("aggressor_minute", "ts"), ("hold_baseline", "d"))
+
+
+def frozen_day(conn, day_iso: str) -> bool:
+    """True when every recorded minute of the day carries the SAME index level
+    for every underlying — the signature of quotes replayed on a closed day.
+    A real session never holds one spot for more than a few minutes."""
+    nxt = (datetime.fromisoformat(day_iso) + timedelta(days=1)).date().isoformat()
+    rows = conn.execute(
+        "SELECT underlying, COUNT(DISTINCT spot), COUNT(DISTINCT ts) FROM chain_snapshot "
+        "WHERE ts >= ? AND ts < ? GROUP BY underlying", (day_iso, nxt)).fetchall()
+    return bool(rows) and all(r[1] <= 1 and r[2] >= 3 for r in rows)
+
+
+def purge_day(conn, day_iso: str, dry_run: bool = False) -> dict:
+    """Delete everything recorded or derived for a day that had no session."""
+    nxt = (datetime.fromisoformat(day_iso) + timedelta(days=1)).date().isoformat()
+    out = {}
+    for table, col in _DAY_TABLES:
+        try:
+            if col == "d":
+                where, args = "d = ?", (day_iso,)
+            else:
+                where, args = f"{col} >= ? AND {col} < ?", (day_iso, nxt)
+            n = conn.execute(f"SELECT COUNT(*) FROM {table} WHERE {where}", args).fetchone()[0]
+            if n and not dry_run:
+                conn.execute(f"DELETE FROM {table} WHERE {where}", args)
+            out[table] = n
+        except Exception as e:                       # a table this DB never created
+            out[table] = f"{type(e).__name__}: {e}"
+    if not dry_run:
+        conn.commit()
+    return out
+
+
 def run_snapshot(force: bool = False) -> dict:
     """One scheduler tick. No-ops outside market hours or when not logged in.
     Returns a small per-underlying status dict; never raises."""
@@ -766,6 +900,12 @@ def run_snapshot(force: bool = False) -> dict:
     kite = get_kite_from_cache()
     if kite is None:
         return {"skipped": "no_kite_session", "ts": now.isoformat()}
+
+    # No session today (a holiday): write nothing. Checked before the morning
+    # backfill so that, on a late open, the backfill starts once trading does.
+    if not force and not session_open_today(kite, now):
+        return {"skipped": "index has not traded today (market holiday?)",
+                "ts": now.isoformat()}
 
     # First valid tick of the day kicks a background backfill of today's gap
     # (e.g. 09:15 → login time). Self-dedupes; never blocks this snapshot.
