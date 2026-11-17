@@ -333,17 +333,25 @@ def is_built(ref: str, url: str, home: Optional[Path] = None) -> bool:
 
 
 def _built_dirs(url: str, home: Optional[Path] = None) -> list:
-    """Every finished build for this URL, newest first."""
+    """Every finished build for this hub URL, best first: builds made for the current dashboard URL
+    before older ones, then the most recently FINISHED (the stamp is written last). The stamp is
+    "version url" (before #115) or "version url dashboard_url" — the old two-part split dropped every
+    newer build, so while an update waited for 15:45 the hub fell back to a pre-#115 build."""
     root = (home or _home()) / "builds"
+    want_dash = dashboard_url(url)
     out = []
     for d in root.glob("*") if root.exists() else []:
+        stamp = d / ".occl-build"
         try:
-            ref, u = (d / ".occl-build").read_text().strip().split(" ", 1)
-        except (OSError, ValueError):
+            parts = stamp.read_text().split()
+            finished = stamp.stat().st_mtime
+        except OSError:
             continue
-        if u == url and (d / "dist" / "index.html").exists():
-            out.append((d.stat().st_mtime, d, ref))
-    return [(d, ref) for _, d, ref in sorted(out, reverse=True)]
+        if len(parts) < 2 or parts[1] != url or not (d / "dist" / "index.html").exists():
+            continue
+        dash = parts[2] if len(parts) > 2 else ""
+        out.append((dash == want_dash, finished, d, parts[0]))
+    return [(d, ref) for _, _, d, ref in sorted(out, key=lambda x: (x[0], x[1]), reverse=True)]
 
 
 def dashboard_url(url: str) -> str:
