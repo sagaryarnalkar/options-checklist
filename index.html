@@ -384,6 +384,10 @@
   /* Recommendation + OI tables — compact cells, tabular numerals */
   table{ font-size:12.5px; }
   th, td{ padding:5px 8px !important; }
+  /* ...but never inside the chart library's own layout table: that padding
+     pushed the price pane 8px right and ~40px UNDER the price axis, hiding
+     the live edge and the tail of every axis label ("R 25300" read "R"). */
+  .tv-lightweight-charts td, .tv-lightweight-charts th{ padding:0 !important; }
   td, th, .live-row, .oi-status{ font-variant-numeric:tabular-nums; }
   .rec-strategy{ padding:12px 14px; }
   /* OI Flow controls — pack the filter bar tighter */
@@ -1414,13 +1418,19 @@
           <option value="off">Off</option>
         </select>
       </label>
+      <label title="Today's OI builds on the chart: a dot on the minute a strike reaches its 5th build (calls above the candles, puts below), and dotted price-axis tags at the most-built strikes per side. They show where positions are piling up — NOT support or resistance: the price test found price reaches these strikes about as often as any strike at the same distance.">OI builds
+        <select id="oiBuildsChart">
+          <option value="on" selected>On</option>
+          <option value="off">Off</option>
+        </select>
+      </label>
     </div>
     <div class="oi-status" id="oiStatus"></div>
     <div class="oi-layout">
       <div class="oi-charts">
         <div class="oi-chart-card">
           <div class="oi-chart-title">
-            <span>Underlying (1-min) + ATM flow (₹cr) · bars rise by magnitude ·
+            <span>Underlying (1-min) + ATM flow (₹cr) · <span class="csp-sub" title="A dot marks the minute a strike reached its 5th OI build today (calls above, puts below); dotted axis tags mark the most-built strikes. Positions, not support or resistance.">● 5th OI build · ┄ most-built strikes</span> · bars rise by magnitude ·
             green = bullish (<span style="color:var(--accent-2)">▮ PE write</span> + <span style="color:var(--pos)">▮ CE buy</span>) ·
             red = bearish (<span style="color:var(--danger)">▮ CE write</span> + <span style="color:var(--neg)">▮ PE buy</span>)</span>
             <button type="button" id="oiReload" class="live-refresh">Reload</button>
@@ -3225,6 +3235,7 @@
     document.getElementById("oiScoreBase").addEventListener("change", oiReload);
     document.getElementById("oiRegime").addEventListener("change", oiReload);
     document.getElementById("oiLlt").addEventListener("change", oiReload);
+    document.getElementById("oiBuildsChart").addEventListener("change", loadBuildsLive);
     startOiAuto();   // arm before the first render so the live dot shows immediately
     buildOiChart();
     await loadOiDays();
@@ -3234,12 +3245,15 @@
   // Minute-resolution Vtrender-style read (see llt.py): green/red circles on
   // the candles + a right-rail feed with the OI-quadrant classification.
   let _lastScoreMarkerObjs = [];
+  let _lastBuildMarkerObjs = [];   // OI-build milestones (applyBuildOverlay)
+  let _oiBuildLines = [];          // OI-build axis tags on the candle series
   let _lastLltPoints = [];   // {time, price, side, lots} per print
   let _lastCandleClose = new Map();   // candle time -> spot close (basis calc)
   let _lltPlotted = [];               // last plotted LLT points (verification)
   function _applyOiMarkers(){
     if (!_oiCandleSeries) return;
-    _oiCandleSeries.setMarkers([..._lastScoreMarkerObjs].sort((a, b) => a.time - b.time));
+    _oiCandleSeries.setMarkers([..._lastScoreMarkerObjs, ..._lastBuildMarkerObjs]
+      .sort((a, b) => a.time - b.time));
     if (!_oiLltSeries) return;
     const pts = [..._lastLltPoints].sort((a, b) => a.time - b.time);
     // LLT prints are FUTURES prices on a SPOT chart. After a contract roll
@@ -3689,11 +3703,89 @@
         Held only means the position stayed on — not that it made money, and a large
         drop from peak means it is already being unwound.</div>`;
   }
+  // Chart overlay for the same payload: a dot on the minute each strike reached
+  // the milestone (5th build), calls above the candles and puts below, and
+  // faint dotted axis tags at the most-built strikes per side. Deliberately
+  // NOT styled like the solid R/S lines: walls.py found no support/resistance
+  // in writers' strikes, so these are drawn as positions, not levels.
+  // cssv() returns the variable's raw text, and several theme colours are
+  // color-mix()/var() expressions the chart library cannot parse. Resolve to
+  // real rgb through the browser: computed colour → 1px canvas → bytes.
+  function cssRgb(name){
+    try {
+      const probe = document.createElement("span");
+      probe.style.cssText = `display:none;color:var(${name})`;
+      document.body.appendChild(probe);
+      const c = getComputedStyle(probe).color;
+      probe.remove();
+      const cv = document.createElement("canvas"); cv.width = cv.height = 1;
+      const x = cv.getContext("2d", { willReadFrequently: true });
+      x.fillStyle = c; x.fillRect(0, 0, 1, 1);
+      const [r, g, b, a] = x.getImageData(0, 0, 1, 1).data;
+      return a >= 255 ? `rgb(${r},${g},${b})` : `rgba(${r},${g},${b},${(a / 255).toFixed(3)})`;
+    } catch(e){ return "rgb(128,128,128)"; }
+  }
+  function buildWhoColor(who, type){
+    if (who === "writers") return cssRgb(type === "CE" ? "--danger" : "--accent-2");
+    if (who === "buyers") return cssRgb(type === "CE" ? "--pos" : "--neg");
+    return null;                          // mixed: the soft muted grey, see below
+  }
+  function applyBuildOverlay(d){
+    if (!_oiCandleSeries) return;
+    _oiBuildLines.forEach(l => { try { _oiCandleSeries.removePriceLine(l); } catch(e){} });
+    _oiBuildLines = [];
+    _lastBuildMarkerObjs = [];
+    // undo any build note added to an R/S line by the previous pass
+    _oiRefLines.forEach(rl => {
+      if (rl.baseTitle != null){ try { rl.line.applyOptions({ title: rl.baseTitle }); } catch(e){} rl.baseTitle = null; }
+    });
+    const muted = cssRgb("--muted");
+    const on = document.getElementById("oiBuildsChart")?.value !== "off";
+    const ch = d && d.ok && d.underlying === oiUnderlying() ? d.chart : null;
+    if (on && ch){
+      // snap to an existing candle: the newest minute may not have a bar yet
+      const times = [..._lastCandleClose.keys()].sort((a, b) => a - b);
+      const snap = t => {
+        let lo = 0, hi = times.length - 1, best = null;
+        while (lo <= hi){ const m = (lo + hi) >> 1; if (times[m] <= t){ best = times[m]; lo = m + 1; } else hi = m - 1; }
+        return best != null && t - best <= 300 ? best : null;
+      };
+      _lastBuildMarkerObjs = (ch.milestones || []).map(m => {
+        const t = snap(Math.floor(Date.parse(m.ts) / 1000) + 19800);   // IST-shift like oi_flow
+        const c = buildWhoColor(m.who, m.opt_type);
+        return t == null ? null : {
+          time: t, position: m.opt_type === "CE" ? "aboveBar" : "belowBar",
+          color: c ? withAlpha(c, 0.9) : muted, shape: "circle", size: 0.6,
+        };
+      }).filter(Boolean);
+      for (const t of ch.tags || []){
+        const col = buildWhoColor(t.who, t.opt_type) || muted;
+        const off = t.off_peak_pct;
+        // the axis label already prints the strike, so the title is just the build read
+        const label = `${t.opt_type} ×${t.hits}${off != null && off <= -15 ? ` ↓${Math.abs(Math.round(off))}%` : ""}`;
+        // the max-OI R/S line often sits on the same strike: annotate it instead
+        // of stacking a second label on top of it
+        const ref = _oiRefLines.find(rl => { try { return Math.abs(rl.line.options().price - t.strike) < 0.01; } catch(e){ return false; } });
+        if (ref){
+          if (ref.baseTitle == null) ref.baseTitle = ref.line.options().title;
+          try { ref.line.applyOptions({ title: `${ref.baseTitle} · ${label}` }); } catch(e){}
+          continue;
+        }
+        _oiBuildLines.push(_oiCandleSeries.createPriceLine({
+          price: t.strike, color: withAlpha(col, 0.5), lineWidth: 1, lineStyle: 1,
+          axisLabelVisible: true, axisLabelColor: col, title: label,
+        }));
+      }
+    }
+    _applyOiMarkers();
+  }
   async function loadBuildsLive(){
     try {
       const r = await fetch("/oi/builds/live?underlying=" + encodeURIComponent(oiUnderlying()) + "&_=" + Date.now(),
                             { cache: "no-store" });
-      renderBuildsLive(r.ok ? await r.json() : null);
+      const d = r.ok ? await r.json() : null;
+      renderBuildsLive(d);
+      applyBuildOverlay(d);
     } catch(e){ /* secondary panel */ }
   }
   // ---------- Expected move / max pain / skew ----------
@@ -4054,6 +4146,9 @@
   function clearCharts(){
     _oiRefLines.forEach(rl => { try { rl.series.removePriceLine(rl.line); } catch(e){} });
     _oiRefLines = [];
+    _oiBuildLines.forEach(l => { try { _oiCandleSeries.removePriceLine(l); } catch(e){} });
+    _oiBuildLines = [];
+    _lastBuildMarkerObjs = [];
     if (_oiCandleSeries) { _oiCandleSeries.setData([]); _oiCandleSeries.setMarkers([]); }
     [_oiBullTotalSeries, _oiPeWriteSeries, _oiBearTotalSeries, _oiCeWriteSeries,
      _oiRegimeBullArea, _oiRegimeBearArea]
