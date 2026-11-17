@@ -118,14 +118,16 @@ export function addPrevious(oc, prevLegs) {
 let accountCache = { at: 0, v: null };
 
 /** The dashboard's /account (margin, today's P&L, open positions), cached 20 s — every read makes three Kite
- *  calls on the dashboard. { status, body } for the proxy's send(). */
+ *  calls on the dashboard. Only a logged-IN reading is cached: a "logged out" one must clear the moment the
+ *  owner logs in (it used to linger 20 s, and the chip then waited a full minute). { status, body } for the
+ *  proxy's send(). */
 export async function dashboardAccount() {
   if (accountCache.v && Date.now() - accountCache.at < 20_000) return { status: 200, body: accountCache.v };
   try {
     const r = await fetch(`${FEED_URL}/account`, { signal: AbortSignal.timeout(15_000), headers: { Accept: "application/json" } });
     if (!r.ok) return { status: 502, body: { error: `dashboard /account answered HTTP ${r.status}` } };
     const body = await r.json();
-    accountCache = { at: Date.now(), v: body };
+    accountCache = body?.logged_in ? { at: Date.now(), v: body } : { at: 0, v: null };
     return { status: 200, body };
   } catch (e) {
     return { status: 502, body: { error: `dashboard unreachable: ${String(e?.message || e).slice(0, 120)}` } };

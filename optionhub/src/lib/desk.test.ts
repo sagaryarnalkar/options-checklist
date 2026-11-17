@@ -62,3 +62,29 @@ describe("desk helpers", () => {
     expect(desk.formatInr(Number.NaN)).toBe("—");
   });
 });
+
+describe("auto-login", () => {
+  const store = () => {
+    const m = new Map<string, string>();
+    return { getItem: (k: string) => m.get(k) ?? null, setItem: (k: string, v: string) => void m.set(k, v) };
+  };
+
+  it("bounces through the dashboard's /login once per local day", async () => {
+    const { desk } = await load("https://d.example");
+    const s = store();
+    const go = vi.fn();
+    expect(desk.maybeAutoLogin(s, go, false)).toBe(true);
+    expect(go).toHaveBeenCalledWith("https://d.example/login");
+    expect(desk.maybeAutoLogin(s, go, false)).toBe(false);
+    expect(go).toHaveBeenCalledTimes(1);
+  });
+
+  it("never from inside a frame, without storage or without a dashboard", async () => {
+    const { desk } = await load("https://d.example");
+    const go = vi.fn();
+    expect(desk.maybeAutoLogin(store(), go, true)).toBe(false);
+    expect(desk.maybeAutoLogin(null, go, false)).toBe(false);
+    expect(desk.maybeAutoLogin(store(), go, false, "")).toBe(false);
+    expect(go).not.toHaveBeenCalled();
+  });
+});

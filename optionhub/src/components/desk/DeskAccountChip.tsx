@@ -2,12 +2,18 @@
  * Toolbar chip with the dashboard's Kite account: available margin, net P&L of today's positions and the
  * open count (the dashboard's /account, read through this terminal's proxy — server/dashboard.mjs).
  * Logged out → a "Log in to Kite" link to the dashboard's login (top window: Kite refuses to be framed).
+ *
+ * Auto-login (the dashboard's old behaviour, now here because the dashboard hands the owner straight to
+ * this terminal): the first time in a local day that the account reads logged out, the whole window
+ * bounces through the dashboard's /login. With a live Kite web session Zerodha returns at once; Kite's
+ * callback goes to the dashboard, which hands back to the terminal. Once per day, so a declined login or
+ * a logout does not loop. Never from inside a frame (browsers block that navigation).
  */
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { LogIn } from "lucide-react";
 import { PROXY_BASE } from "@/lib/api/proxyClient";
-import { DESK_URL, formatInr } from "@/lib/desk";
+import { DESK_URL, formatInr, maybeAutoLogin } from "@/lib/desk";
 import { cn } from "@/lib/utils";
 
 interface Account {
@@ -21,6 +27,8 @@ interface Account {
 }
 
 const REFRESH_MS = 60_000;
+/** Logged out: look again sooner, so a login done in another tab shows within seconds. */
+const REFRESH_LOGGED_OUT_MS = 10_000;
 
 export function DeskAccountChip({ className }: { className?: string }) {
   const [acct, setAcct] = useState<Account | null>(null);
@@ -28,22 +36,37 @@ export function DeskAccountChip({ className }: { className?: string }) {
   useEffect(() => {
     if (!DESK_URL) return;
     let alive = true;
+    let timer: number | undefined;
     const load = async () => {
+      window.clearTimeout(timer);
+      let next = REFRESH_MS;
       try {
         const r = await fetch(`${PROXY_BASE}/api/dashboard/account`, { cache: "no-store" });
         const j = (await r.json()) as Account;
-        if (alive && r.ok && typeof j?.logged_in === "boolean") setAcct(j);
+        if (alive && r.ok && typeof j?.logged_in === "boolean") {
+          setAcct(j);
+          if (!j.logged_in) {
+            next = REFRESH_LOGGED_OUT_MS;
+            let storage: Storage | null = null;
+            try {
+              storage = window.localStorage;
+            } catch {
+              storage = null;
+            }
+            if (maybeAutoLogin(storage, (u) => window.location.assign(u))) return;
+          }
+        }
       } catch {
         /* keep the last reading */
       }
+      if (alive) timer = window.setTimeout(load, next);
     };
     void load();
-    const id = window.setInterval(load, REFRESH_MS);
     const onFocus = () => void load();
     window.addEventListener("focus", onFocus);
     return () => {
       alive = false;
-      window.clearInterval(id);
+      window.clearTimeout(timer);
       window.removeEventListener("focus", onFocus);
     };
   }, []);
