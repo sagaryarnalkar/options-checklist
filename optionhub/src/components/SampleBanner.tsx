@@ -6,6 +6,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { PROXY_BASE, probeProxy, useProxyStatus } from "@/lib/api/proxyClient";
 import { bannerState, type BannerKind } from "@/lib/marketData/banner";
 import { cn } from "@/lib/utils";
+import { DeskDataHelp } from "@/components/desk/DeskDataHelp";
+import { DESK_URL } from "@/lib/desk";
 
 function subscribeOnline(cb: () => void): () => void {
   window.addEventListener("online", cb);
@@ -48,6 +50,10 @@ const ICON: Record<BannerKind, typeof Database> = {
 };
 
 function StartProxyHelp() {
+  return DESK_URL ? <DeskDataHelp /> : <UpstreamStartProxyHelp />;
+}
+
+function UpstreamStartProxyHelp() {
   const [checking, setChecking] = useState(false);
   const [failed, setFailed] = useState(false);
   const retry = async () => {

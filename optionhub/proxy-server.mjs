@@ -56,7 +56,7 @@ import * as panicGate from "./server/lib/panicGate.mjs";
 import * as tradingLockState from "./server/lib/tradingLockState.mjs";
 import * as auditLog from "./server/lib/auditLog.mjs";
 import * as basketEngine from "./server/lib/basketEngine.mjs";
-import { DASHBOARD, dashboardAccount, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
+import { DASHBOARD, dashboardAccount, dashboardJson, dashboardSnapshots, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -1654,6 +1654,22 @@ async function handleNSEProxy(params) {
   }
   const def = NSE_SIMPLE[endpoint];
   if (!def) throw new InputError(`Unknown NSE endpoint: ${truncate(endpoint, 30)}`);
+  if (DASHBOARD && endpoint === "equity-derivatives") {
+    // options-checklist: NSE retired this list (404); the dashboard answers it from its Kite login.
+    const key = "nse:equity-derivatives";
+    const hit = cache.get(key);
+    if (hit) return { status: 200, body: hit };
+    try {
+      const json = await coalesce(key, () => dashboardJson("/hub/feed/fno-stocks", 40_000));
+      if (Array.isArray(json?.data) && json.data.length) {
+        cache.set(key, json, def.ttl);
+        setLastGood(`lastgood:nse:${endpoint}`, json, "nse");
+        return { status: 200, body: json };
+      }
+    } catch {
+      /* dashboard logged out or busy: fall through to NSE */
+    }
+  }
   const key = `nse:${endpoint}`;
   const hit = cache.get(key);
   if (hit) return { status: 200, body: hit };
@@ -2655,7 +2671,8 @@ export async function handleX(route, params, creds = () => null) {
     }
 
     case "snapshots":
-      return handleSnapshots(params);
+      // options-checklist: the dashboard records every minute of every session (server/dashboard.mjs)
+      return DASHBOARD ? dashboardSnapshots(params) : handleSnapshots(params);
 
     case "snapshots/status":
       return { status: 200, body: { data: recorderStatus(), meta: { source: "cache", asOf: Date.now(), stale: false } } };

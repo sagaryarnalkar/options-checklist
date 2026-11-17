@@ -20,7 +20,7 @@ import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-quer
 import type { OptionChainHookData } from "@/hooks/useMarketData";
 import { fetchLiveOptionChain } from "@/lib/marketApi";
 import { getMarketSession, isTradingDay, istDateString, normalizeExpiry, nowIST } from "@/lib/options";
-import { hydrateSnapshots } from "@/lib/history/hydrate";
+import { hydrateSnapshots, seedLatestSession } from "@/lib/history/hydrate";
 import { getStorageHealth, subscribeStorageHealth } from "@/lib/history/storageHealth";
 import {
   MIN_SNAPSHOT_GAP_MS,
@@ -228,7 +228,8 @@ export function useSnapshots(symbol: string, expiry: string, fromTs?: number) {
   return useQuery({
     queryKey: ["chain-snapshots", symbol.toUpperCase(), expiry, fromTs ?? 0],
     queryFn: async (): Promise<ChainSnapshot[]> => {
-      // Fill today's gaps from the server recorder first (no-op unless the proxy is reachable).
+      // The last recorded session (dashboard build), then today's gaps from the server recorder.
+      await seedLatestSession(symbol).catch(() => 0);
       await hydrateSnapshots(symbol, expiry).catch(() => undefined);
       return getSnapshots(symbol, expiry, fromTs);
     },

@@ -10,8 +10,14 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { PROXY_BASE, probeProxy } from "@/lib/api/proxyClient";
 import { cn } from "@/lib/utils";
 import type { LiveGap } from "./liveGaps";
+import { DeskDataHelp } from "@/components/desk/DeskDataHelp";
+import { DESK_URL } from "@/lib/desk";
 
 export function StartProxyButton({ onRecovered }: { onRecovered?: () => void }) {
+  return DESK_URL ? <DeskDataHelp variant="button" onRecovered={onRecovered} /> : <UpstreamStartProxyButton onRecovered={onRecovered} />;
+}
+
+function UpstreamStartProxyButton({ onRecovered }: { onRecovered?: () => void }) {
   const [checking, setChecking] = useState(false);
   const [result, setResult] = useState<"" | "ok" | "failed">("");
   const check = async () => {

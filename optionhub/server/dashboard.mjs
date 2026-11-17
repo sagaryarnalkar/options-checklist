@@ -133,3 +133,28 @@ export async function dashboardAccount() {
     return { status: 502, body: { error: `dashboard unreachable: ${String(e?.message || e).slice(0, 120)}` } };
   }
 }
+
+// ── F&O stock quotes and session history (hub_feed.fno_stocks / hub_feed.snapshots) ──
+
+/** GET a dashboard feed path as JSON; throws on any non-200 (callers fall back to upstream). */
+export async function dashboardJson(path, timeoutMs = 30_000) {
+  const r = await fetch(`${FEED_URL}${path}`, { headers: feedHeaders(), signal: AbortSignal.timeout(timeoutMs) });
+  const j = await r.json().catch(() => null);
+  if (!r.ok || !j) throw new Error(`dashboard ${path.split("?")[0]} answered HTTP ${r.status}${j?.message ? `: ${j.message}` : ""}`);
+  return j;
+}
+
+/** /api/x/snapshots from the dashboard's per-minute recorder, in the proxy's envelope. */
+export async function dashboardSnapshots(params) {
+  const q = new URLSearchParams();
+  for (const k of ["symbol", "expiry", "from", "to", "latest"]) {
+    const v = params.get(k);
+    if (v) q.set(k, v);
+  }
+  try {
+    const data = await dashboardJson(`/hub/feed/snapshots?${q}`, 45_000);
+    return { status: 200, body: { data, meta: { source: "database", asOf: Date.now(), stale: false } } };
+  } catch (e) {
+    return { status: 502, body: { data: null, meta: { source: "database", asOf: Date.now(), stale: true, reason: String(e?.message || e).slice(0, 200) } } };
+  }
+}
