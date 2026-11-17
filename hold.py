@@ -309,3 +309,143 @@ def recent_builds(conn, underlying: str, date: str, limit: int = 40) -> dict:
     return {"held": [r for r in rows if r["held"] == 1],
             "did_not_hold": [r for r in rows if r["held"] == 0],
             "unjudged": [r for r in rows if r["held"] is None]}
+
+
+# ---------------------------------------------------------------------------
+# Point in time: what a trader could have seen DURING the session.
+#
+# hold_stats grades a contract on its whole-day build count, which a trader
+# standing at 11:00 does not have. pit_ladder counts only the builds that had
+# fired before a cut-off and grades them at the close, against every
+# contract-day with NO build by that cut-off (never built + built later). Early
+# builds turned out to hold BETTER than late ones, so the whole-day figures are
+# not a hindsight artefact (checked on 98 live sessions before this shipped).
+# ---------------------------------------------------------------------------
+PIT_CUTS = ("11:00", "12:30", "14:00")
+HIT_BUCKETS = (("1", 1, 1), ("2-4", 2, 4), ("5+", 5, 10 ** 9))
+WRITER_SIDE = {"CE": "call_write", "PE": "put_write"}
+
+
+def _bucket(n: int) -> str:
+    for lab, lo, hi in HIT_BUCKETS:
+        if lo <= n <= hi:
+            return lab
+    return "0"
+
+
+def _rate(held: int, n: int) -> dict:
+    return {"held": held, "n": n, "pct": round(held / n * 100, 1) if n else None}
+
+
+def _z(h1, n1, h2, n2):
+    if not n1 or not n2:
+        return None
+    p = (h1 + h2) / (n1 + n2)
+    se = (p * (1 - p) * (1 / n1 + 1 / n2)) ** 0.5
+    return round((h1 / n1 - h2 / n2) / se, 2) if se else None
+
+
+def pit_ladder(conn, underlying: str = "NIFTY", cuts=PIT_CUTS) -> dict:
+    """Hold rate by the number of builds SEEN BY each cut-off, graded at the close.
+
+    The control for each cut is every graded contract-day with no build by
+    then. Only sessions that also have a hold_baseline row (complete, prior
+    close known) are used, so both arms come from the same days.
+    """
+    days = {r[0]: (r[1] or 0, r[2] or 0) for r in conn.execute(
+        "SELECT d, no_build_held, no_build_n FROM hold_baseline WHERE underlying=?",
+        (underlying,))}
+    cds = defaultdict(list)
+    expiry_day = set()
+    for ts, exp, k, t, held in conn.execute(
+            "SELECT ts, expiry, strike, opt_type, held FROM oi_builds "
+            "WHERE underlying=? AND held IS NOT NULL", (underlying,)):
+        d = ts[:10]
+        if d not in days:
+            continue
+        cds[(d, exp, k, t)].append((ts[11:16], held))
+        if exp and exp[:10] == d:
+            expiry_day.add(d)
+    if not cds:
+        return {"ok": False, "reason": "no graded builds yet"}
+    never_held = sum(v[0] for v in days.values())
+    never_n = sum(v[1] for v in days.values())
+    out = {"ok": True, "underlying": underlying, "sessions": len(days),
+           "contract_days": len(cds) + never_n, "cuts": {}}
+    for cut in cuts:
+        acc = {lab: [0, 0] for lab in ("0", "1", "2-4", "5+")}
+        acc["0"] = [never_held, never_n]
+        for bs in cds.values():
+            seen = sum(1 for hhmm, _ in bs if hhmm < cut)
+            a = acc[_bucket(seen) if seen else "0"]
+            a[0] += bs[0][1]
+            a[1] += 1
+        h0, n0 = acc["0"]
+        out["cuts"][cut] = {
+            lab: {**_rate(h, n), **({} if lab == "0" else {"lift_pp": (
+                round((h / n - h0 / n0) * 100, 1) if n and n0 else None),
+                "z": _z(h, n, h0, n0)})}
+            for lab, (h, n) in acc.items()}
+    # expiry day behaves differently: positions are squared off into the bell
+    split = {"expiry_day": [0, 0], "other_days": [0, 0]}
+    for (d, *_), bs in cds.items():
+        a = split["expiry_day" if d in expiry_day else "other_days"]
+        a[0] += bs[0][1]
+        a[1] += 1
+    out["built_by_day_type"] = {k: _rate(*v) for k, v in split.items()}
+    return out
+
+
+def _fmt_contract(key, bs, spot):
+    exp, strike, otype = key
+    bs = sorted(bs, key=lambda b: b["ts"])
+    first, last = bs[0], bs[-1]
+    writer = sum(1 for b in bs if b["side"] == WRITER_SIDE[otype])
+    # the side is the 1-min price-direction proxy (see _side), so an active
+    # strike often splits close to even: only a clear 2:1 majority is named
+    share = writer / len(bs)
+    who = "writers" if share >= 2 / 3 else "buyers" if share <= 1 / 3 else "mixed"
+    pc, now = first["oi_prior_close"], first["oi_close"]
+    peak = first["oi_peak"]
+    dist = (strike - spot) if spot else None
+    return {
+        "expiry": exp, "strike": strike, "opt_type": otype,
+        "hits": len(bs), "writer_hits": writer, "buyer_hits": len(bs) - writer,
+        "who": who, "first": first["ts"][11:16], "last": last["ts"][11:16],
+        "oi_now": now, "oi_prior_close": pc,
+        "added_today": None if pc is None else now - pc,
+        "added_by_builds": sum(b["doi_at_fire"] for b in bs),
+        "off_peak_pct": round((now / peak - 1) * 100, 1) if peak else None,
+        "value_cr": round(sum(b["value_cr"] for b in bs), 2),
+        "dist_pts": None if dist is None else round(dist, 1),
+        "dist_pct": None if dist is None else round(dist / spot * 100, 2),
+        "otm": None if dist is None else ((dist > 0) if otype == "CE" else (dist < 0)),
+    }
+
+
+def live_board(conn, underlying: str = "NIFTY", date: str | None = None,
+               top: int = 12) -> dict:
+    """Today's builds so far, one row per contract — the live view of what
+    hold_stats grades after the close. Runs the SAME detect_builds on the
+    session as recorded up to now (a partial session: nothing is graded)."""
+    d = date or conn.execute(
+        "SELECT substr(MAX(ts),1,10) FROM chain_snapshot WHERE underlying=?",
+        (underlying,)).fetchone()[0]
+    if not d:
+        return {"ok": False, "reason": f"nothing recorded for {underlying} yet"}
+    last = conn.execute(
+        "SELECT ts, spot FROM chain_snapshot WHERE underlying=? AND ts>=? AND ts<? "
+        "ORDER BY ts DESC LIMIT 1", (underlying, d, d + "~")).fetchone()
+    spot = last[1] if last else None
+    builds = detect_builds(conn, underlying, d)
+    by = defaultdict(list)
+    for b in builds:
+        by[(b["expiry"], b["strike"], b["opt_type"])].append(b)
+    rows = [_fmt_contract(k, v, spot) for k, v in by.items()]
+    rows.sort(key=lambda r: (-r["hits"], -r["value_cr"]))
+    expiries = {r["expiry"][:10] for r in rows if r["expiry"]}
+    return {"ok": True, "underlying": underlying, "date": d,
+            "as_of": last[0][11:16] if last else None, "spot": spot,
+            "complete": session_complete(conn, underlying, d),
+            "expiry_day": d in expiries, "n_builds": len(builds),
+            "n_contracts": len(rows), "contracts": rows[:top]}

@@ -583,6 +583,23 @@
   .hold-oi{ margin-top:3px; font-size:10px; color:var(--muted); }
   .hold-note{ font-size:10.5px; color:var(--muted); padding:8px 12px; line-height:1.5; }
 
+  /* ---- Live OI builds (rail) ---- */
+  #buildsLiveBody{ overflow-x:auto; }
+  table.bl-tbl{ margin-bottom:6px; }
+  table.bl-tbl td{ padding:4px 5px; vertical-align:top; white-space:nowrap; }
+  table.bl-tbl th{ white-space:nowrap; padding:4px 5px; }
+  table.bl-tbl .bl-dist{ display:block; font-weight:400; font-size:10px; color:var(--muted); }
+  table.bl-tbl tr.bl-strong td{ background:color-mix(in srgb,var(--amber) 9%,transparent); }
+  .bl-who{ font-size:10.5px; }
+  .bl-who.w-CE{ color:var(--danger); } .bl-who.w-PE{ color:var(--accent-2); }
+  .bl-who.b-CE{ color:var(--pos); }    .bl-who.b-PE{ color:var(--neg); }
+  .bl-who.mixed{ color:var(--muted); }
+  .bl-off{ color:var(--muted); } .bl-off.unwinding{ color:var(--amber); font-weight:600; }
+  .bl-meta{ font-size:10.5px; color:var(--muted); margin-bottom:6px; line-height:1.45; }
+  .bl-note{ font-size:10.5px; color:var(--muted); line-height:1.5; margin-top:6px; font-family:var(--sans); }
+  .bl-note b{ color:var(--text); }
+  .bl-warn{ font-size:10.5px; color:var(--amber); margin-bottom:6px; font-family:var(--sans); }
+
   /* ---- Pulse rail ---- */
   .rv-tbl{ margin:0 12px 12px; width:calc(100% - 24px); }
   .rv-tbl td{ text-align:right; } .rv-tbl td:first-child{ text-align:left; }
@@ -1464,6 +1481,10 @@
         </div>
       </div>
       <aside class="oi-side">
+        <div class="oi-side-panel" id="buildsLiveCard">
+        <div class="oi-side-title" title="Strikes where open interest jumped well above its own recent noise on real traded money, counted as they happen. Ranked by how many times each strike has built today: repeat builds are what predict the position is still on at the close.">OI builds — live <span class="csp-sub" id="buildsLiveAsOf"></span></div>
+        <div class="oi-side-body" id="buildsLiveBody"><div class="note">no data yet</div></div>
+        </div>
         <div class="oi-side-panel">
         <div class="oi-side-title">Expected move · max pain · skew</div>
         <div class="oi-side-body" id="pulseBody"><div class="note">no data yet</div></div>
@@ -3187,7 +3208,7 @@
       setOiStatus(e.message, "error"); return;
     }
     document.getElementById("oiUnderlying").addEventListener("change", () => {
-      loadOiDays(); loadHolds(); loadPulse();
+      loadOiDays(); loadHolds(); loadBuildsLive(); loadPulse();
     });
     document.getElementById("oiReload").addEventListener("click", oiReload);
     document.getElementById("oiDays").addEventListener("change", oiReload);
@@ -3563,7 +3584,9 @@
         One row per contract, ranked by hit count, because repeat builds are what actually
         predict holding: over 4.7 years of NIFTY history, 5+ builds on one contract held
         78.2% of the time against 54.1% for a single build and a 35.6% baseline. It shows
-        positions STAYED, not that price will respect the strike — that is untested.</div>
+        positions STAYED, not that price will respect the strike: that is tested separately
+        (the scorecard's "Writer strikes" rows) — read these strikes as positioning, not as
+        support or resistance, unless those rows say otherwise.</div>
       <div class="hold-grid">
         <div><div class="hold-col ok">Held · ${byContract(held).length} contracts</div>
           ${byContract(held).slice(0,8).map(card).join("") || '<div class="note">none</div>'}</div>
@@ -3586,6 +3609,93 @@
     } catch(e){ /* secondary panel */ }
   }
 
+  // ---------- OI builds, live (hold.live_board via /oi/builds/live) ----------
+  // The same detector the after-close "Build follow-through" card grades, run
+  // on the session so far. The footnote quotes the track record FROM THE DATA
+  // (4.7-year replay when graded, else the live recording) — never a constant:
+  //   * held = OI still above yesterday's close at the bell, counting only the
+  //     builds seen by the cut-off (the point-in-time ladder);
+  //   * the price test (walls.py): whether price stays away from writers'
+  //     strikes more than from ordinary strikes at the same distance. Until it
+  //     says so, these strikes are NOT drawn or described as support/resistance.
+  const fmtUnits = v => {
+    if (v == null || !isFinite(v)) return "—";
+    const a = Math.abs(v), sg = v > 0 ? "+" : v < 0 ? "−" : "";
+    if (a >= 1e7) return sg + (a / 1e7).toFixed(2) + " Cr";
+    if (a >= 1e5) return sg + (a / 1e5).toFixed(1) + " L";
+    return sg + Math.round(a).toLocaleString("en-IN");
+  };
+  function buildsCut(asOf){
+    if (!asOf || asOf < "12:30") return "11:00";
+    return asOf < "14:00" ? "12:30" : "14:00";
+  }
+  function renderBuildsLive(d){
+    const body = document.getElementById("buildsLiveBody");
+    const asof = document.getElementById("buildsLiveAsOf");
+    if (!d || !d.ok){
+      body.innerHTML = `<div class="note">${esc((d && d.reason) || "no data yet")}</div>`;
+      asof.textContent = ""; return;
+    }
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    asof.textContent = d.date === today && !d.complete ? `as of ${d.as_of}`
+                     : `${d.date}${d.complete ? " · closed" : ` · ${d.as_of}`}`;
+    const rows = (d.contracts || []).map(c => {
+      const wh = c.who === "writers" ? `w-${c.opt_type}` : c.who === "buyers" ? `b-${c.opt_type}` : "mixed";
+      const dist = c.dist_pct == null ? "" : `${c.dist_pct > 0 ? "+" : c.dist_pct < 0 ? "−" : ""}${Math.abs(c.dist_pct)}%${c.otm ? "" : " · ITM"}`;
+      const off = c.off_peak_pct;
+      return `<tr class="${c.hits >= 5 ? "bl-strong" : ""}">
+        <td>${Math.round(c.strike)} ${c.opt_type}<span class="bl-dist">${dist}</span></td>
+        <td><span class="bl-who ${wh}" title="${c.writer_hits} writer / ${c.buyer_hits} buyer builds — the side is read from the 1-minute price direction, a proxy, so only a clear 2:1 majority is named">${c.who}</span><span class="bl-dist">${c.writer_hits}w · ${c.buyer_hits}b</span></td>
+        <td title="builds today, first ${c.first} · last ${c.last}"><b>${c.hits}</b></td>
+        <td title="open interest now minus yesterday's close (units)">${fmtUnits(c.added_today)}</td>
+        <td><span class="bl-off ${off != null && off <= -15 ? "unwinding" : ""}" title="open interest now vs its peak since the first build">${off == null ? "—" : (off < 0 ? "−" : "") + Math.abs(off).toFixed(0) + "%"}</span></td>
+      </tr>`;
+    }).join("");
+    const ev = d.evidence || {}, lad = (ev.ladder && ev.ladder.ok) ? ev.ladder : null;
+    const w = (ev.walls && ev.walls.ok) ? ev.walls : null;
+    const src = ev.source === "replay"
+      ? `${(ev.range || []).join(" → ")}, ${Number(ev.sessions || 0).toLocaleString("en-IN")} sessions replayed`
+      : `this app's own recording (${lad ? lad.sessions : "?"} sessions)`;
+    const notes = [];
+    if (lad){
+      const cut = buildsCut(d.complete ? "11:00" : d.as_of), L = lad.cuts[cut] || {};
+      const p = k => (L[k] && L[k].pct != null) ? `<b>${L[k].pct}%</b>` : "—";
+      notes.push(`Still on at the close (OI above yesterday's), counting builds seen by ${cut}:
+        5+ ${p("5+")} · 2–4 ${p("2-4")} · 1 ${p("1")} · none ${p("0")}.`);
+    }
+    if (w && w.all){
+      const g = w.all, g5 = (w.by_hits || {})["5+"] || {};
+      const line = (x, lab) => `${lab}: price stayed away ${x.stayed_away_pct}% vs ${x.stayed_away_expected_pct}% for ordinary strikes at the same distance (n=${x.n})`;
+      const verdict = g.verdict === "beats baseline"
+        ? "<b>price stayed away from writers' strikes more often</b> than from ordinary strikes at the same distance"
+        : g.verdict === "WORSE than baseline"
+        ? "<b>price reached writers' strikes MORE often</b> than ordinary strikes at the same distance"
+        : "<b>not support or resistance</b>: price reached writers' strikes about as often as any strike at the same distance";
+      notes.push(`Price test (11:00 → close): ${verdict}. ${line(g, "All")}${
+        g5.n ? "; " + line(g5, "5+ builds") : ""}.`);
+    }
+    const warn = (d.expiry_day && lad && lad.built_by_day_type)
+      ? `<div class="bl-warn">Expiry day — built strikes held only ${lad.built_by_day_type.expiry_day.pct}% vs ${lad.built_by_day_type.other_days.pct}% on other days.</div>` : "";
+    body.innerHTML = `
+      <div class="bl-meta">${esc(d.underlying)} ${d.spot ? Number(d.spot).toLocaleString("en-IN") : ""} ·
+        ${d.n_contracts} strike${d.n_contracts === 1 ? "" : "s"} built today · ${d.n_builds} builds</div>
+      ${warn}
+      ${rows ? `<table class="oi-ff bl-tbl"><thead><tr>
+          <th>Strike</th><th>Who</th><th title="builds today">#</th>
+          <th title="open interest now minus yesterday's close">OI vs yday</th>
+          <th title="open interest now vs its peak since the first build — a large drop means the build is being unwound">Peak</th>
+        </tr></thead><tbody>${rows}</tbody></table>` : `<div class="note">No builds yet today.</div>`}
+      <div class="bl-note">${notes.join("<br>")} Source: ${esc(src)}.
+        Held only means the position stayed on — not that it made money, and a large
+        drop from peak means it is already being unwound.</div>`;
+  }
+  async function loadBuildsLive(){
+    try {
+      const r = await fetch("/oi/builds/live?underlying=" + encodeURIComponent(oiUnderlying()) + "&_=" + Date.now(),
+                            { cache: "no-store" });
+      renderBuildsLive(r.ok ? await r.json() : null);
+    } catch(e){ /* secondary panel */ }
+  }
   // ---------- Expected move / max pain / skew ----------
   function renderPulse(d){
     const el = document.getElementById("pulseBody");
@@ -3930,6 +4040,7 @@
       loadLLT(days);
       loadLadder();
       loadHolds();
+      loadBuildsLive();
       loadPulse();
       loadParticipants();
       loadPartTrend();

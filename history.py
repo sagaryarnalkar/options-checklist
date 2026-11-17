@@ -654,8 +654,11 @@ def save_scorecard(underlying: str, hist_path: Optional[str] = None) -> dict:
     """Grade once and cache: the full grade walks every replayed minute
     (seconds to minutes of CPU), far too slow to redo per page view."""
     sc = scorecard(underlying, hist_path)
+    path = scorecard_path(underlying)
+    if not sc.get("ok") and path.exists():
+        return sc                        # never replace a good grade with a failure
     sc["graded_at"] = datetime.now(IST).isoformat(timespec="seconds")
-    scorecard_path(underlying).write_text(json.dumps(sc, default=str))
+    path.write_text(json.dumps(sc, default=str))
     return sc
 
 
@@ -704,6 +707,10 @@ if __name__ == "__main__":
     if a.cmd == "run":
         print(json.dumps(run(a.underlying, a.since, a.until, a.arch, a.hist, a.redo)))
     elif a.save:
+        try:
+            os.nice(10)                      # spawned beside the live app
+        except Exception:
+            pass
         sc = save_scorecard(a.underlying, a.hist)
         print(json.dumps({"saved": str(scorecard_path(a.underlying)), "ok": sc.get("ok"),
                           "sessions": sc.get("sessions")}))
