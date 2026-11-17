@@ -157,8 +157,46 @@ export function hydrateSnapshots(
   return run;
 }
 
+// ── options-checklist: the dashboard's recorder has every past session too ──
+// Before the open, on holidays, or on a browser that never had the page open in market hours, today has
+// no snapshots and the session charts (GEX levels, hedging pressure, flow, OI time series, replay) drew a
+// simulated day. In the dashboard build the server recorder (the dashboard's per-minute chain) holds the
+// most recent real session, so it is imported once per page and the charts show that instead. Only the
+// two underlyings the dashboard records; a failed attempt is retried after a minute.
+
+function readDashboardBuild(): boolean {
+  try {
+    return import.meta.env?.VITE_DASHBOARD_KITE === "1";
+  } catch {
+    return false;
+  }
+}
+const DASHBOARD_BUILD = readDashboardBuild();
+const RECORDED_UNDERLYINGS = new Set(["NIFTY", "BANKNIFTY"]);
+const seeded = new Map<string, Promise<number>>();
+
+/** Import the most recent recorded session for `symbol` (once per page). Resolves to snapshots imported. */
+export function seedLatestSession(symbol: string, opts?: { enabled?: boolean }): Promise<number> {
+  const sym = normaliseSymbol(symbol);
+  if (!(opts?.enabled ?? DASHBOARD_BUILD) || !RECORDED_UNDERLYINGS.has(sym)) return Promise.resolve(0);
+  const existing = seeded.get(sym);
+  if (existing) return existing;
+  const run = (async () => {
+    const env = await proxyGet<ServerSnapshotsPayload>("/api/x/snapshots", { symbol: sym, latest: "1" }, { timeoutMs: 45_000 });
+    if (!env.data) throw new Error(env.meta.reason ?? "unavailable");
+    const snaps = sanitiseServerSnapshots(env.data);
+    return snaps.length ? importSnapshots(snaps) : 0;
+  })().catch(() => {
+    setTimeout(() => seeded.delete(sym), HYDRATE_THROTTLE_MS);
+    return 0;
+  });
+  seeded.set(sym, run);
+  return run;
+}
+
 /** Tests only. */
 export function resetHydrateMemory(): void {
   lastRun.clear();
   inflight.clear();
+  seeded.clear();
 }

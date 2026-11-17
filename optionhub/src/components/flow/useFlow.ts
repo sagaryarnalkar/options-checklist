@@ -26,7 +26,17 @@ import {
 } from "@/lib/flow";
 
 /** Underlyings the Flow page always follows. */
-export const FLOW_UNIVERSE = ["NIFTY", "BANKNIFTY", "SENSEX"] as const;
+// options-checklist: in the dashboard build the default flow covers the two underlyings the dashboard
+// records and quotes from Kite (NFO). SENSEX is BSE (BFO): no Kite feed for it yet, so it would only ever
+// be a simulated session and label the whole page "Sample". It can still be added on the page.
+function readDashboardBuild(): boolean {
+  try {
+    return import.meta.env?.VITE_DASHBOARD_KITE === "1";
+  } catch {
+    return false;
+  }
+}
+export const FLOW_UNIVERSE: readonly string[] = readDashboardBuild() ? ["NIFTY", "BANKNIFTY"] : ["NIFTY", "BANKNIFTY", "SENSEX"];
 
 export function useFlowState(): FlowState {
   return useSyncExternalStore(flowStore.subscribe, flowStore.getState, flowStore.getState);

@@ -321,12 +321,21 @@ _prev: dict = {"for_day": None, "session": None, "legs": None, "tried_at": 0.0, 
 
 
 def parse_bhav(csv_bytes: bytes) -> dict:
-    """{(name, expiry_iso, strike, CE|PE): (open_interest_units, close)} for the served names."""
+    """{(name, expiry_iso, strike, CE|PE): (open_interest_units, close)} for the served names' options,
+    plus {(name, expiry_iso, 0, "FUT"): (oi, close)} for EVERY future (stocks and indices: the F&O
+    stock list's OI change)."""
     import csv
     import io
     out = {}
     for row in csv.DictReader(io.StringIO(csv_bytes.decode("utf-8-sig"))):
         name, typ = row.get("TckrSymb"), row.get("OptnTp")
+        if row.get("FinInstrmTp") in ("STF", "IDF"):
+            try:
+                out[(name, row["XpryDt"][:10], 0, "FUT")] = (
+                    int(float(row["OpnIntrst"] or 0)), float(row["ClsPric"] or 0) or None)
+            except (KeyError, ValueError):
+                pass
+            continue
         if name not in SERVED or typ not in ("CE", "PE"):
             continue
         try:
@@ -388,13 +397,13 @@ def prev(symbol: str, expiry: Optional[str] = None) -> dict:
         raise FeedRefused(503, f"NSE F&O bhavcopy unavailable ({_prev['error'] or 'retrying'}).")
     today = datetime.now(IST).date().isoformat()
     if not expiry:
-        exps = sorted({e for (n, e, _s, _t) in legs if n == name and e >= today})
+        exps = sorted({e for (n, e, _s, t) in legs if n == name and e >= today and t != "FUT"})
         if not exps:
             raise FeedRefused(404, f"No {name} expiry in the bhavcopy.", "InputException")
         expiry = exps[0]
     out: dict = {}
     for (n, e, strike, typ), (oi, close) in legs.items():
-        if n == name and e == expiry:
+        if n == name and e == expiry and typ in ("CE", "PE"):
             out.setdefault(f"{strike:g}", {})[typ] = {"previous_oi": oi, "previous_close_price": close}
     return {"session": session.isoformat(), "expiry": expiry, "legs": out}
 
@@ -505,6 +514,193 @@ def nse(path: str) -> tuple:
         return r.status_code, ctype, r.content
 
 
+# ------------------------------------------------ F&O stock quotes (Kite) --
+# Option Hub's watchlist, dashboard and screener read every F&O stock's quote from NSE's
+# "equity-derivatives" list (/api/equity-stockIndices?index=SECURITIES IN F&O), which NSE retired
+# (404 for every client, Nov 2026) — so those pages showed labelled SAMPLE numbers. fno_stocks()
+# answers in NSE's own shape from the dashboard's Kite login: ONE kite.quote of every F&O stock's cash
+# quote (NSE:<name>) plus its near-month future (OI); OI change vs NSE's official previous-session OI
+# (bhavcopy). Cached 30 s; Kite calls keep the chain top-ups' spacing and never overlap a recorder tick.
+
+FNO_TTL_S = 30
+FNO_STALE_OK_S = 120         # while the gate is closed, a reading this fresh is served as is
+INDEX_NAMES = {"NIFTY", "BANKNIFTY", "FINNIFTY", "MIDCPNIFTY", "NIFTYNXT50", "SENSEX", "BANKEX"}
+_fno_lock = threading.Lock()
+_fno: dict = {"at": 0.0, "body": None}
+fno_stats = {"calls": 0, "errors": 0, "last_error": None}
+
+
+def _wait_for_gate(timeout_s: float = 25.0) -> bool:
+    """Block until a Kite quote may go out (seconds 15–55, no recorder tick running, ≥1.1 s apart)."""
+    end = time.time() + timeout_s
+    while time.time() < end:
+        if _gate_open(datetime.now(IST), time.time()):
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _prev_fut_oi() -> dict:
+    _session, legs = _prev_legs()
+    return {(n, e): oi for (n, e, _s, t), (oi, _c) in (legs or {}).items() if t == "FUT"}
+
+
+def fno_stocks() -> dict:
+    """{"data": [NSE equity-derivatives rows]} for every F&O stock, from Kite."""
+    with _fno_lock:
+        now = time.time()
+        body = _fno["body"]
+        if body and now - _fno["at"] < FNO_TTL_S:
+            return body
+        kite = _kite()
+        if body and now - _fno["at"] < FNO_STALE_OK_S and not _gate_open(datetime.now(IST), now):
+            return body
+        if not _wait_for_gate():
+            if body:
+                return body
+            raise FeedRefused(503, "Kite is busy (recorder tick); try again in a few seconds.")
+        today = datetime.now(IST).date().isoformat()
+        futs: dict = {}
+        for r in recorder._get_instruments(kite):
+            name = r.get("name")
+            if r.get("instrument_type") != "FUT" or not name or name in INDEX_NAMES:
+                continue
+            exp = _exp_iso(r.get("expiry"))
+            if exp >= today and (name not in futs or exp < futs[name][0]):
+                futs[name] = (exp, r["tradingsymbol"])
+        names = sorted(futs)
+        keys = [f"NSE:{n}" for n in names] + [f"NFO:{futs[n][1]}" for n in names]
+        q: dict = {}
+        try:
+            for i in range(0, len(keys), MAX_KEYS):
+                if i and not _wait_for_gate(5.0):
+                    break
+                _last_call["at"] = time.time()
+                fno_stats["calls"] += 1
+                q.update(kite.quote(keys[i:i + MAX_KEYS]) or {})
+        except Exception as e:  # noqa: BLE001
+            fno_stats["errors"] += 1
+            fno_stats["last_error"] = f"{type(e).__name__}: {str(e)[:160]}"
+            if body:
+                return body
+            raise FeedRefused(502, f"Kite quote failed: {type(e).__name__}.")
+        prev = _prev_fut_oi()
+        rows = []
+        for n in names:
+            c = q.get(f"NSE:{n}") or {}
+            ltp = c.get("last_price")
+            if not ltp:
+                continue
+            o = c.get("ohlc") or {}
+            close = o.get("close") or None
+            f = q.get(f"NFO:{futs[n][1]}") or {}
+            oi = f.get("oi")
+            p = prev.get((n, futs[n][0]))
+            rows.append({
+                "symbol": n, "identifier": n, "lastPrice": ltp,
+                "change": round(ltp - close, 2) if close else 0.0,
+                "pChange": round((ltp - close) / close * 100, 2) if close else 0.0,
+                "open": o.get("open") or ltp, "dayHigh": o.get("high") or ltp, "dayLow": o.get("low") or ltp,
+                "previousClose": close or ltp, "totalTradedVolume": c.get("volume") or 0,
+                "openInterest": oi, "changeinOpenInterest": (oi - p) if (oi is not None and p is not None) else None,
+                "meta": {"industry": ""},
+            })
+        body = {"data": rows, "source": "kite", "asOf": int(time.time() * 1000)}
+        _fno.update(at=time.time(), body=body)
+        return body
+
+
+# ------------------------------------------- session history (recorder) --
+# Option Hub's intraday charts (GEX levels through the session, hedging pressure, options flow, OI
+# time series, OI replay, expiry-day straddles) run on chain snapshots its BROWSER records while a page
+# is open in market hours; with none they draw a labelled simulated session. Its proxy can backfill
+# that store from a server recorder (GET /api/x/snapshots) — ours records every minute of every
+# session (chain_snapshot: ATM±10 of the nearest expiry), so snapshots() answers in its format.
+# IV per row is backed out of the LTP (Black-Scholes, recommend._implied_vol) because his GEX needs it.
+# Units follow the live Kite chain the hub shows (OI and cumulative volume in UNITS).
+
+SNAP_MAX = 800
+_snap_cache: dict = {}        # (under, expiry, day) -> payload list, completed days only
+
+
+def _ts_ms(ts: str) -> int:
+    return int(datetime.fromisoformat(ts).timestamp() * 1000)
+
+
+def _iso_ist(ms: float) -> str:
+    return datetime.fromtimestamp(ms / 1000, IST).isoformat(timespec="seconds")
+
+
+def _build_snaps(rows: list, under: str, expiry: str) -> list:
+    from recommend import _implied_vol
+    exp_dt = datetime.fromisoformat(f"{expiry}T15:30:00+05:30")
+    out, cur, cur_ts = [], None, None
+    for ts, spot, strike, typ, ltp, vol, oi in rows:
+        if ts != cur_ts:
+            if cur and cur["rows"]:
+                out.append(cur)
+            cur_ts = ts
+            cur = {"symbol": under, "expiry": expiry, "ts": _ts_ms(ts), "spot": spot or 0, "rows": []}
+            t_years = max((exp_dt - datetime.fromisoformat(ts)).total_seconds(), 0) / (365 * 86400)
+        iv = None
+        if ltp and spot and t_years > 0:
+            iv = _implied_vol(float(ltp), float(spot), float(strike), t_years, typ)
+        cur["rows"].append({"strike": float(strike), "side": typ, "ltp": float(ltp or 0), "oi": float(oi or 0),
+                            "vol": float(vol or 0), "iv": round(iv * 100, 2) if iv else 0.0, "bid": 0.0, "ask": 0.0})
+    if cur and cur["rows"]:
+        out.append(cur)
+    return out
+
+
+def snapshots(symbol: str, expiry: Optional[str] = None, from_ms: Optional[float] = None,
+              to_ms: Optional[float] = None, latest: bool = False) -> dict:
+    """{"symbol","expiry","from","to","snapshots":[…],"truncated"} — Option Hub's server-recorder
+    payload. latest=True: the most recent recorded session (today's, or the last one before it)."""
+    under = SERVED.get((symbol or "").upper())
+    if not under:
+        raise FeedRefused(404, f"No recorded history for {symbol}.", "InputException")
+    if expiry is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", expiry):
+        raise FeedRefused(400, "expiry must be YYYY-MM-DD", "InputException")
+    with db.get_conn() as conn:
+        if latest or from_ms is None:
+            q = "SELECT substr(MAX(ts),1,10) FROM chain_snapshot WHERE underlying=?" + (" AND expiry=?" if expiry else "")
+            day = conn.execute(q, (under, expiry) if expiry else (under,)).fetchone()[0]
+            if not day:
+                return {"symbol": symbol.upper(), "expiry": expiry, "from": 0, "to": 0, "snapshots": [], "truncated": False}
+            lo, hi = f"{day}T00:00:00", f"{day}T23:59:59+99"
+        else:
+            lo = _iso_ist(from_ms)
+            hi = _iso_ist(to_ms if to_ms is not None else time.time() * 1000)
+        if not expiry:
+            r = conn.execute("SELECT expiry, COUNT(*) c FROM chain_snapshot WHERE underlying=? AND ts>=? AND ts<=? "
+                             "GROUP BY expiry ORDER BY c DESC LIMIT 1", (under, lo, hi)).fetchone()
+            if not r:
+                return {"symbol": symbol.upper(), "expiry": None, "from": 0, "to": 0, "snapshots": [], "truncated": False}
+            expiry = r[0]
+        day = lo[:10]
+        whole_past_day = (latest or from_ms is None) and day < datetime.now(IST).date().isoformat()
+        key = (under, expiry, day)
+        if whole_past_day and key in _snap_cache:
+            snaps = _snap_cache[key]
+        else:
+            rows = conn.execute(
+                "SELECT ts, spot, strike, opt_type, ltp, volume, oi FROM chain_snapshot "
+                "WHERE underlying=? AND expiry=? AND ts>=? AND ts<=? ORDER BY ts, strike, opt_type",
+                (under, expiry, lo, hi)).fetchall()
+            snaps = _build_snaps(rows, symbol.upper(), expiry)
+            if whole_past_day:
+                if len(_snap_cache) > 40:
+                    _snap_cache.clear()
+                _snap_cache[key] = snaps
+    truncated = len(snaps) > SNAP_MAX
+    if truncated:
+        step = len(snaps) / SNAP_MAX
+        snaps = [snaps[int(i * step)] for i in range(SNAP_MAX)]
+    return {"symbol": symbol.upper(), "expiry": expiry,
+            "from": snaps[0]["ts"] if snaps else 0, "to": snaps[-1]["ts"] if snaps else 0,
+            "snapshots": snaps, "truncated": truncated}
+
+
 def status() -> dict:
     """Small summary for /hub/status (public: market data plumbing only)."""
     now = time.time()
@@ -516,6 +712,9 @@ def status() -> dict:
         "topup_errors": stats["topup_errors"],
         "last_error": stats["last_error"],
         "last_call_age_s": round(now - stats["last_call_at"]) if stats["last_call_at"] else None,
+        "fno_stocks": {"calls": fno_stats["calls"], "errors": fno_stats["errors"], "last_error": fno_stats["last_error"],
+                       "rows": len((_fno["body"] or {}).get("data") or []),
+                       "age_s": round(now - _fno["at"]) if _fno["at"] else None},
         "nse_relay": {
             "calls": nse_stats["calls"], "cache_hits": nse_stats["cache_hits"],
             "errors": nse_stats["errors"], "last_error": nse_stats["last_error"],

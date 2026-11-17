@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useLiveOptionChain } from "@/hooks/useMarketData";
 import { istDateString } from "@/lib/options";
 import { getLatestSnapshots, recordSnapshot } from "@/lib/snapshotStore";
+import { seedLatestSession } from "@/lib/history/hydrate";
 import { RING_CAPACITY, flowStore } from "@/lib/flow";
 
 /**
@@ -41,7 +42,10 @@ export function FlowFeeder({ symbol, persist = true }: { symbol: string; persist
   useEffect(() => {
     if (!expiry || isSample) return;
     let cancelled = false;
-    getLatestSnapshots(symbol, expiry, RING_CAPACITY)
+    // options-checklist: the last recorded session first (dashboard build), so the feed is real pre-open.
+    seedLatestSession(symbol)
+      .catch(() => 0)
+      .then(() => getLatestSnapshots(symbol, expiry, RING_CAPACITY))
       .then((snaps) => {
         if (cancelled) return;
         const lastDay = snaps.length ? istDateString(new Date(snaps[snaps.length - 1].ts)) : "";

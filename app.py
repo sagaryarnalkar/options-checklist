@@ -54,7 +54,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException, Request
+from fastapi import BackgroundTasks, Body, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import (
     FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response,
     StreamingResponse,
@@ -735,6 +735,25 @@ def hub_feed_profile(x_hub_feed: Optional[str] = Header(default=None)):
     _hub_feed_auth(x_hub_feed)
     import hub_feed as _hf
     return _hub_feed_call(lambda: JSONResponse({"status": "success", "data": _hf.profile()}))
+
+
+@app.get("/hub/feed/fno-stocks")
+def hub_feed_fno_stocks(x_hub_feed: Optional[str] = Header(default=None)):
+    """Every F&O stock's quote in NSE's equity-derivatives shape, from the dashboard's Kite login
+    (NSE retired that list — the hub's watchlist/dashboard/screener showed sample numbers)."""
+    _hub_feed_auth(x_hub_feed)
+    import hub_feed as _hf
+    return _hub_feed_call(lambda: JSONResponse(_hf.fno_stocks()))
+
+
+@app.get("/hub/feed/snapshots")
+def hub_feed_snapshots(symbol: str, expiry: Optional[str] = None, from_: Optional[float] = Query(default=None, alias="from"),
+                       to: Optional[float] = None, latest: bool = False,
+                       x_hub_feed: Optional[str] = Header(default=None)):
+    """The recorder's per-minute chain as the hub's server-recorder snapshots (its session charts)."""
+    _hub_feed_auth(x_hub_feed)
+    import hub_feed as _hf
+    return _hub_feed_call(lambda: JSONResponse(_hf.snapshots(symbol, expiry, from_, to, latest)))
 
 
 @app.get("/hub/feed/nse")
