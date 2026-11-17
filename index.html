@@ -85,6 +85,15 @@
   d.dataset.skin = (qs && /^[a-z]{2,20}$/.test(qs)) ? qs : (localStorage.getItem("hz_skin") || "fintech");
   d.dataset.density = "comfortable"; d.dataset.corners = "square";
   d.dataset.numerals = "mono"; d.dataset.tint = "off";
+  // Inside the terminal with its theme: its fonts (Inter, Plus Jakarta Sans), 10px cards, proportional
+  // figures — the "HeroZero terminal look" block at the end of the stylesheet does the rest.
+  if (embed && /^hub-/.test(d.dataset.theme)) {
+    d.dataset.corners = "soft"; d.dataset.numerals = "proportional";
+    var fl = document.createElement("link");
+    fl.rel = "stylesheet";
+    fl.href = "https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,300..800&family=Plus+Jakarta+Sans:wght@500..800&display=swap";
+    document.head.appendChild(fl);
+  }
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) d.dataset.rm = "true";
 })();
 </script>
@@ -1127,6 +1136,79 @@
     .hz-tabbar .tab{ flex:0 0 auto; white-space:nowrap; padding:10px 14px; }
   }
 
+
+  /* ---------- HeroZero terminal look ----------
+     This page embedded in the terminal (?embed=1&theme=hub-dark|hub-light) takes the terminal's design
+     language (optionhub/src/index.css + tailwind.config.ts): Inter for text AND numbers (tabular), Plus
+     Jakarta Sans for headings, sentence case, 10px cards on a hairline, 6px controls on a soft track,
+     orange only for actions and links (the darker "primary-ink" for text). Last in the sheet on purpose:
+     it wins over the skins. */
+  :root.hz-embed[data-theme^="hub-"]{
+    --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --mono:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+    --hub-display:"Plus Jakarta Sans","Inter",system-ui,sans-serif;
+  }
+  :root.hz-embed[data-theme="hub-light"]{
+    --color-divider:rgba(37,24,28,.11); --hub-strong-line:rgba(37,24,28,.16);
+    --hub-link:#aa400c; --hub-track:rgba(31,13,20,.06); --hub-track-hover:rgba(31,13,20,.10);
+    --hub-shadow:0 1px 2px rgba(31,13,20,.05),0 0 0 .5px rgba(31,13,20,.02);
+    --hub-warn-bg:#f7efdf; --hub-warn:#7a5212; --chip:rgba(31,13,20,.06);
+  }
+  :root.hz-embed[data-theme="hub-dark"]{
+    --color-divider:rgba(255,255,255,.09); --hub-strong-line:rgba(255,255,255,.14);
+    --hub-link:#f5a26e; --hub-track:rgba(255,255,255,.07); --hub-track-hover:rgba(255,255,255,.11);
+    --hub-shadow:0 1px 2px rgba(0,0,0,.35);
+    --hub-warn-bg:rgba(227,178,90,.10); --hub-warn:#e8c07a; --chip:rgba(255,255,255,.07);
+  }
+  :root.hz-embed[data-theme^="hub-"] body{ font-size:13px; font-variant-numeric:tabular-nums;
+    -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
+  /* sentence case everywhere: the terminal never shouts */
+  :root.hz-embed[data-theme^="hub-"] *{ text-transform:none !important; letter-spacing:normal !important; }
+  :root.hz-embed[data-theme^="hub-"] h1{ font-family:var(--hub-display); font-size:26px; font-weight:650;
+    letter-spacing:-.015em !important; line-height:1.2; color:var(--color-text); }
+  :root.hz-embed[data-theme^="hub-"] h2{ font-family:var(--hub-display); font-size:16px; font-weight:600;
+    color:var(--color-text); margin-bottom:10px; }
+  :root.hz-embed[data-theme^="hub-"] h3{ font-family:var(--hub-display); font-size:15px; font-weight:600; color:var(--color-text); }
+  :root.hz-embed[data-theme^="hub-"] h4{ font-size:12px; font-weight:600; color:var(--muted); }
+  :root.hz-embed[data-theme^="hub-"] .clock{ font-size:13px; color:var(--muted); }
+  /* cards: 10px, hairline, faint shadow */
+  :root.hz-embed[data-theme^="hub-"] :is(.live-card,.triggers,.rec-strategy,.oi-chart-card,.oi-controls,
+    .oi-side-panel,.pt-tile,.pt-equity,.pt-trade,.payoff-wrap,details.card,.card,.csp-card,.pos-headcard){
+    border-radius:10px !important; border:1px solid var(--color-divider) !important;
+    box-shadow:var(--hub-shadow) !important; background:var(--color-surface); }
+  /* boxes inside cards */
+  :root.hz-embed[data-theme^="hub-"] :is(.fc-hz,.fc-call,.fc-tile,.fc-drv,.live-grid > *,.live-spots > *,
+    .spot-pill,.ir-context,.inline-rec,.pt-mtm > *){
+    border-radius:8px; border-color:var(--color-divider) !important; }
+  :root.hz-embed[data-theme^="hub-"] :is(table,th,td){ border-color:var(--color-divider) !important; }
+  :root.hz-embed[data-theme^="hub-"] th{ font-size:11px; font-weight:600; color:var(--muted); }
+  /* controls: 6px on a soft track, medium weight, no hard borders */
+  :root.hz-embed[data-theme^="hub-"] :is(button,.live-refresh):not(.tab){
+    border-radius:6px !important; background:var(--hub-track) !important; color:var(--color-text) !important;
+    border:1px solid transparent !important; font-family:var(--sans); font-weight:500; font-size:12.5px;
+    box-shadow:none !important; transition:background-color .12s ease; }
+  :root.hz-embed[data-theme^="hub-"] :is(button,.live-refresh):not(.tab):hover{ background:var(--hub-track-hover) !important; }
+  :root.hz-embed[data-theme^="hub-"] :is(select,input,textarea){
+    border-radius:6px !important; border:1px solid var(--hub-strong-line) !important;
+    background:var(--color-surface) !important; color:var(--color-text); font-family:var(--sans); box-shadow:none !important; }
+  /* chips and badges */
+  :root.hz-embed[data-theme^="hub-"] :is(.badge,.pill,.sig,.fc-verdict,summary .count){
+    border-radius:6px !important; border-color:transparent !important; font-family:var(--sans); font-weight:500; }
+  :root.hz-embed[data-theme^="hub-"] .badge:not(.hot){ background:var(--hub-track) !important; color:var(--muted); }
+  /* links: the terminal's primary ink, underline on hover */
+  :root.hz-embed[data-theme^="hub-"] a{ color:var(--hub-link) !important; text-decoration:none; }
+  :root.hz-embed[data-theme^="hub-"] a:hover{ text-decoration:underline; text-underline-offset:3px; }
+  /* warnings: the terminal's wash */
+  :root.hz-embed[data-theme^="hub-"] .live-stale{ background:var(--hub-warn-bg) !important; color:var(--hub-warn) !important;
+    border:0 !important; border-radius:8px !important; }
+  :root.hz-embed[data-theme^="hub-"] .note{ color:var(--muted); }
+  /* accents become quiet: card titles in text colour, the recommendations card on the same hairline */
+  :root.hz-embed[data-theme^="hub-"] :is(.oi-side-title,.payoff-title,.pt-title,.subhead){ color:var(--color-text) !important;
+    font-family:var(--hub-display); font-size:13.5px; font-weight:600; }
+  :root.hz-embed[data-theme^="hub-"] .rec-card{ border:1px solid var(--color-divider) !important; border-radius:10px !important;
+    box-shadow:var(--hub-shadow) !important; }
+  :root.hz-embed[data-theme^="hub-"] .live-grid{ background:transparent !important; gap:8px !important; }
+  :root.hz-embed[data-theme^="hub-"] .live-grid > *{ border:1px solid var(--color-divider) !important; border-radius:8px; }
 </style>
 </head>
 <body>

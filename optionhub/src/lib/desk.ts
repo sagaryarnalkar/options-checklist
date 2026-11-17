@@ -68,3 +68,26 @@ export function formatInr(v: unknown): string {
   const s = `₹${Math.round(Math.abs(n)).toLocaleString("en-IN")}`;
   return n < 0 ? `−${s}` : s;
 }
+
+/** Once-a-day Kite login bounce (the dashboard's old auto-login), used by the toolbar account chip. */
+const AUTOLOGIN_KEY = "hz_autologin_day";
+
+const todayLocal = () => new Date().toLocaleDateString("en-CA");
+
+/** True when this call started the once-a-day login bounce. */
+export function maybeAutoLogin(
+  storage: Pick<Storage, "getItem" | "setItem"> | null,
+  go: (url: string) => void,
+  framed: boolean = typeof window !== "undefined" && window.top !== window.self,
+  base: string = DESK_URL,
+): boolean {
+  if (!base || framed || !storage) return false;
+  try {
+    if (storage.getItem(AUTOLOGIN_KEY) === todayLocal()) return false;
+    storage.setItem(AUTOLOGIN_KEY, todayLocal());
+  } catch {
+    return false;
+  }
+  go(`${base}/login`);
+  return true;
+}

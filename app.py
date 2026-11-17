@@ -1582,7 +1582,7 @@ async def callback(
     # Show a nice landing page; auto-refresh the dashboard via meta-refresh.
     return HTMLResponse(f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Logged in</title>
-<meta http-equiv="refresh" content="2;url=/">
+<meta http-equiv="refresh" content="1;url=/">
 <style>
 body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
        background: #0b0e14; color: #e7ecf3; padding: 60px 30px; text-align: center; }}
