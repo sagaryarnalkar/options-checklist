@@ -1061,6 +1061,65 @@ async def oi_hold_stats(underlying: Optional[str] = None):
         return JSONResponse(_hold.hold_stats(conn, underlying))
 
 
+_BUILDS_LIVE: dict = {}          # underlying -> (key, payload): one fresh read per minute
+_BUILDS_HIST: dict = {}          # underlying -> (stamp, {"ladder", "walls", "source"})
+
+
+def _builds_evidence(conn, underlying: str) -> dict:
+    """The track record the live card quotes: the 4.7-year replay when its
+    graded scorecard carries these sections, else the live recording."""
+    import time
+    import history as _hi
+    import hold as _hold
+    import walls as _walls
+    p = _hi.scorecard_path(underlying)
+    stamp = p.stat().st_mtime if p.exists() else 0
+    hit = _BUILDS_HIST.get(underlying)
+    if hit and hit[0][0] == stamp and time.time() - hit[0][1] < 3600:
+        return hit[1]
+    ev = None
+    if stamp:
+        try:
+            sc = json.loads(p.read_text())
+            sig = sc.get("signals") or {}
+            if (sig.get("oi_builds_pit") or {}).get("ok") and (sig.get("walls") or {}).get("ok"):
+                ev = {"source": "replay", "range": sc.get("range"),
+                      "sessions": sc.get("sessions"),
+                      "ladder": sig["oi_builds_pit"], "walls": sig["walls"]}
+        except (OSError, ValueError):
+            ev = None
+    if ev is None:
+        ev = {"source": "live", "ladder": _hold.pit_ladder(conn, underlying),
+              "walls": _walls.respect(conn, underlying)}
+    _BUILDS_HIST[underlying] = ((stamp, time.time()), ev)
+    return ev
+
+
+@app.get("/oi/builds/live")
+def oi_builds_live(underlying: str = "NIFTY", date: Optional[str] = None, top: int = 12):
+    """Today's OI builds so far, one row per contract (hold.live_board), with
+    the point-in-time track record and the price test to read them by.
+    Public and read-only, like the rest of the OI Flow tab."""
+    import hold as _hold
+    if underlying not in ("NIFTY", "BANKNIFTY"):
+        return JSONResponse({"ok": False, "reason": "underlying must be NIFTY or BANKNIFTY"},
+                            status_code=400)
+    top = max(1, min(int(top), 40))
+    with db.get_conn() as conn:
+        last = conn.execute("SELECT MAX(ts) FROM chain_snapshot WHERE underlying=?"
+                            + (" AND ts<?" if date else ""),
+                            (underlying, date + "~") if date else (underlying,)).fetchone()[0]
+        key = (last, date, top)
+        hit = _BUILDS_LIVE.get(underlying)
+        if hit and hit[0] == key:
+            board = hit[1]
+        else:
+            board = _hold.live_board(conn, underlying, date, top)
+            _BUILDS_LIVE[underlying] = (key, board)
+        ev = _builds_evidence(conn, underlying)
+    return JSONResponse({**board, "evidence": ev})
+
+
 @app.post("/oi/grade_holds")
 async def oi_grade_holds(days: int = 30):
     """Detect and grade builds for every recorded session (idempotent)."""
@@ -1766,6 +1825,40 @@ def _backfill_missing():
                       f"unflagged {m['no_build']['pct']}% (z={m['z']})")
     except Exception as e:
         print(f"[bootstrap] hold grading failed: {type(e).__name__}: {e}")
+    _regrade_history_if_stale("bootstrap")
+
+
+# A cached replay scorecard written before a grader existed lacks its section,
+# and the live OI-builds card quotes the replay only when it is there. Regrade
+# once, outside market hours (minutes of CPU, niced), from the startup job and
+# the 17:45 tick — a deploy must never leave it waiting on a manual POST.
+_HIST_REGRADE_SPAWNED: set = set()
+HIST_SCORECARD_NEEDS = ("oi_builds_pit", "walls")
+
+
+def _regrade_history_if_stale(tag: str) -> list:
+    import history as _hi
+    started = []
+    if recorder.is_market_hours() or not _hi.HIST_DB.exists():
+        return started
+    for u in ("NIFTY", "BANKNIFTY"):
+        p = _hi.scorecard_path(u)
+        if u in _HIST_REGRADE_SPAWNED or not p.exists():
+            continue
+        try:
+            sig = json.loads(p.read_text()).get("signals") or {}
+        except (OSError, ValueError):
+            continue
+        if all(k in sig for k in HIST_SCORECARD_NEEDS):
+            continue
+        try:
+            pid = _spawn_history(["scorecard", "--underlying", u, "--save"])
+            _HIST_REGRADE_SPAWNED.add(u)
+            started.append(u)
+            print(f"[{tag}] {u} replay scorecard lacks the new grades — regrading (pid {pid})")
+        except Exception as e:
+            print(f"[{tag}] {u} replay regrade failed to start: {type(e).__name__}: {e}")
+    return started
 
 
 def _eod_tick():
@@ -1804,6 +1897,7 @@ def _eod_tick():
         print(f"[eod] forecast grading: {_fc.grade_now()}")
     except Exception as e:
         print(f"[eod] forecast grading failed: {type(e).__name__}: {e}")
+    _regrade_history_if_stale("eod")
 
 
 async def _forecast_tick():

@@ -55,6 +55,16 @@ def _two_prop_z(h1: int, n1: int, h2: int, n2: int):
     return round((p1 - p2) / se, 2) if se else None
 
 
+def _verdict_z(n, z) -> str:
+    """The same verdict words, for graders that compute their own z."""
+    if n < MIN_SAMPLE:
+        return "insufficient sample"
+    if z is None:
+        return "no baseline"
+    return ("beats baseline" if z > 1.96 else
+            "WORSE than baseline" if z < -1.96 else "no evidence")
+
+
 def _verdict(hits, n, base_hits, base_n) -> str:
     if n < MIN_SAMPLE:
         return "insufficient sample"
@@ -278,13 +288,18 @@ def _safe(fn, *a, **k) -> dict:
 def scorecard(conn, underlying: str = "NIFTY") -> dict:
     """Everything gradeable, in one place, each with its control."""
     import hold as _hold
+    import walls as _walls
     out = {"ok": True, "underlying": underlying,
            "markers": _safe(grade_markers, conn, underlying),
            # LLT tracks NIFTY futures only; grading it under BANKNIFTY would
            # quietly re-print NIFTY's prints with the wrong label
            "llt": (_safe(grade_llt, conn) if underlying == "NIFTY" else
                    {"ok": False, "reason": "LLT tracks NIFTY futures only"}),
-           "oi_builds": _safe(_hold.hold_stats, conn, underlying)}
+           "oi_builds": _safe(_hold.hold_stats, conn, underlying),
+           # builds as a trader could have seen them by 11:00 (hold.pit_ladder)
+           "oi_builds_pit": _safe(_hold.pit_ladder, conn, underlying),
+           # do writers' strikes hold PRICE, not just OI? (walls.py)
+           "walls": _safe(_walls.respect, conn, underlying)}
     # a flat list of the honest headlines, for the UI and for a quick read
     lines = []
     m = out["markers"]
@@ -310,8 +325,24 @@ def scorecard(conn, underlying: str = "NIFTY") -> dict:
                       "n": mm["with_build"]["n"], "pct": mm["with_build"]["pct"],
                       "baseline": mm["no_build"]["pct"],
                       "verdict": "beats baseline" if mm.get("significant") else "no evidence"})
+    p = out["oi_builds_pit"]
+    if p.get("ok"):
+        cut = p["cuts"].get("11:00") or {}
+        top, none = cut.get("5+") or {}, cut.get("0") or {}
+        if top.get("n"):
+            lines.append({"signal": "OI builds · 5+ seen by 11:00 · held",
+                          "n": top["n"], "pct": top["pct"], "baseline": none.get("pct"),
+                          "verdict": _verdict_z(top["n"], top.get("z"))})
+    w = out["walls"]
+    if w.get("ok"):
+        for lab, g in (("all", w["all"]), ("5+ builds", w["by_hits"].get("5+") or {})):
+            if g.get("n"):
+                lines.append({"signal": f"Writer strikes · {lab} · price stayed away",
+                              "n": g["n"], "pct": g["stayed_away_pct"],
+                              "baseline": g["stayed_away_expected_pct"],
+                              "verdict": g["verdict"]})
     for key, label in (("markers", "OI flow markers"), ("llt", "LLT prints"),
-                       ("oi_builds", "OI builds")):
+                       ("oi_builds", "OI builds"), ("walls", "Writer strikes")):
         blk = out.get(key) or {}
         if not blk.get("ok"):
             why = str(blk.get("reason") or "no data")
