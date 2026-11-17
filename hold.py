@@ -396,15 +396,25 @@ def pit_ladder(conn, underlying: str = "NIFTY", cuts=PIT_CUTS) -> dict:
     return out
 
 
+# a strike earns a chart mark at its 5th build: the bucket that held 82.8% vs
+# 50.3% when seen by 11:00 (pit_ladder, 87 live sessions)
+CHART_MILESTONE = 5
+CHART_TAGS_PER_SIDE = 2
+
+
+def _who(writer: int, n: int) -> str:
+    """The side is the 1-min price-direction proxy (see _side), so an active
+    strike often splits close to even: only a clear 2:1 majority is named."""
+    share = writer / n if n else 0
+    return "writers" if share >= 2 / 3 else "buyers" if share <= 1 / 3 else "mixed"
+
+
 def _fmt_contract(key, bs, spot):
     exp, strike, otype = key
     bs = sorted(bs, key=lambda b: b["ts"])
     first, last = bs[0], bs[-1]
     writer = sum(1 for b in bs if b["side"] == WRITER_SIDE[otype])
-    # the side is the 1-min price-direction proxy (see _side), so an active
-    # strike often splits close to even: only a clear 2:1 majority is named
-    share = writer / len(bs)
-    who = "writers" if share >= 2 / 3 else "buyers" if share <= 1 / 3 else "mixed"
+    who = _who(writer, len(bs))
     pc, now = first["oi_prior_close"], first["oi_close"]
     peak = first["oi_peak"]
     dist = (strike - spot) if spot else None
@@ -444,8 +454,25 @@ def live_board(conn, underlying: str = "NIFTY", date: str | None = None,
     rows = [_fmt_contract(k, v, spot) for k, v in by.items()]
     rows.sort(key=lambda r: (-r["hits"], -r["value_cr"]))
     expiries = {r["expiry"][:10] for r in rows if r["expiry"]}
+    # chart overlay: the moment each strike reached the milestone, and the
+    # most-built strikes per side (axis tags). Positions, not levels: the
+    # price test (walls.py) found no support/resistance in writers' strikes.
+    milestones = []
+    for (exp, strike, otype), v in by.items():
+        if len(v) < CHART_MILESTONE:
+            continue
+        first = sorted(v, key=lambda b: b["ts"])[:CHART_MILESTONE]
+        w = sum(1 for b in first if b["side"] == WRITER_SIDE[otype])
+        milestones.append({"ts": first[-1]["ts"], "expiry": exp, "strike": strike,
+                           "opt_type": otype, "who": _who(w, len(first))})
+    milestones.sort(key=lambda m: m["ts"])
+    tags = [r for t in ("CE", "PE")
+            for r in [x for x in rows if x["opt_type"] == t
+                      and x["hits"] >= CHART_MILESTONE][:CHART_TAGS_PER_SIDE]]
     return {"ok": True, "underlying": underlying, "date": d,
             "as_of": last[0][11:16] if last else None, "spot": spot,
             "complete": session_complete(conn, underlying, d),
             "expiry_day": d in expiries, "n_builds": len(builds),
-            "n_contracts": len(rows), "contracts": rows[:top]}
+            "n_contracts": len(rows), "contracts": rows[:top],
+            "chart": {"milestone": CHART_MILESTONE, "milestones": milestones,
+                      "tags": tags}}
