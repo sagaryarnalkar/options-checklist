@@ -46,11 +46,22 @@ Live orders go through the dashboard's own Kite login. This app never holds the 
 | `server/dashboard.mjs`, `proxy-server.mjs` | `GET/POST /api/dashboard/orders?op=status\|book\|order\|log\|preview\|place\|modify\|cancel\|halt` forwards to the dashboard's `/hub/orders/*` with the feed token. POST needs an allowed Origin (or a loopback caller) and the `x-hz-orders: 1` header. A send that gets no answer says the order MAY have gone through. |
 | `src/lib/kiteOrders.ts` (new) | Client: preview, place, modify and cancel. `placeKiteOrder` and `modifyKiteOrder` require a `LiveArmToken` (liveArm.ts). Baskets go one leg at a time, buys first, and each leg must report COMPLETE before the next is sent. The first refusal, rejection or unfilled leg stops the basket, with no automatic unwind. |
 | `src/components/live/LiveOrderDialog.tsx` (new) | Real-order confirmation. It shows Kite's contract, quantity, LTP, rule verdicts and Kite margin. Product and order type (LIMIT / MARKET / SL / SL-M) are chosen here. Nothing is sent until the real-money box is ticked. Intent ids are minted when the dialog opens. |
-| `src/pages/PaperTrading.tsx`, `src/components/paper/OrderTicket.tsx` | A **Paper / Live · Zerodha** switch, which starts on Paper at every visit. In Live mode the ticket and the basket open the confirmation, and the paper-only controls (stop/target, max loss, paper guardrails, naked-sell hiding) step aside. The paper account is untouched. |
+| `src/pages/PaperTrading.tsx`, `src/components/paper/OrderTicket.tsx` | (Replaced by the Live Trading page in #124.) A **Paper / Live · Zerodha** switch, which starts on Paper at every visit. In Live mode the ticket and the basket open the confirmation, and the paper-only controls (stop/target, max loss, paper guardrails, naked-sell hiding) step aside. The paper account is untouched. |
 | `src/pages/Orders.tsx`, `src/components/live/KiteOrders.tsx` (new) | In our build the Orders page is the Kite order book, with cancel, modify (price / trigger / lots) and the server's **Halt all live orders** switch. Cancelling works while halted. |
 | `src/features/one-cliq/hooks/useQuickOrder.ts`, `OneCliqTerminal.tsx`, `components/TradingLockBanner.tsx` | Armed live keys send Kite orders (MARKET; market protection as an aggressive LIMIT; LIMIT at LTP). They respect the trading lock, which was display-only. A fresh install's "lock file missing" engine-fault lock can be cleared from the banner in our build only. |
 | `src/components/LiveTradingToggle.tsx` | Copy for the dashboard build: Zerodha via the dashboard, and Kite's static-IP rule. |
 | Tests | `server/dashboard.test.mjs` (orders forwarding), `src/lib/kiteOrders.test.ts`, `src/components/live/LiveMode.test.tsx`. |
+
+### Live Trading page, separate from Paper Trading (#124)
+
+The owner found it misleading to place real orders from a page named Paper Trading, so live trading now has its own page.
+
+| Where | What changed |
+|---|---|
+| `src/pages/LiveTrading.tsx` (new), `src/pages/PaperTrading.tsx`, `src/lib/routes.ts`, `src/lib/routeIcons.ts` | The page body is now `TradingDesk({ mode })`. `/paper-trading` is paper only again, with no Live switch, plus a "Live Trading" link in our build. `/trade` ("Live Trading", first in the Trade group, our build only) has the same ticket and basket sending real orders, no paper account, and today's Kite orders beside the basket. Outside our build `/trade` redirects to Paper Trading. |
+| `src/components/option-chain/basket.ts`, `BasketDrawer.tsx`, `src/pages/StrategyBuilder.tsx`, `src/pages/Optimizer.tsx`, `src/components/optimizer/*`, `src/components/contract/ContractPanels.tsx` | A **Trade live** button sits beside every "Paper trade". It stages the legs at `/trade?legs=`, and nothing is sent until you confirm there. There is a new `"live"` send target. |
+| `src/components/live/KiteOrders.tsx` | `KiteOrderBook` (status, halt, book, cancel, modify) is split from the Orders page so Live Trading can show it. |
+| `vite.config.ts` | Fixed the "VITE_SITE_URL is not set" warning, whose unescaped quotes turned the message into `NaN` and failed builds without VITE_SITE_URL (#116 slip; production sets it). |
 
 `LICENSE`, `NOTICE.md` and `COMMERCIAL-LICENSE.md` are kept in this folder, along with the copyright notes in source comments.
 

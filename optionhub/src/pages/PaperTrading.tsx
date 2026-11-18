@@ -10,13 +10,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { BookOpenCheck, Download, FlaskConical, Layers, LineChart, Radio, Upload, Wallet, X } from "lucide-react";
+import { BookOpenCheck, Download, FlaskConical, Layers, LineChart, ListOrdered, Radio, Upload, Wallet, X } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { LiveOrderDialog } from "@/components/live/LiveOrderDialog";
+import { KiteOrderBook } from "@/components/live/KiteOrders";
 import { kiteOrdersAvailable, type KiteLeg } from "@/lib/kiteOrders";
 import { PageHeader } from "@/components/PageHeader";
 import { ChainFeed } from "@/components/positions/ChainFeed";
@@ -118,7 +118,17 @@ function atmIvPct(chain: OptionData[], spot: number): number | null {
 }
 
 export default function PaperTrading() {
-  useDocumentTitle("Paper Trading");
+  return <TradingDesk mode="paper" />;
+}
+
+/**
+ * options-checklist: one page, two modes. "paper" is upstream's Paper Trading, untouched in behaviour. "live" (the
+ * /trade route, our build only) is Live Trading: the same order ticket and basket send REAL Zerodha orders through
+ * the dashboard's Kite login (LiveOrderDialog), with none of the paper account around them.
+ */
+export function TradingDesk({ mode }: { mode: "paper" | "live" }) {
+  const live = mode === "live" && kiteOrdersAvailable();
+  useDocumentTitle(live ? "Live Trading" : "Paper Trading");
   const [params, setParams] = useSearchParams();
   const [state, setState] = useState<PaperState>(() => compactLedger(loadPaper() ?? createPaperState(), new Date()));
   const stateRef = useRef(state);
@@ -217,10 +227,7 @@ export default function PaperTrading() {
     setExpiry(firstExpiry(s));
   };
   const [staged, setStaged] = useState<BasketLeg[]>([]);
-  // options-checklist: Live (Zerodha) mode — the ticket and the basket send REAL orders through the dashboard's
-  // Kite login (LiveOrderDialog). Never persisted: every visit starts in Paper.
-  const liveCapable = kiteOrdersAvailable();
-  const [live, setLive] = useState(false);
+  // options-checklist: Live Trading — the ticket and the basket open the real-order confirmation (LiveOrderDialog).
   const [liveOrder, setLiveOrder] = useState<{ legs: KiteLeg[]; source: "ticket" | "basket" } | null>(null);
   const [tab, setTab] = useState("positions");
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -469,9 +476,13 @@ export default function PaperTrading() {
       ))}
 
       <PageHeader
-        icon={Wallet}
-        title="Paper Trading"
-        description="Practise option trades with virtual money on live chains. Real fills at mid plus slippage, real charges, stops and targets, automatic settlement at expiry, and guardrails before every order."
+        icon={live ? Radio : Wallet}
+        title={live ? "Live Trading" : "Paper Trading"}
+        description={
+          live
+            ? "Real orders on your Zerodha account, sent with the dashboard's Kite login after a confirmation that shows Kite's own contract, quantity and margin. NIFTY and BANKNIFTY options, up to 25 lots an order."
+            : "Practise option trades with virtual money on live chains. Real fills at mid plus slippage, real charges, stops and targets, automatic settlement at expiry, and guardrails before every order."
+        }
         source={
           <>
             {vix !== null ? (
@@ -487,21 +498,27 @@ export default function PaperTrading() {
           </>
         }
         actions={
+          live ? (
+            <>
+              <Button asChild variant="outline" size="sm">
+                <Link to="/orders">
+                  <ListOrdered aria-hidden="true" /> Kite orders
+                </Link>
+              </Button>
+              <Button asChild variant="outline" size="sm">
+                <Link to="/paper-trading">
+                  <Wallet aria-hidden="true" /> Paper Trading
+                </Link>
+              </Button>
+            </>
+          ) : (
           <>
-            {liveCapable ? (
-              <ToggleGroup
-                type="single"
-                size="sm"
-                value={live ? "live" : "paper"}
-                onValueChange={(v) => v && setLive(v === "live")}
-                aria-label="Paper or live orders"
-                className={cn("rounded-pill", live && "ring-1 ring-bearish/60")}
-              >
-                <ToggleGroupItem value="paper">Paper</ToggleGroupItem>
-                <ToggleGroupItem value="live" className="data-[state=on]:bg-bearish data-[state=on]:text-bearish-foreground">
-                  <Radio className={cn(live && "animate-pulse")} aria-hidden="true" /> Live · Zerodha
-                </ToggleGroupItem>
-              </ToggleGroup>
+            {kiteOrdersAvailable() ? (
+              <Button asChild variant="outline" size="sm" className="border-bearish/50 text-bearish hover:text-bearish">
+                <Link to="/trade">
+                  <Radio aria-hidden="true" /> Live Trading
+                </Link>
+              </Button>
             ) : null}
             <Button asChild variant="outline" size="sm">
               <Link to="/journal?source=paper">
@@ -542,6 +559,7 @@ export default function PaperTrading() {
               }}
             />
           </>
+          )
         }
       />
 
@@ -550,7 +568,7 @@ export default function PaperTrading() {
           <Radio className="h-4 w-4 shrink-0 animate-pulse text-bearish" aria-hidden="true" />
           <span>
             <span className="font-semibold text-bearish">LIVE.</span> The order ticket and the basket below send <strong>real orders</strong> to your Zerodha account through the
-            dashboard's Kite login, after a confirmation. NIFTY and BANKNIFTY only, at most 25 lots an order. The paper account below is not touched.
+            dashboard's Kite login, after a confirmation. NIFTY and BANKNIFTY only, at most 25 lots an order. Your paper account is not involved.
           </span>
           <Link to="/orders" className="ml-auto font-semibold text-primary-ink underline-offset-4 hover:underline">
             Kite orders
@@ -558,6 +576,8 @@ export default function PaperTrading() {
         </p>
       ) : null}
 
+      {live ? null : (
+      <>
       <div className={cn(STAT_GROUP, "grid-cols-2 sm:grid-cols-3 xl:grid-cols-6")}>
         <Stat label="Equity" value={formatCompactIN(f.equity, { symbol: true, decimals: 2 })} sub={`started ${formatCompactIN(state.startingCapital, { symbol: true })}`} help="Cash plus the marked value of open positions (long value minus short liability)." />
         <Stat label="Return" value={formatPct(ret, { decimals: 2, signed: true })} tone={ret > 0 ? "bullish" : ret < 0 ? "bearish" : "muted"} sub="on starting capital" />
@@ -568,6 +588,8 @@ export default function PaperTrading() {
       </div>
 
       <GuardrailBar guardrails={guardrails} todayPnl={todayPnl(state, now)} killSwitch={state.killSwitch} killActive={killOn} openPositions={state.positions.length} onKill={kill} onRelease={release} />
+      </>
+      )}
 
       <div className="grid items-start gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
         <div className="min-w-0">
@@ -597,6 +619,7 @@ export default function PaperTrading() {
         </div>
 
         <div className="min-w-0 space-y-4">
+          {live ? null : (
           <Tabs value={tab} onValueChange={setTab} className="space-y-3">
             <div className="-mx-1 overflow-x-auto px-1">
               <TabsList>
@@ -665,6 +688,7 @@ export default function PaperTrading() {
               </Panel>
             </TabsContent>
           </Tabs>
+          )}
 
           <div ref={basketRef} id="paper-basket" tabIndex={-1} className={cn("scroll-mt-20 rounded-card outline-none transition-shadow duration-settle", basketFlash && "shadow-focus")}>
             <Panel
@@ -674,7 +698,11 @@ export default function PaperTrading() {
                   {staged.length ? <Badge variant="neutral">{staged.length}</Badge> : null}
                 </>
               }
-              subtitle="Legs from the option-chain basket or a Strategy Builder link. Reviewed with margin and charges, then placed as market orders."
+              subtitle={
+                live
+                  ? "Legs from the Strategy Builder, the Optimizer or the option-chain basket. Sent as real orders, buys first, after a confirmation with Kite's own figures."
+                  : "Legs from the option-chain basket or a Strategy Builder link. Reviewed with margin and charges, then placed as market orders."
+              }
               actions={
                 <Button
                   variant="outline"
@@ -761,16 +789,21 @@ export default function PaperTrading() {
               )}
             </Panel>
           </div>
+          {live ? <KiteOrderBook compact /> : null}
         </div>
       </div>
 
-      {liveCapable ? (
+      {live ? (
         <LiveOrderDialog open={!!liveOrder} onOpenChange={(o) => !o && setLiveOrder(null)} legs={liveOrder?.legs ?? []} source={liveOrder?.source ?? "ticket"} />
       ) : null}
 
       <BasketConfirmDialog open={confirmOpen} onOpenChange={setConfirmOpen} preview={preview} capital={capital} maxRiskPct={guardrails.maxRiskPct} guard={guardBasket} onConfirm={placeBasket} />
 
-      <EduNote>Paper trades are simulated. Real fills, slippage and margin will differ. IVP marked * is proxied by the India VIX percentile.</EduNote>
+      <EduNote>
+        {live
+          ? "Real orders. The ticket's estimates use the paper model; the confirmation shows Kite's own contract, quantity, last price and margin, and the dashboard re-checks every order before Kite sees it."
+          : "Paper trades are simulated. Real fills, slippage and margin will differ. IVP marked * is proxied by the India VIX percentile."}
+      </EduNote>
     </div>
   );
 }

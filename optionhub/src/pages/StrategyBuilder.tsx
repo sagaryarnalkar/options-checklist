@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, BookOpen, Eye, FlaskConical, Keyboard, Layers, Loader2, PackagePlus, Radio, RefreshCw, Wand2, X } from "lucide-react";
+import { kiteOrdersAvailable } from "@/lib/kiteOrders";
 import { PageHeader } from "@/components/PageHeader";
 import { SaveBasketDialog } from "@/components/SaveBasketDialog";
 import { previewBasket, type BasketPreview } from "@/lib/basketApi";
@@ -590,6 +591,8 @@ export default function StrategyBuilder() {
   const openPaperTrade = () => {
     if (paperHref) navigate(paperHref);
   };
+  // options-checklist: the same legs staged on the Live Trading page (real Zerodha orders after a confirmation).
+  const liveHref = paperHref && kiteOrdersAvailable() ? paperHref.replace(/^\/paper-trading/, "/trade") : null;
 
   // ── Save as basket (1CLIQ-TRADE-SPEC.md §9) ──
   // basket-deploy resolves the legs against the live chain for a preview, then the basket is saved
@@ -784,6 +787,19 @@ export default function StrategyBuilder() {
             >
               <FlaskConical /> Paper trade
             </Button>
+            {kiteOrdersAvailable() ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="border-bearish/50 text-bearish hover:text-bearish"
+                onClick={() => liveHref && navigate(liveHref)}
+                disabled={!liveHref}
+                title={liveHref ? "Stage these option legs on the Live Trading page: real Zerodha orders, sent only after you confirm there" : "Add at least one enabled option leg"}
+              >
+                <Radio /> Trade live
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"

@@ -50,6 +50,22 @@ function timeOf(ts?: string | null): string {
 
 export function KiteOrders() {
   useDocumentTitle("Orders");
+  return (
+    <div className="mx-auto w-full max-w-[1400px] space-y-4">
+      <PageHeader
+        icon={ListOrdered}
+        eyebrow="Trade"
+        title="Orders"
+        description="Today's Zerodha order book, from the dashboard's Kite login. Cancel or change open orders here; place them from Live Trading or 1Cliq."
+      />
+      <KiteOrderBook />
+    </div>
+  );
+}
+
+/** The status strip (with the HALT switch), today's Kite orders and their cancel / modify. `compact` = the
+ *  Live Trading page's panel: a title row instead of the page header, same controls. */
+export function KiteOrderBook({ compact = false }: { compact?: boolean }) {
   const qc = useQueryClient();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [editing, setEditing] = useState<KiteOrderRow | null>(null);
@@ -90,18 +106,13 @@ export function KiteOrders() {
   const openCount = rows.filter((o) => OPEN.has(String(o.status).toUpperCase())).length;
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] space-y-4">
-      <PageHeader
-        icon={ListOrdered}
-        eyebrow="Trade"
-        title="Orders"
-        description="Today's Zerodha order book, from the dashboard's Kite login. Cancel or change open orders here; place them from Paper Trading in Live mode or from 1Cliq."
-        actions={
-          <Button variant="outline" size="sm" onClick={refresh} disabled={book.isFetching}>
-            <RefreshCw className={cn(book.isFetching && "animate-spin")} aria-hidden="true" /> Refresh
-          </Button>
-        }
-      />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {compact ? <h2 className="text-lead font-semibold">Today's Kite orders</h2> : <span />}
+        <Button variant="outline" size="sm" onClick={refresh} disabled={book.isFetching}>
+          <RefreshCw className={cn(book.isFetching && "animate-spin")} aria-hidden="true" /> Refresh
+        </Button>
+      </div>
 
       <Card className={st?.halted ? "border-bearish/50 bg-bearish/5" : undefined}>
         <CardContent className="flex flex-wrap items-center gap-2 py-3 text-body-sm">
@@ -243,7 +254,7 @@ export function KiteOrders() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Resume live orders?</AlertDialogTitle>
-            <AlertDialogDescription>New real orders and modifications will be accepted again from Paper Trading (Live mode), 1Cliq and this page.</AlertDialogDescription>
+            <AlertDialogDescription>New real orders and modifications will be accepted again from Live Trading, 1Cliq and this page.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Keep halted</AlertDialogCancel>

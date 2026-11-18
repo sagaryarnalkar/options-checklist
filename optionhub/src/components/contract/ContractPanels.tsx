@@ -1,11 +1,12 @@
 /** Contract page controls and side panels: contract switcher, trade actions, depth and contract facts. */
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ChevronLeft, ChevronRight, Layers, ListPlus, ScrollText, Wallet } from "lucide-react";
+import { ChevronLeft, ChevronRight, Layers, ListPlus, Radio, ScrollText, Wallet } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { encodeLegs } from "@/components/option-chain/basket";
+import { kiteOrdersAvailable } from "@/lib/kiteOrders";
 import type { ExpiryDate } from "@/lib/mockData";
 import type { OptionLegDataExt } from "@/lib/types/market";
 import {
@@ -48,6 +49,13 @@ export function ContractActions({ k, leg }: { k: ContractKey; leg: OptionLegData
           <Wallet aria-hidden="true" /> Paper trade
         </Link>
       </Button>
+      {kiteOrdersAvailable() ? (
+        <Button asChild variant="outline" className="border-bearish/50 text-bearish hover:text-bearish">
+          <Link to={`/trade?legs=${legs}`} title="Stage on the Live Trading page: a real Zerodha order, sent only after you confirm there">
+            <Radio aria-hidden="true" /> Trade live
+          </Link>
+        </Button>
+      ) : null}
     </>
   );
 }

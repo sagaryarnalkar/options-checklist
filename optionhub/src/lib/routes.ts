@@ -117,6 +117,31 @@ const DESK_ROUTES: RouteDef[] = DESK_URL
     }))
   : [];
 
+/** options-checklist: real Zerodha orders exist only in our build (VITE_DASHBOARD_KITE=1, lib/kiteOrders.ts). Read
+ *  guarded like lib/desk.ts: vite.config.ts imports this file in Node, where import.meta.env does not exist. */
+const DASHBOARD_KITE_ROUTES = (() => {
+  try {
+    return import.meta.env?.VITE_DASHBOARD_KITE === "1";
+  } catch {
+    return false;
+  }
+})();
+const LIVE_TRADING_ROUTES: RouteDef[] = DASHBOARD_KITE_ROUTES
+  ? [
+      {
+        path: "/trade",
+        title: "Live Trading",
+        navLabel: "Live Trading",
+        group: "Trade",
+        icon: "Radio",
+        keywords: ["live", "trade", "real orders", "zerodha", "kite", "buy", "sell", "order ticket", "basket", "place order"],
+        description: "Real Zerodha orders through the dashboard's Kite login: order ticket and baskets from the Strategy Builder, Optimizer and option chain, after a confirmation.",
+        page: "LiveTrading",
+        lazy: pageLoader("LiveTrading"),
+      },
+    ]
+  : [];
+
 export const ROUTES: RouteDef[] = [
   ...DESK_ROUTES,
   // ── Markets ─────────────────────────────────────────────────────────────
@@ -359,6 +384,7 @@ export const ROUTES: RouteDef[] = [
   },
 
   // ── Trade (1Cliq execution; real orders need Live Trading on in Broker settings) ──
+  ...LIVE_TRADING_ROUTES,
   {
     path: "/one-cliq",
     title: "1Cliq Trade",
@@ -378,9 +404,11 @@ export const ROUTES: RouteDef[] = [
     navLabel: "Orders",
     group: "Trade",
     icon: "ListOrdered",
-    keywords: ["orders", "order book", "orderbook", "pending", "cancel", "dhan", "live orders"],
+    keywords: ["orders", "order book", "orderbook", "pending", "cancel", "dhan", "zerodha", "kite", "live orders", "halt"],
     badge: "Beta",
-    description: "Today's real Dhan order book, with cancel for resting orders.",
+    description: DASHBOARD_KITE_ROUTES
+      ? "Today's Zerodha order book from the dashboard's Kite login: cancel, modify, halt all live orders."
+      : "Today's real Dhan order book, with cancel for resting orders.",
     page: "Orders",
     lazy: pageLoader("Orders"),
   },

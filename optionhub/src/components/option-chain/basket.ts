@@ -6,6 +6,7 @@
  *  - "Open in Strategy Builder" navigates to /strategy-builder?legs=<base64url(JSON.stringify(BasketLeg[]))>
  *    (replaces the builder's legs); "Add to current strategy" appends &mode=append.
  *  - "Paper trade" navigates to /paper-trading?legs=<same encoding>.
+ *  - options-checklist: "Trade live" navigates to /trade?legs=<same encoding> (real Zerodha orders, our build only).
  *  - `premium` is rupees per unit (mid when a two-sided quote exists, else LTP).
  *  - `iv` is a DECIMAL (0.142 = 14.2%), matching Leg.iv in "@/lib/options"; null when unknown.
  */
@@ -16,6 +17,8 @@ import { nearestStrike } from "./chainModel";
 export const BASKET_KEY = "mc_basket_v1";
 export const STRATEGY_BUILDER_PATH = "/strategy-builder";
 export const PAPER_TRADING_PATH = "/paper-trading";
+/** options-checklist: the Live Trading page (real Zerodha orders through the dashboard). */
+export const LIVE_TRADING_PATH = "/trade";
 /** Last hand-off from the basket: { at, target, count, symbols }. */
 export const BASKET_SENT_KEY = "mc_basket_sent_v1";
 
@@ -125,6 +128,11 @@ export function paperTradingUrl(legs: BasketLeg[]): string {
   return `${PAPER_TRADING_PATH}?legs=${encodeLegs(legs)}`;
 }
 
+/** options-checklist: the same legs staged on the Live Trading page (nothing is sent until you confirm there). */
+export function liveTradingUrl(legs: BasketLeg[]): string {
+  return `${LIVE_TRADING_PATH}?legs=${encodeLegs(legs)}`;
+}
+
 export interface BasketGroup {
   symbol: string;
   /** Legs with their index in the full basket (for edits). */
@@ -155,7 +163,7 @@ export function removeLegs(basket: BasketLeg[], legs: BasketLeg[]): BasketLeg[] 
   return basket.filter((b) => !legs.some((l) => sameLeg(l, b)));
 }
 
-export type SendTarget = "builder" | "append" | "paper";
+export type SendTarget = "builder" | "append" | "paper" | "live";
 
 export interface BasketSent {
   at: number;
@@ -179,7 +187,7 @@ export function readBasketSent(): BasketSent | null {
     const raw = localStorage.getItem(BASKET_SENT_KEY);
     if (!raw) return null;
     const p = JSON.parse(raw) as Partial<BasketSent>;
-    if (!p || !isNum(p.at) || !isNum(p.count) || (p.target !== "builder" && p.target !== "append" && p.target !== "paper") || !Array.isArray(p.symbols)) return null;
+    if (!p || !isNum(p.at) || !isNum(p.count) || (p.target !== "builder" && p.target !== "append" && p.target !== "paper" && p.target !== "live") || !Array.isArray(p.symbols)) return null;
     return { at: p.at, target: p.target, count: p.count, symbols: p.symbols.filter((x): x is string => typeof x === "string") };
   } catch {
     return null;
@@ -189,6 +197,7 @@ export function readBasketSent(): BasketSent | null {
 /** Where a send target navigates. */
 export function sendUrl(target: SendTarget, legs: BasketLeg[]): string {
   if (target === "paper") return paperTradingUrl(legs);
+  if (target === "live") return liveTradingUrl(legs);
   return strategyBuilderUrl(legs, target === "append" ? "append" : "replace");
 }
 

@@ -18,6 +18,8 @@ export interface ResultActions {
   onOpen: (c: RankedCandidate) => void;
   onAddToBasket: (c: RankedCandidate) => void;
   onPaperTrade: (c: RankedCandidate) => void;
+  /** options-checklist: stage on the Live Trading page (real Zerodha orders). Absent outside our build. */
+  onLiveTrade?: (c: RankedCandidate) => void;
 }
 
 /** Badge variant for a payoff tone. */

@@ -47,7 +47,7 @@ export function LiveTradingToggle() {
     if (alreadyAcknowledged) {
       setLiveTradingEnabled(true);
       setEnabled(true);
-      toast.warning(KITE ? "Live Trading enabled: Paper Trading (Live mode), 1Cliq and the Orders page can now send real Zerodha orders after confirming." : "Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
+      toast.warning(KITE ? "Live Trading enabled: the Live Trading page, 1Cliq and the Orders page can now send real Zerodha orders after confirming." : "Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
       return;
     }
     setShowAck(true);
@@ -59,7 +59,7 @@ export function LiveTradingToggle() {
     setEnabled(true);
     setShowAck(false);
     setAckChecked(false);
-    toast.warning(KITE ? "Live Trading enabled: Paper Trading (Live mode), 1Cliq and the Orders page can now send real Zerodha orders after confirming." : "Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
+    toast.warning(KITE ? "Live Trading enabled: the Live Trading page, 1Cliq and the Orders page can now send real Zerodha orders after confirming." : "Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
   };
 
   return (
@@ -73,7 +73,7 @@ export function LiveTradingToggle() {
           </p>
           {KITE ? (
             <p className="text-muted-foreground text-body-sm mt-0.5">
-              Off by default. Turning it on lets Paper Trading in <strong>Live · Zerodha</strong> mode, an armed 1Cliq Trade and the Orders page send <strong>real orders
+              Off by default. Turning it on lets the <strong>Live Trading</strong> page, an armed 1Cliq Trade and the Orders page send <strong>real orders
               with real money</strong> to your Zerodha account through the dashboard's Kite login. Every order is checked again by the dashboard (NIFTY/BANKNIFTY only, at
               most 25 lots, a price band around the last price) and Kite takes orders only from the dashboard server's registered static IP.
             </p>
