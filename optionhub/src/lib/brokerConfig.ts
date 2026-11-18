@@ -642,7 +642,12 @@ export function getBrokerInfo(brokerId: string): BrokerInfo | undefined {
 const LIVE_TRADING_KEY = "optionsdesk_live_trading_enabled";
 
 export function isLiveTradingEnabled(): boolean {
-  return readStorage("local", LIVE_TRADING_KEY) === "true";
+  const v = readStorage("local", LIVE_TRADING_KEY);
+  // options-checklist: in our build it is ON unless switched off (#125, owner: no turning it on per browser or
+  // after every deploy). The Live Trading page, the per-order real-money confirmation, 1Cliq arming and the
+  // dashboard's own rules and halt switch remain. Upstream builds keep the off-by-default rule.
+  if (DASHBOARD_KITE) return v !== "false";
+  return v === "true";
 }
 
 export function setLiveTradingEnabled(enabled: boolean): void {

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -105,5 +105,29 @@ describe("requestUnlock — pure eligibility check, no timer of its own", () => 
   it("treats a missing/non-finite coolingElapsedMs as zero elapsed, not as unlimited", () => {
     const result = requestUnlock(LOCK_STATES.LOCKED_BY_MTM_LOSS, "100", 100, undefined);
     expect(result.ok).toBe(false);
+  });
+});
+
+// options-checklist: the dashboard sets TRADING_LOCK_FILE so the lock survives terminal rebuilds.
+describe("TRADING_LOCK_FILE", () => {
+  it("puts the lock where the env says, so a new build reads the same state", async () => {
+    const d = mkdtempSync(join(tmpdir(), "tradinglock-env-"));
+    const file = join(d, "persist", "trading-lock.json");
+    const prev = process.env.TRADING_LOCK_FILE;
+    process.env.TRADING_LOCK_FILE = file;
+    try {
+      vi.resetModules();
+      const first = await import("./tradingLockState.mjs");
+      expect(first.getLockState().state).toBe(first.LOCK_STATES.LOCKED_BY_ENGINE_FAULT); // nothing there yet
+      first.setLockState(first.LOCK_STATES.UNLOCKED);
+      vi.resetModules();
+      const rebuilt = await import("./tradingLockState.mjs"); // a fresh module = a new build's process
+      expect(rebuilt.getLockState().state).toBe(rebuilt.LOCK_STATES.UNLOCKED);
+    } finally {
+      if (prev === undefined) delete process.env.TRADING_LOCK_FILE;
+      else process.env.TRADING_LOCK_FILE = prev;
+      vi.resetModules();
+      rmSync(d, { recursive: true, force: true });
+    }
   });
 });

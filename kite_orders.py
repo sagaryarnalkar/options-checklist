@@ -15,8 +15,9 @@ WHO CAN CALL (app.py `_hub_orders_auth`)
     cookie lock.
 
 THE RULES (owner's choices, 2026-11-18)
-  * KITE_ORDERS=on in .env, and the halt switch (DATA_DIR/.kite_orders_halt) off. Halt blocks
-    new orders and modifications; cancelling is always allowed (it only reduces risk).
+  * ON by default since the static IP was registered (#125, owner: no switching on after every deploy).
+    KITE_ORDERS=off in .env turns the whole path off; the halt switch (DATA_DIR/.kite_orders_halt,
+    the Orders page button) stops new orders and modifications at once. Cancelling always works.
   * NFO only: NIFTY and BANKNIFTY options and futures, today's expiry or later.
   * Quantity = lots × lot_size from Kite's own instrument dump, never from the client.
     1 ≤ lots ≤ 25 per order.
@@ -96,7 +97,8 @@ def halt_file():
 
 
 def enabled() -> bool:
-    return os.environ.get("KITE_ORDERS", "").strip().lower() in ("on", "1", "true", "yes")
+    """On unless .env says otherwise (KITE_ORDERS=off / 0 / false / no)."""
+    return os.environ.get("KITE_ORDERS", "on").strip().lower() not in ("off", "0", "false", "no")
 
 
 def halted() -> bool:
@@ -382,7 +384,7 @@ def recent(limit: int = 50) -> list:
 def _require_on(for_cancel: bool = False) -> None:
     if not enabled():
         raise OrderRefused("ORDERS_OFF", "Live orders are switched off on the server "
-                                         "(KITE_ORDERS is not 'on' in .env).", 403)
+                                         "(KITE_ORDERS=off in the dashboard's .env).", 403)
     if halted() and not for_cancel:
         raise OrderRefused("HALTED", "Live orders are HALTED (the halt switch on the Orders page). "
                                      "Cancelling still works.", 403)

@@ -394,6 +394,9 @@ def serve_env(url: str, build: Path, node_bin: str, token: str) -> dict:
         "HUB_FRAME_ANCESTORS": _frame_ancestors(url),
         "HUB_FEED_URL": os.environ.get("OPTION_HUB_FEED_URL", "http://127.0.0.1:8000"),
         "HUB_FEED_TOKEN": token,
+        # 1Cliq's trading lock (server/lib/tradingLockState.mjs) lives beside the builds, not inside one: a
+        # rebuild used to start every time as "engine fault: lock file missing" (#125).
+        "TRADING_LOCK_FILE": str(_home() / "trading-lock.json"),
         "NODE_ENV": "production",
         "NODE_OPTIONS": "--max-old-space-size=384",
     })

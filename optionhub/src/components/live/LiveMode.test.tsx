@@ -102,7 +102,23 @@ describe("Live Trading page", () => {
     expect(ROUTES.find((r) => r.path === "/trade")).toMatchObject({ navLabel: "Live Trading", group: "Trade" });
   });
 
-  it("the ticket opens the confirmation; nothing is sent until Live Trading is on and the real-money box is ticked", async () => {
+  it("Live trading is on by default in our build, and switching it off sticks", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_DASHBOARD_KITE", "1");
+    const cfg = await import("@/lib/brokerConfig");
+    expect(cfg.isLiveTradingEnabled()).toBe(true);
+    cfg.setLiveTradingEnabled(false);
+    expect(cfg.isLiveTradingEnabled()).toBe(false);
+    cfg.setLiveTradingEnabled(true);
+    expect(cfg.isLiveTradingEnabled()).toBe(true);
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    localStorage.clear();
+    expect((await import("@/lib/brokerConfig")).isLiveTradingEnabled()).toBe(false); // upstream: off by default
+  });
+
+  it("the ticket opens the confirmation; nothing is sent while Live trading is switched off or the real-money box is unticked", async () => {
+    localStorage.setItem("optionsdesk_live_trading_enabled", "false"); // the owner switched it off
     const Page = await loadPage();
     renderPage(<Page />, "/trade");
     expect(screen.getByRole("heading", { level: 1, name: /Live Trading/ })).toBeInTheDocument();
@@ -118,8 +134,8 @@ describe("Live Trading page", () => {
     fireEvent.click(within(dialog).getByRole("checkbox"));
     expect(send).toBeDisabled(); // still off: Live Trading not enabled
     expect(sent.filter((s) => s.op === "place")).toHaveLength(0);
-    // Turning Live Trading on (Broker settings) and reopening:
-    localStorage.setItem("optionsdesk_live_trading_enabled", "true");
+    // Switching it back on (Broker settings) and reopening:
+    localStorage.removeItem("optionsdesk_live_trading_enabled");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     fireEvent.click(buy);
     const dialog2 = await screen.findByRole("dialog");
@@ -147,8 +163,7 @@ describe("Live Trading page", () => {
       { symbol: "NIFTY", expiry, strike: 25000, type: "CE", side: "SELL", lots: 2, premium: 100, iv: null },
       { symbol: "NIFTY", expiry, strike: 25500, type: "CE", side: "BUY", lots: 2, premium: 40, iv: null },
     ]);
-    localStorage.setItem("optionsdesk_live_trading_enabled", "true");
-    const Page = await loadPage();
+    const Page = await loadPage(); // Live trading on by default: nothing to switch on
     renderPage(<Page />, `/trade?legs=${enc}`);
     fireEvent.click(await screen.findByRole("button", { name: /Place on Zerodha/ }));
     const dialog = await screen.findByRole("dialog");

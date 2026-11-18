@@ -73,7 +73,7 @@ export function LiveTradingToggle() {
           </p>
           {KITE ? (
             <p className="text-muted-foreground text-body-sm mt-0.5">
-              Off by default. Turning it on lets the <strong>Live Trading</strong> page, an armed 1Cliq Trade and the Orders page send <strong>real orders
+              On by default in this terminal (switching it off here sticks). It lets the <strong>Live Trading</strong> page, an armed 1Cliq Trade and the Orders page send <strong>real orders
               with real money</strong> to your Zerodha account through the dashboard's Kite login. Every order is checked again by the dashboard (NIFTY/BANKNIFTY only, at
               most 25 lots, a price band around the last price) and Kite takes orders only from the dashboard server's registered static IP.
             </p>

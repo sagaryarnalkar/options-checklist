@@ -37,11 +37,14 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_LOCK_FILE = resolve(__dirname, "../../.cache/trading-lock.json");
+// options-checklist: TRADING_LOCK_FILE (set by the dashboard's option_hub.py) keeps the lock OUTSIDE the build
+// directory, so a rebuild does not reset it to "lock file missing". Unset = upstream's path.
+const CONFIGURED_LOCK_FILE = process.env.TRADING_LOCK_FILE ? resolve(process.env.TRADING_LOCK_FILE) : DEFAULT_LOCK_FILE;
 
 // The one piece of module-level mutable state: which file reads/writes
 // target. Tests redirect this to a scratch file so they never touch (or need
 // to clean up) the real .cache/trading-lock.json.
-let lockFilePath = DEFAULT_LOCK_FILE;
+let lockFilePath = CONFIGURED_LOCK_FILE;
 
 /** Test seam — redirect all reads/writes to a throwaway file. */
 export function setLockFilePathForTests(path) {
@@ -50,7 +53,7 @@ export function setLockFilePathForTests(path) {
 
 /** Test seam — restore the real .cache/trading-lock.json path. */
 export function resetLockFilePathForTests() {
-  lockFilePath = DEFAULT_LOCK_FILE;
+  lockFilePath = CONFIGURED_LOCK_FILE;
 }
 
 export const LOCK_STATES = Object.freeze({
