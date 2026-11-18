@@ -43,6 +43,7 @@ export function OrderTicket({
   guard,
   wouldBeNaked,
   onPlace,
+  live = false,
 }: {
   symbol: string;
   onSymbol: (s: string) => void;
@@ -61,6 +62,9 @@ export function OrderTicket({
   /** True when selling this contract would open or add to a naked short. */
   wouldBeNaked: (input: TicketOrder) => boolean;
   onPlace: (input: TicketOrder, quote: Quote | null, maxLoss: number | null) => boolean;
+  /** options-checklist: Live (Zerodha) mode. The buttons open the real-order confirmation; the paper-only
+   *  controls (stop/target, max loss, paper guardrails, beginner naked-sell hiding) step aside. */
+  live?: boolean;
 }) {
   const uid = useId();
   const expiries = useMemo(() => getExpiries(symbol, new Date(), 8), [symbol]);
@@ -120,7 +124,7 @@ export function OrderTicket({
   };
   const estBuy = estimate("BUY");
   const estSell = estimate("SELL");
-  const sellHidden = beginnerMode && Number.isFinite(activeStrike) && lots > 0 && wouldBeNaked(orderFor("SELL"));
+  const sellHidden = !live && beginnerMode && Number.isFinite(activeStrike) && lots > 0 && wouldBeNaked(orderFor("SELL"));
   const suggested = estBuy && !estBuy.guard.risk.unlimited ? Math.ceil(estBuy.guard.risk.loss) : null;
 
   const err = !lotSize
@@ -131,11 +135,11 @@ export function OrderTicket({
         ? "Pick a strike."
         : orderType === "LIMIT" && !(limit > 0)
           ? "Enter a limit price."
-          : orderType === "MARKET" && !quote
+          : orderType === "MARKET" && !quote && !live
             ? "No quote for this strike."
-            : orderType === "MARKET" && blockedSample
+            : orderType === "MARKET" && blockedSample && !live
               ? "Only sample quotes. Turn on sample fills in settings."
-              : (sl !== undefined && !(sl > 0)) || (target !== undefined && !(target > 0))
+              : !live && ((sl !== undefined && !(sl > 0)) || (target !== undefined && !(target > 0)))
                 ? "SL and target must be premium prices above zero."
                 : null;
 
@@ -302,6 +306,7 @@ export function OrderTicket({
             <Input id={`${uid}-limit`} type="number" inputMode="decimal" min={0.05} step="0.05" value={limitText} onChange={(e) => setLimitText(e.target.value)} placeholder={mid > 0 ? `Mid ${mid.toFixed(2)}` : undefined} />
           </div>
         ) : null}
+        {live ? null : (<>
         <div className="grid gap-1.5">
           <Label htmlFor={`${uid}-sl`}>Stop-loss (₹, optional)</Label>
           <Input id={`${uid}-sl`} type="number" inputMode="decimal" min={0.05} step="0.05" value={slText} onChange={(e) => setSlText(e.target.value)} />
@@ -310,8 +315,13 @@ export function OrderTicket({
           <Label htmlFor={`${uid}-tg`}>Target (₹, optional)</Label>
           <Input id={`${uid}-tg`} type="number" inputMode="decimal" min={0.05} step="0.05" value={tgText} onChange={(e) => setTgText(e.target.value)} />
         </div>
+        </>)}
       </div>
-      <p className="text-body-sm text-muted-foreground">SL and target are premium levels for this contract, checked on every quote update. For a short, the stop sits above the entry.</p>
+      {live ? (
+        <p className="text-body-sm text-muted-foreground">The button opens a confirmation with Kite's own contract, quantity, last price and margin. You can switch to a stop-loss order there. Nothing is sent until you confirm.</p>
+      ) : (
+        <p className="text-body-sm text-muted-foreground">SL and target are premium levels for this contract, checked on every quote update. For a short, the stop sits above the entry.</p>
+      )}
 
       {isSample ? (
         <p className="flex items-start gap-1.5 rounded-tile border border-warning/30 bg-wash-warning/60 px-3 py-2 text-body-sm text-warning">
@@ -320,6 +330,7 @@ export function OrderTicket({
         </p>
       ) : null}
 
+      {live ? null : (
       <div className="space-y-1.5 rounded-tile border border-separator p-3">
         <Label htmlFor={`${uid}-maxloss`} className="flex items-center gap-1.5">
           <ShieldAlert className="h-4 w-4 text-primary-ink" aria-hidden="true" />
@@ -355,12 +366,13 @@ export function OrderTicket({
           )}
         </p>
       </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         {(["BUY", "SELL"] as const).map((side) => {
           const est = side === "BUY" ? estBuy : estSell;
           const hidden = side === "SELL" && sellHidden;
-          const blocked = !!est && !est.guard.ok;
+          const blocked = !live && !!est && !est.guard.ok;
           return (
             <div key={side} className="min-w-0 space-y-1.5">
               {hidden ? (
@@ -374,7 +386,7 @@ export function OrderTicket({
                   disabled={!!err || blocked}
                   onClick={() => submit(side)}
                 >
-                  {side === "BUY" ? "Buy" : "Sell"} {orderType === "LIMIT" ? "limit" : "at market"}
+                  {side === "BUY" ? "Buy" : "Sell"} {live ? "on Zerodha…" : orderType === "LIMIT" ? "limit" : "at market"}
                 </Button>
               )}
               <div className="text-center text-body-sm text-muted-foreground" aria-live="polite">
@@ -413,6 +425,7 @@ export function OrderTicket({
         })}
       </div>
       {(() => {
+        if (live) return null;
         const buyR = estBuy?.guard.blockers ?? [];
         const sellR = !sellHidden ? estSell?.guard.blockers ?? [] : [];
         const reasons = [...new Set([...buyR, ...sellR])].map((r) => (buyR.includes(r) && sellR.includes(r) ? r : buyR.includes(r) ? `Buy: ${r}` : `Sell: ${r}`));
@@ -436,7 +449,9 @@ export function OrderTicket({
       })()}
       {err ? <p className="text-center text-body-sm text-muted-foreground">{err}</p> : null}
       <p className="text-body-sm text-muted-foreground">
-        Market fills at mid {slippagePct > 0 ? `± ${slippagePct}% slippage` : "(no slippage)"}, rounded to ₹0.05 against you.
+        {live
+          ? "Estimates above use the paper model. Kite fills at the market; a market order carries Kite's automatic price protection."
+          : <>Market fills at mid {slippagePct > 0 ? `± ${slippagePct}% slippage` : "(no slippage)"}, rounded to ₹0.05 against you.</>}
       </p>
     </div>
   );

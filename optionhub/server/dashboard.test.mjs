@@ -140,3 +140,77 @@ describe("without the dashboard (upstream behaviour)", () => {
     }
   });
 });
+
+describe("dashboard orders (real Zerodha orders via kite_orders.py)", () => {
+  beforeEach(() => {
+    process.env.HUB_FEED_URL = FEED;
+    process.env.HUB_FEED_TOKEN = TOKEN;
+  });
+  afterEach(() => {
+    delete process.env.HUB_FEED_URL;
+    delete process.env.HUB_FEED_TOKEN;
+    vi.resetModules();
+  });
+
+  const jsonResponse = (status, body) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+  it("forwards a place to /hub/orders/place with the feed token and the JSON body, answer unchanged", async () => {
+    const { dashboard } = await dashboardModules();
+    const calls = [];
+    const doFetch = async (url, init) => {
+      calls.push({ url, init });
+      return jsonResponse(200, { ok: true, order_id: "251118000001", quantity: 130 });
+    };
+    const body = { intent: "tk1abc234", source: "ticket", leg: { underlying: "NIFTY", side: "BUY", lots: 2 } };
+    const out = await dashboard.dashboardOrders("place", "POST", new URLSearchParams(), body, doFetch);
+    expect(out).toEqual({ status: 200, body: { ok: true, order_id: "251118000001", quantity: 130 } });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(`${FEED}/hub/orders/place`);
+    expect(calls[0].init.method).toBe("POST");
+    expect(calls[0].init.headers["X-Hub-Feed"]).toBe(TOKEN);
+    expect(JSON.parse(calls[0].init.body)).toEqual(body);
+  });
+
+  it("passes the dashboard's refusals through with their status and code", async () => {
+    const { dashboard } = await dashboardModules();
+    const doFetch = async () => jsonResponse(422, { ok: false, code: "TOO_MANY_LOTS", message: "26 lots is over the 25-lot limit per order." });
+    const out = await dashboard.dashboardOrders("place", "POST", null, {}, doFetch);
+    expect(out.status).toBe(422);
+    expect(out.body).toMatchObject({ ok: false, code: "TOO_MANY_LOTS" });
+  });
+
+  it("maps FastAPI's own refusals ({detail}) onto { ok:false }", async () => {
+    const { dashboard } = await dashboardModules();
+    const out = await dashboard.dashboardOrders("status", "GET", new URLSearchParams(), null, async () => jsonResponse(401, { detail: "hub feed token required" }));
+    expect(out).toEqual({ status: 401, body: { ok: false, code: "HTTP_401", message: "hub feed token required" } });
+  });
+
+  it("a send with no answer says the order MAY have gone through; a read just says unreachable", async () => {
+    const { dashboard } = await dashboardModules();
+    const boom = async () => {
+      throw new Error("The operation was aborted due to timeout");
+    };
+    const place = await dashboard.dashboardOrders("place", "POST", null, {}, boom);
+    expect(place.status).toBe(504);
+    expect(place.body.message).toMatch(/MAY have gone through/);
+    const book = await dashboard.dashboardOrders("book", "GET", new URLSearchParams(), null, boom);
+    expect(book.body.message).toMatch(/unreachable/);
+    expect(book.body.message).not.toMatch(/MAY/);
+  });
+
+  it("refuses unknown ops and wrong methods without a network call; only whitelisted query keys travel", async () => {
+    const { dashboard } = await dashboardModules();
+    const calls = [];
+    const doFetch = async (url) => {
+      calls.push(url);
+      return jsonResponse(200, { ok: true });
+    };
+    expect((await dashboard.dashboardOrders("delete-everything", "POST", null, {}, doFetch)).status).toBe(404);
+    expect((await dashboard.dashboardOrders("place", "GET", null, null, doFetch)).status).toBe(405);
+    expect((await dashboard.dashboardOrders("book", "POST", null, {}, doFetch)).status).toBe(405);
+    expect(calls).toHaveLength(0);
+    await dashboard.dashboardOrders("order", "GET", new URLSearchParams({ order_id: "251118000001", evil: "1" }), null, doFetch);
+    expect(calls[0]).toBe(`${FEED}/hub/orders/order?order_id=251118000001`);
+    expect([...dashboard.ORDER_POST_OPS].sort()).toEqual(["cancel", "halt", "modify", "place", "preview"]);
+  });
+});

@@ -770,6 +770,114 @@ def hub_feed_nse(path: str, x_hub_feed: Optional[str] = Header(default=None)):
     return _hub_feed_call(go)
 
 
+# Real Zerodha orders from the HeroZero terminal (kite_orders.py). Callable ONLY by the terminal's
+# proxy on this machine: the hub feed token AND a direct loopback connection. Caddy always adds
+# X-Forwarded-For, so nothing arriving through the public site can reach these, token or not.
+
+_FORWARD_HEADERS = ("x-forwarded-for", "x-real-ip", "forwarded", "x-forwarded-host")
+
+
+def _hub_orders_auth(request: Request, x_hub_feed: Optional[str]) -> None:
+    _hub_feed_auth(x_hub_feed)
+    host = (request.client.host if request.client else "") or ""
+    direct = host in ("127.0.0.1", "::1") or host.startswith("::ffff:127.")
+    if not direct or any(h in request.headers for h in _FORWARD_HEADERS):
+        raise HTTPException(status_code=403, detail="order routes answer only the terminal's local proxy")
+
+
+def _orders_call(fn):
+    import kite_orders as _ko
+    try:
+        return JSONResponse(fn())
+    except _ko.OrderRefused as e:
+        return JSONResponse({"ok": False, "code": e.code, "message": e.message}, status_code=e.status)
+
+
+async def _orders_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON body required")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="JSON object required")
+    return body
+
+
+@app.get("/hub/orders/status")
+def hub_orders_status(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    import kite_orders as _ko
+    return _orders_call(_ko.status)
+
+
+@app.get("/hub/orders/book")
+def hub_orders_book(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    import kite_orders as _ko
+    return _orders_call(_ko.book)
+
+
+@app.get("/hub/orders/order")
+def hub_orders_order(request: Request, order_id: str, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    import kite_orders as _ko
+    return _orders_call(lambda: _ko.order_state(order_id))
+
+
+@app.get("/hub/orders/log")
+def hub_orders_log(request: Request, limit: int = 50, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    import kite_orders as _ko
+    return _orders_call(lambda: {"ok": True, "rows": _ko.recent(max(1, min(limit, 500)))})
+
+
+@app.post("/hub/orders/preview")
+async def hub_orders_preview(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    body = await _orders_body(request)
+    import kite_orders as _ko
+    return await asyncio.to_thread(_orders_call, lambda: _ko.preview(body.get("legs")))
+
+
+@app.post("/hub/orders/place")
+async def hub_orders_place(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    body = await _orders_body(request)
+    import kite_orders as _ko
+    return await asyncio.to_thread(
+        _orders_call, lambda: _ko.place(body.get("intent"), str(body.get("source") or ""), body.get("leg")))
+
+
+@app.post("/hub/orders/modify")
+async def hub_orders_modify(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    body = await _orders_body(request)
+    import kite_orders as _ko
+    changes = {k: body[k] for k in ("order_type", "price", "trigger_price", "lots") if k in body}
+    return await asyncio.to_thread(
+        _orders_call, lambda: _ko.modify(body.get("intent"), str(body.get("order_id") or ""), changes))
+
+
+@app.post("/hub/orders/cancel")
+async def hub_orders_cancel(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    body = await _orders_body(request)
+    import kite_orders as _ko
+    return await asyncio.to_thread(
+        _orders_call, lambda: _ko.cancel(body.get("intent"), str(body.get("order_id") or "")))
+
+
+@app.post("/hub/orders/halt")
+async def hub_orders_halt(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    _hub_orders_auth(request, x_hub_feed)
+    body = await _orders_body(request)
+    import kite_orders as _ko
+    on = body.get("halted")
+    if not isinstance(on, bool):
+        raise HTTPException(status_code=400, detail="halted must be true or false")
+    return _orders_call(lambda: {"ok": True, "halted": _ko.set_halt(on)})
+
+
 @app.post("/hub/runtime/build")
 def hub_runtime_build(force: bool = False, x_app_key: Optional[str] = Header(default=None)):
     """'Build now' in the tab: retry a failed build at once; force=true also ignores the

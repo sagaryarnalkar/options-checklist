@@ -464,6 +464,21 @@ CREATE TABLE IF NOT EXISTS paper_marks (
     note       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_paper_marks_trade ON paper_marks(trade_id, ts);
+
+-- Every real-order attempt from the HeroZero terminal (kite_orders.py), refused ones too.
+-- (action, intent) is UNIQUE: the client's intent id is the idempotency key and the Kite tag.
+CREATE TABLE IF NOT EXISTS kite_order_log (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT    NOT NULL,
+    action       TEXT    NOT NULL,          -- place | modify | cancel | halt
+    intent       TEXT,
+    source       TEXT,                      -- ticket | basket | oneclick | orders
+    request_json TEXT,
+    outcome      TEXT    NOT NULL,          -- sending | sent | refused | error
+    order_id     TEXT,
+    message      TEXT,
+    UNIQUE(action, intent)
+);
 """
 
 

@@ -4,7 +4,10 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { AlertTriangle, Radio } from "lucide-react";
-import { isLiveTradingEnabled, setLiveTradingEnabled } from "@/lib/brokerConfig";
+import { isDashboardKiteBuild, isLiveTradingEnabled, setLiveTradingEnabled } from "@/lib/brokerConfig";
+
+// options-checklist: in our build live orders go to Zerodha through the dashboard's Kite login (lib/kiteOrders).
+const KITE = isDashboardKiteBuild();
 import { toast } from "sonner";
 
 const ACK_KEY = "optionsdesk_live_trading_ack";
@@ -44,7 +47,7 @@ export function LiveTradingToggle() {
     if (alreadyAcknowledged) {
       setLiveTradingEnabled(true);
       setEnabled(true);
-      toast.warning("Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
+      toast.warning(KITE ? "Live Trading enabled: Paper Trading (Live mode), 1Cliq and the Orders page can now send real Zerodha orders after confirming." : "Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
       return;
     }
     setShowAck(true);
@@ -56,7 +59,7 @@ export function LiveTradingToggle() {
     setEnabled(true);
     setShowAck(false);
     setAckChecked(false);
-    toast.warning("Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
+    toast.warning(KITE ? "Live Trading enabled: Paper Trading (Live mode), 1Cliq and the Orders page can now send real Zerodha orders after confirming." : "Live Trading enabled: 1Cliq Trade can now place real orders once armed.");
   };
 
   return (
@@ -68,11 +71,19 @@ export function LiveTradingToggle() {
             <span id="live-trading-label">Live trading</span>
             {enabled && <span className="inline-flex items-center gap-1 text-body-sm text-bearish"><Radio className="h-3 w-3 animate-pulse" aria-hidden /> Active</span>}
           </p>
+          {KITE ? (
+            <p className="text-muted-foreground text-body-sm mt-0.5">
+              Off by default. Turning it on lets Paper Trading in <strong>Live · Zerodha</strong> mode, an armed 1Cliq Trade and the Orders page send <strong>real orders
+              with real money</strong> to your Zerodha account through the dashboard's Kite login. Every order is checked again by the dashboard (NIFTY/BANKNIFTY only, at
+              most 25 lots, a price band around the last price) and Kite takes orders only from the dashboard server's registered static IP.
+            </p>
+          ) : (
           <p className="text-muted-foreground text-body-sm mt-0.5">
             Off by default: 1Cliq Trade fills are paper only. Enabling this lets an armed 1Cliq Trade place <strong>real orders with real money</strong> through
             your saved Dhan account. Dhan's order APIs require your proxy's IP to be a static IP registered with Dhan, so most users running
             this locally on a home connection will have orders rejected until that is set up.
           </p>
+          )}
         </div>
         <Switch checked={enabled} onCheckedChange={handleToggle} aria-labelledby="live-trading-label" />
       </CardContent>
@@ -85,10 +96,10 @@ export function LiveTradingToggle() {
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-3 text-body text-foreground">
-                <p>This lets 1Cliq Trade, once armed, place <strong>real orders</strong> with your saved Dhan account instead of paper trades.</p>
+                <p>{KITE ? <>This lets the terminal send <strong>real orders</strong> to your Zerodha account through the dashboard, after a confirmation (or, in 1Cliq, once armed).</> : <>This lets 1Cliq Trade, once armed, place <strong>real orders</strong> with your saved Dhan account instead of paper trades.</>}</p>
                 <ul className="list-disc list-inside text-body-sm text-muted-foreground space-y-1">
                   <li>Real money — a mistake here is a real trade, not a simulation.</li>
-                  <li>Requires a static IP whitelisted with Dhan for order APIs. If your setup doesn't have one, orders will be rejected (Dhan's exact reason will be shown).</li>
+                  <li>{KITE ? "Kite accepts orders only from the static IP registered on your Kite Connect app. Otherwise Kite rejects them and shows its reason." : "Requires a static IP whitelisted with Dhan for order APIs. If your setup doesn't have one, orders will be rejected (Dhan's exact reason will be shown)."}</li>
                   <li>You can turn this off again at any time.</li>
                 </ul>
                 <label className="flex items-center gap-2 text-body-sm pt-1">

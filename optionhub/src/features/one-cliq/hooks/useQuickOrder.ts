@@ -14,7 +14,9 @@
 import { useCallback, useRef, useState } from "react";
 import { createPosition, addPosition } from "@/lib/positionStore";
 import { createRateLimiter, rateLimitMessage, isDenied } from "../lib/rateLimiter";
-import { simulateFill } from "../lib/fillModel";
+import { marketProtectionPrice, simulateFill } from "../lib/fillModel";
+import { armLive } from "@/lib/liveArm";
+import { KiteOrderError, kiteOrdersAvailable, kiteProductFor, newIntentId as newKiteIntentId, placeKiteOrder, waitForKiteOrder, type KiteLeg } from "@/lib/kiteOrders";
 import type {
   ExecMode, FillResult, LegQuote, OptionType, OrderIntent, Side, TerminalConfig, TerminalMessage,
 } from "../types";
@@ -34,9 +36,12 @@ export interface QuickOrderDeps {
   securityIdFor: (optionType: OptionType) => string | undefined;
   quoteFor: (optionType: OptionType) => LegQuote;
   onKeepAlive?: () => void;
+  /** options-checklist: why new entries are locked (tradingLockState), or null when unlocked. Live Zerodha
+   *  orders honour it — the banner says "New entries are blocked", so they must be. */
+  entryLocked?: string | null;
 }
 
-export function useQuickOrder({ config, mode, securityIdFor, quoteFor, onKeepAlive }: QuickOrderDeps) {
+export function useQuickOrder({ config, mode, securityIdFor, quoteFor, onKeepAlive, entryLocked = null }: QuickOrderDeps) {
   const [messages, setMessages] = useState<TerminalMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const limiterRef = useRef(createRateLimiter());
@@ -97,6 +102,48 @@ export function useQuickOrder({ config, mode, securityIdFor, quoteFor, onKeepAli
     onKeepAlive?.();
 
     try {
+      if (mode === "LIVE" && kiteOrdersAvailable()) {
+        // options-checklist: a REAL Zerodha order through the dashboard's Kite login. armLive(true) needs Live
+        // Trading on AND one-click armed; the dashboard re-checks every rule (contract, ≤ 25 lots, price band).
+        if (entryLocked) {
+          pushMessage("error", `Trading is locked (${entryLocked}). The order was NOT sent — unlock it in the banner first.`);
+          return null;
+        }
+        const arm = armLive(true);
+        if (!arm.token) {
+          pushMessage("error", arm.message ?? "Not armed — the order was NOT sent.");
+          return null;
+        }
+        const leg: KiteLeg = {
+          underlying: intent.symbol,
+          expiry: intent.expiry,
+          strike: intent.strike,
+          opt_type: intent.optionType,
+          side: intent.side,
+          lots: intent.lots,
+          product: kiteProductFor(config.productType),
+          ...(intent.variant === "MARKET"
+            ? { order_type: "MARKET" as const }
+            : intent.variant === "MARKET_PROTECT"
+              ? { order_type: "LIMIT" as const, price: marketProtectionPrice(intent.refPrice, intent.side, config.protectionPct) }
+              : { order_type: "LIMIT" as const, price: Number(intent.refPrice.toFixed(2)) }),
+        };
+        const label = `${intent.side} ${intent.lots}× ${intent.symbol} ${intent.strike} ${intent.optionType}`;
+        try {
+          const placed = await placeKiteOrder(leg, "oneclick", newKiteIntentId("oc"), arm.token);
+          pushMessage("warning", `LIVE ${label} sent to Kite as ${placed.order_id}${leg.price ? ` (limit ${leg.price.toFixed(2)})` : " (market)"}…`);
+          const order = await waitForKiteOrder(placed.order_id, { timeoutMs: 6000 });
+          const st = String(order?.status ?? "").toUpperCase();
+          if (st === "COMPLETE") pushMessage("success", `LIVE ${label} FILLED ${order?.filled_quantity ?? ""} @ ₹${(order?.average_price ?? 0).toFixed(2)} (${placed.order_id})`);
+          else if (st === "REJECTED" || st === "CANCELLED") pushMessage("error", `LIVE ${label} ${st}: ${order?.status_message || "no reason given"} (${placed.order_id})`);
+          else pushMessage("warning", `LIVE ${label} is ${order?.status ? order.status.toLowerCase() : "unconfirmed"} at your price (${placed.order_id}). See the Orders page.`);
+        } catch (e) {
+          const err = e instanceof KiteOrderError ? e : new KiteOrderError("ERROR", (e as Error).message, 0);
+          pushMessage(err.uncertain ? "warning" : "error", `LIVE ${label}: ${err.message}`);
+        }
+        return null;
+      }
+
       if (mode === "LIVE") {
         // Phase 1 is paper-only by design. Saying so plainly beats quietly
         // routing a live keypress into a paper fill, which would be a lie about
@@ -145,7 +192,7 @@ export function useQuickOrder({ config, mode, securityIdFor, quoteFor, onKeepAli
       inFlightRef.current = false;
       setBusy(false);
     }
-  }, [buildIntent, mode, onKeepAlive, pushMessage]);
+  }, [buildIntent, config.productType, config.protectionPct, entryLocked, mode, onKeepAlive, pushMessage]);
 
   const clearMessages = useCallback(() => setMessages([]), []);
 
