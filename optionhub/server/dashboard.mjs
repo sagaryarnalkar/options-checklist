@@ -225,3 +225,58 @@ export async function dashboardOrders(op, method, params, body, doFetch = fetch)
   }
   return { status: r.status, body: j };
 }
+
+// ── Live positions + Ask Claude for the Strategy Builder (#126) ──
+
+/** The dashboard's live Kite book (positions.py, no margins) for "Live positions". { status, body }. */
+export async function dashboardPositions(doFetch = fetch) {
+  try {
+    const r = await doFetch(`${FEED_URL}/hub/positions`, { headers: { ...feedHeaders(), Accept: "application/json" }, signal: AbortSignal.timeout(30_000) });
+    const j = await r.json().catch(() => null);
+    if (!j || typeof j !== "object") return { status: 502, body: { ok: false, reason: `The dashboard answered HTTP ${r.status} without JSON.` } };
+    if (j.ok === undefined) return { status: r.status, body: { ok: false, reason: typeof j.detail === "string" ? j.detail : `HTTP ${r.status}` } };
+    return { status: r.status, body: j };
+  } catch (e) {
+    return { status: 504, body: { ok: false, reason: `Dashboard unreachable: ${String(e?.message || e).slice(0, 120)}` } };
+  }
+}
+
+/**
+ * Stream the dashboard's Ask Claude answer (server-sent events: meta, status, text, done | error) straight
+ * through to the browser. The upstream call is cancelled when the browser goes away.
+ */
+export async function dashboardAssistantStream(res, body, doFetch = fetch) {
+  const ctrl = new AbortController();
+  let finished = false;
+  res.on("close", () => {
+    if (!finished) ctrl.abort();
+  });
+  const fail = (status, message) => {
+    finished = true;
+    if (!res.headersSent) res.writeHead(status, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ ok: false, message }));
+  };
+  let r;
+  try {
+    r = await doFetch(`${FEED_URL}/hub/assistant/chat`, {
+      method: "POST",
+      headers: { ...feedHeaders(), "Content-Type": "application/json", Accept: "text/event-stream" },
+      body: JSON.stringify(body ?? {}),
+      signal: ctrl.signal,
+    });
+  } catch (e) {
+    return fail(504, `Dashboard unreachable: ${String(e?.message || e).slice(0, 120)}`);
+  }
+  if (!r.ok || !String(r.headers.get("content-type") || "").includes("text/event-stream")) {
+    const j = await r.json().catch(() => null);
+    return fail(r.ok ? 502 : r.status, (j && (j.message || j.detail || j.reason)) || `The dashboard answered HTTP ${r.status}`);
+  }
+  res.writeHead(200, { "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no" });
+  try {
+    for await (const chunk of r.body) res.write(chunk);
+  } catch {
+    /* the browser left, or the dashboard dropped the stream: nothing more to send */
+  }
+  finished = true;
+  res.end();
+}

@@ -214,3 +214,80 @@ describe("dashboard orders (real Zerodha orders via kite_orders.py)", () => {
     expect([...dashboard.ORDER_POST_OPS].sort()).toEqual(["cancel", "halt", "modify", "place", "preview"]);
   });
 });
+
+describe("dashboard positions + Ask Claude stream (#126)", () => {
+  beforeEach(() => {
+    process.env.HUB_FEED_URL = FEED;
+    process.env.HUB_FEED_TOKEN = TOKEN;
+  });
+  afterEach(() => {
+    delete process.env.HUB_FEED_URL;
+    delete process.env.HUB_FEED_TOKEN;
+    vi.resetModules();
+  });
+
+  /** A minimal http.ServerResponse stand-in. */
+  function fakeRes() {
+    const listeners = {};
+    return {
+      status: null, headers: null, chunks: [], ended: false, headersSent: false,
+      on(ev, fn) { listeners[ev] = fn; },
+      emit(ev) { listeners[ev]?.(); },
+      writeHead(s, h) { this.status = s; this.headers = h; this.headersSent = true; },
+      write(c) { this.chunks.push(Buffer.from(c).toString()); },
+      end(c) { if (c) this.chunks.push(String(c)); this.ended = true; },
+    };
+  }
+
+  it("positions come from /hub/positions with the feed token", async () => {
+    const { dashboard } = await dashboardModules();
+    const calls = [];
+    const out = await dashboard.dashboardPositions(async (url, init) => {
+      calls.push({ url, init });
+      return new Response(JSON.stringify({ ok: true, groups: [] }), { status: 200 });
+    });
+    expect(out).toEqual({ status: 200, body: { ok: true, groups: [] } });
+    expect(calls[0].url).toBe(`${FEED}/hub/positions`);
+    expect(calls[0].init.headers["X-Hub-Feed"]).toBe(TOKEN);
+  });
+
+  it("streams the dashboard's server-sent events straight through", async () => {
+    const { dashboard } = await dashboardModules();
+    const enc = new TextEncoder();
+    const parts = ['event: text\ndata: {"type":"text","text":"Hel"}\n\n', 'event: done\ndata: {"type":"done"}\n\n'];
+    let sent;
+    const res = fakeRes();
+    await dashboard.dashboardAssistantStream(res, { message: "q", scope: "NIFTY", builder: { legs: [] } }, async (url, init) => {
+      sent = { url, init };
+      return new Response(new ReadableStream({ start(c) { for (const p of parts) c.enqueue(enc.encode(p)); c.close(); } }), { headers: { "content-type": "text/event-stream" } });
+    });
+    expect(sent.url).toBe(`${FEED}/hub/assistant/chat`);
+    expect(sent.init.headers["X-Hub-Feed"]).toBe(TOKEN);
+    expect(JSON.parse(sent.init.body)).toEqual({ message: "q", scope: "NIFTY", builder: { legs: [] } });
+    expect(res.status).toBe(200);
+    expect(res.headers["Content-Type"]).toMatch(/text\/event-stream/);
+    expect(res.chunks.join("")).toBe(parts.join(""));
+    expect(res.ended).toBe(true);
+  });
+
+  it("a refusal (no stream) is answered as JSON with the dashboard's words", async () => {
+    const { dashboard } = await dashboardModules();
+    const res = fakeRes();
+    await dashboard.dashboardAssistantStream(res, {}, async () => new Response(JSON.stringify({ detail: "message must be 1-4000 characters" }), { status: 400 }));
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.chunks.join(""))).toEqual({ ok: false, message: "message must be 1-4000 characters" });
+  });
+
+  it("the browser leaving cancels the upstream request", async () => {
+    const { dashboard } = await dashboardModules();
+    const res = fakeRes();
+    let signal;
+    const p = dashboard.dashboardAssistantStream(res, {}, (url, init) => {
+      signal = init.signal;
+      return new Promise((_, reject) => init.signal.addEventListener("abort", () => reject(new Error("aborted"))));
+    });
+    res.emit("close");
+    await p;
+    expect(signal.aborted).toBe(true);
+  });
+});

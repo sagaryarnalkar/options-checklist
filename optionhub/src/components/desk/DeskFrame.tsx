@@ -5,6 +5,7 @@
  * the dashboard's charts resolve colours when they are built.
  */
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTheme } from "@/hooks/useTheme";
 import { DESK_URL, deskFrameUrl, type DeskTab } from "@/lib/desk";
 import { cn } from "@/lib/utils";
@@ -17,8 +18,12 @@ const DESK_ORIGIN = (() => {
   }
 })();
 
+/** Terminal pages the dashboard frame may open (#126: "⇢ Strategy Builder" on a Positions-tab group). */
+const NAVIGABLE = /^\/strategy-builder\?positions=[A-Za-z0-9&_%-]{1,40}$/;
+
 export function DeskFrame({ tab }: { tab: DeskTab | null }) {
   const { isDark } = useTheme();
+  const navigate = useNavigate();
   const active = !!tab;
   const frame = useRef<HTMLIFrameElement>(null);
   const current = useRef<string>(tab?.id ?? "dashboard");
@@ -39,6 +44,19 @@ export function DeskFrame({ tab }: { tab: DeskTab | null }) {
   }, [active, isDark, src]);
 
   useEffect(() => setLoaded(false), [src]);
+
+  // The dashboard asks the terminal to open one of its own pages: only from the dashboard's origin, only this
+  // frame, only whitelisted paths.
+  useEffect(() => {
+    if (!DESK_ORIGIN) return;
+    const onMessage = (e: MessageEvent) => {
+      if (e.origin !== DESK_ORIGIN || e.source !== frame.current?.contentWindow) return;
+      const d = e.data as { type?: unknown; path?: unknown } | null;
+      if (d?.type === "hz:navigate" && typeof d.path === "string" && NAVIGABLE.test(d.path)) navigate(d.path);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [navigate]);
 
   useEffect(() => {
     if (!active || !loaded || !tab) return;

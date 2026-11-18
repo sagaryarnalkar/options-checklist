@@ -2181,6 +2181,8 @@
       });
       document.getElementById("wiRun").addEventListener("click", posRunWhatIf);
       document.getElementById("tabPositions").addEventListener("click", e => {
+        const sb = e.target.closest(".sb-open");
+        if (sb){ openInStrategyBuilder(sb.dataset.under); return; }
         const b = e.target.closest(".ai-open, .ai-mini");
         if (!b) return;
         aiOpen(b.dataset.scope || "overall", b.dataset.focus || null);
@@ -2190,6 +2192,25 @@
     if (!posKey()){ posShowGate(); return; }
     document.getElementById("posGate").style.display = "none";
     loadPositions(); posStartTimer();
+  }
+
+  // #126: open one underlying's live position in the HeroZero terminal's Strategy Builder. Inside the terminal
+  // (embed mode) the terminal navigates itself (DeskFrame listens for hz:navigate from this origin); on the
+  // classic dashboard it opens the terminal in a new tab.
+  async function openInStrategyBuilder(under){
+    if (!/^[A-Z0-9&_-]{1,24}$/.test(under || "")) return;
+    const path = "/strategy-builder?positions=" + encodeURIComponent(under);
+    if (document.documentElement.classList.contains("hz-embed") && window.parent !== window){
+      let target = "*";
+      try { if (document.referrer) target = new URL(document.referrer).origin; } catch (_) {}
+      window.parent.postMessage({ type: "hz:navigate", path }, target);
+      return;
+    }
+    try {
+      const st = await (await fetch("/hub/status", { cache: "no-store" })).json();
+      if (st && st.url){ window.open(String(st.url).replace(/\/+$/, "") + path, "_blank", "noopener"); return; }
+    } catch (_) {}
+    alert("The HeroZero terminal is not set up on this server.");
   }
 
   function posStartTimer(){
@@ -2425,6 +2446,7 @@
           <span class="pos-sub"> spot ${posN(g.spot, 2)}${exp}</span></div>
         <div style="display:flex;gap:10px;align-items:baseline">
           <b class="${posCls(g.pnl)}" style="font-family:var(--mono)">${posRsS(g.pnl)}</b>
+          <button type="button" class="live-refresh sb-open" data-under="${esc(g.underlying)}" title="Open this position in the terminal's Strategy Builder to analyse and modify it">⇢ Strategy Builder</button>
           <button type="button" class="live-refresh ai-open" data-scope="${esc(g.underlying)}">✦ Ask Claude</button>
         </div>
       </div>

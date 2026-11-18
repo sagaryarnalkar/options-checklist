@@ -619,6 +619,11 @@ async def assistant_chat(payload: dict = Body(...),
     """One question, answered by Claude with read-only tools; streamed as
     server-sent events: meta, status, text (deltas), done | error."""
     _require_app_key(x_app_key)
+    return _assistant_stream(payload)
+
+
+def _assistant_stream(payload: dict, builder: Optional[dict] = None):
+    """The SSE answer for one question (shared by the dashboard drawer and the terminal's Strategy Builder)."""
     import assistant as _as
     msg = str(payload.get("message") or "").strip()
     if not msg or len(msg) > 4000:
@@ -631,7 +636,7 @@ async def assistant_chat(payload: dict = Body(...),
 
     async def sse():
         try:
-            async for ev in _as.chat_turn(conv_id, scope, msg, focus):
+            async for ev in _as.chat_turn(conv_id, scope, msg, focus, builder):
                 yield f"event: {ev['type']}\ndata: {json.dumps(ev, default=str)}\n\n"
         except Exception as e:
             err = {"type": "error", "message": f"{type(e).__name__}: {e}"}
@@ -865,6 +870,33 @@ async def hub_orders_cancel(request: Request, x_hub_feed: Optional[str] = Header
     import kite_orders as _ko
     return await asyncio.to_thread(
         _orders_call, lambda: _ko.cancel(body.get("intent"), str(body.get("order_id") or "")))
+
+
+@app.get("/hub/positions")
+def hub_positions(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    """Live Kite positions for the terminal's Strategy Builder ("Live positions"): the Positions tab's book
+    without margins (positions.py). Same lock as the order routes."""
+    _hub_orders_auth(request, x_hub_feed)
+    from kite_auth import get_kite_from_cache
+    import positions as _pos
+    kite = get_kite_from_cache()
+    if kite is None:
+        return JSONResponse({"ok": False, "logged_in": False,
+                             "reason": "The dashboard is not logged in to Kite today."})
+    try:
+        return JSONResponse(_pos.public(_pos.fetch_book(kite, with_margins=False)))
+    except Exception as e:
+        return JSONResponse({"ok": False, "reason": f"{type(e).__name__}: {e}"}, status_code=502)
+
+
+@app.post("/hub/assistant/chat")
+async def hub_assistant_chat(request: Request, x_hub_feed: Optional[str] = Header(default=None)):
+    """Ask Claude from the terminal's Strategy Builder: /assistant/chat plus the builder's legs and payoff
+    figures (`builder`) in the context. Same lock as the order routes."""
+    _hub_orders_auth(request, x_hub_feed)
+    payload = await _orders_body(request)
+    builder = payload.get("builder")
+    return _assistant_stream(payload, builder if isinstance(builder, dict) else None)
 
 
 @app.post("/hub/orders/halt")

@@ -2,8 +2,12 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, us
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQueries } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, BookOpen, Eye, FlaskConical, Keyboard, Layers, Loader2, PackagePlus, Radio, RefreshCw, Wand2, X } from "lucide-react";
+import { AlertTriangle, BookOpen, Briefcase, Eye, FlaskConical, Keyboard, Layers, Loader2, PackagePlus, Radio, RefreshCw, Sparkles, Wand2, X } from "lucide-react";
 import { kiteOrdersAvailable } from "@/lib/kiteOrders";
+import { diffFromLive, fetchLiveBook, positionLegs, type LivePositionGroup } from "@/lib/livePositions";
+import { AskClaudeSheet } from "@/components/strategy/AskClaudeSheet";
+import { LivePositionsMenu } from "@/components/strategy/LivePositionsMenu";
+import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/PageHeader";
 import { SaveBasketDialog } from "@/components/SaveBasketDialog";
 import { previewBasket, type BasketPreview } from "@/lib/basketApi";
@@ -138,6 +142,18 @@ function writeStore(key: string, value: string): void {
   }
 }
 
+/** options-checklist (#126): the live position the legs were loaded from, kept so a reload still compares. */
+const LIVE_KEY = "mc_sb_live_v1";
+type LivePos = { underlying: string; asOf: string; legs: Leg[]; pnl: number | null };
+function readLivePos(symbol: string): LivePos | null {
+  try {
+    const v = JSON.parse(readStore(LIVE_KEY) || "null") as LivePos | null;
+    return v && v.underlying === symbol && Array.isArray(v.legs) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 function readInitial(params: URLSearchParams): InitialState {
   return resolveInitialState({ params, draft: decodeShare(readStore(DRAFT_KEY), lotSizeFor), today: istDateString(), lotSizeFor });
 }
@@ -191,6 +207,22 @@ export default function StrategyBuilder() {
   const [bannerHidden, setBannerHidden] = useState(() => readStore(BANNER_KEY) === "1");
   const [now, setNow] = useState(() => new Date());
   const chartRef = useRef<HTMLDivElement>(null);
+  // options-checklist (#126): a live Kite position opened here ("Live positions" or ?positions=NIFTY from the
+  // dashboard's Positions tab), and Ask Claude about what is on screen.
+  const [livePos, setLivePos] = useState<LivePos | null>(() => (kiteOrdersAvailable() && !initial.fromParams ? readLivePos(initial.symbol) : null));
+  const [askOpen, setAskOpen] = useState(false);
+  const [positionsParam] = useState(() => (kiteOrdersAvailable() ? params.get("positions") : null));
+  useEffect(() => {
+    if (!kiteOrdersAvailable()) return;
+    if (livePos) writeStore(LIVE_KEY, JSON.stringify(livePos));
+    else {
+      try {
+        window.localStorage.removeItem(LIVE_KEY);
+      } catch {
+        /* storage blocked */
+      }
+    }
+  }, [livePos]);
   const pendingTemplate = useRef<string | null>(initial.legs.length === 0 && !initial.fromParams ? "iron-condor" : null);
 
   /** Mark the strategy as the user's own: persist the draft from now on and leave any shared snapshot. */
@@ -214,6 +246,60 @@ export default function StrategyBuilder() {
     toast.success("Previous draft restored", { description: `${prev.legs.length} leg${prev.legs.length === 1 ? "" : "s"} on ${prev.symbol}.` });
   }, []);
 
+  /** Open one underlying's live Kite position: entry = Kite's average price (legs marked manual, so refreshing
+   *  quotes never overwrites it). The previous draft can be restored from the toast. */
+  const loadLivePosition = useCallback(
+    (group: LivePositionGroup, asOf: string) => {
+      const { legs: live, skipped: notLoaded } = positionLegs(group);
+      if (!live.length) {
+        toast.error(`No option or futures legs in your ${group.underlying} position`);
+        return;
+      }
+      const take = live.slice(0, MAX_LEGS);
+      const prev = legs.length ? { symbol, name, legs } : null;
+      persistRef.current = true;
+      pendingTemplate.current = null;
+      setShared(null);
+      setSkipped([]);
+      setSymbol(group.underlying);
+      setLegs(toBuilderLegs(take).map((l) => ({ ...l, manual: true })));
+      setName(`Live ${group.underlying}`);
+      setTemplateId(null);
+      setFocusedId(null);
+      setTargetIdx(0);
+      setExpiry(take.map((l) => l.expiry).sort()[0] ?? "");
+      setLivePos({ underlying: group.underlying, asOf, legs: take, pnl: typeof group.pnl === "number" ? group.pnl : null });
+      const notes = [
+        notLoaded.length ? `Not loaded: ${notLoaded.join(", ")}.` : "",
+        live.length > take.length ? `Only the first ${MAX_LEGS} of ${live.length} legs fit.` : "",
+      ].filter(Boolean);
+      toast.success(`Opened your live ${group.underlying} position (${take.length} leg${take.length === 1 ? "" : "s"})`, {
+        description: notes.join(" ") || "Entry prices are Kite's averages. Change anything to see the effect; nothing is sent to Kite from here.",
+        duration: 10_000,
+        action: prev ? { label: "Undo", onClick: () => restoreDraft(prev) } : undefined,
+      });
+    },
+    [legs, symbol, name, restoreDraft],
+  );
+
+  // From the dashboard's Positions tab: /strategy-builder?positions=NIFTY opens that live position.
+  useEffect(() => {
+    if (!positionsParam) return;
+    let alive = true;
+    fetchLiveBook()
+      .then((book) => {
+        if (!alive) return;
+        const g = book.ok ? (book.groups ?? []).find((x) => x.underlying === positionsParam.toUpperCase()) : undefined;
+        if (g) loadLivePosition(g, book.as_of ?? new Date().toISOString());
+        else toast.error(`Could not open your live ${positionsParam} position`, { description: book.ok ? "No open position on it right now." : book.reason });
+      })
+      .catch((e: Error) => alive && toast.error("Could not reach the dashboard for your positions", { description: e.message }));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, for the link that opened the page
+  }, [positionsParam]);
+
   // One-time: announce what came from the URL, then drop the params so a refresh does not re-add legs.
   useEffect(() => {
     if (announcedRef.current) return;
@@ -222,11 +308,12 @@ export default function StrategyBuilder() {
     if (initial.message) {
       toast.success(initial.message, prev ? { duration: 12_000, action: { label: "Undo (restore previous draft)", onClick: () => restoreDraft(prev) } } : undefined);
     }
-    if (params.has("legs") || params.has("s") || params.has("mode")) {
+    if (params.has("legs") || params.has("s") || params.has("mode") || params.has("positions")) {
       const next = new URLSearchParams(params);
       next.delete("legs");
       next.delete("s");
       next.delete("mode");
+      next.delete("positions");
       setParams(next, { replace: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
@@ -703,6 +790,52 @@ export default function StrategyBuilder() {
     setExpiry(take.map((l) => l.expiry).sort()[0] ?? "");
   };
 
+  // ── Live position + Ask Claude (#126) ──
+  const liveOnScreen = !!livePos && livePos.underlying === symbol;
+  const liveChanges = useMemo(() => (livePos && livePos.underlying === symbol ? diffFromLive(livePos.legs, legs) : []), [livePos, symbol, legs]);
+  /** What Claude sees from this screen: the legs, the builder's own figures and, for a live position, the edits. */
+  const builderContext = (): Record<string, unknown> => {
+    const a = analysis;
+    const rnd = (x: number, d = 0) => (Number.isFinite(x) ? Number(x.toFixed(d)) : null);
+    return {
+      symbol,
+      spot: rnd(spot, 2),
+      at: new Date().toISOString(),
+      data: anySample ? "sample chain (not market quotes)" : main.data?.source ?? "unknown",
+      strategy_name: name || null,
+      legs: legs.map((l) => ({
+        enabled: l.enabled,
+        side: l.side,
+        type: l.type,
+        strike: l.type === "FUT" ? null : l.strike,
+        expiry: l.expiry,
+        lots: l.lots,
+        lot_size: l.lotSize,
+        qty: l.lots * l.lotSize,
+        entry_price: rnd(l.premium, 2),
+        iv_pct: l.iv ? rnd(l.iv * 100, 2) : null,
+      })),
+      builder_figures: a.empty
+        ? null
+        : {
+            note: "the builder's own model (Black-76 with the chain's smile, its margin estimate) — not Kite's",
+            max_profit: a.unlimitedProfit ? "unlimited" : rnd(a.maxProfit),
+            max_loss: a.unlimitedLoss ? "unlimited" : rnd(a.maxLoss),
+            breakevens: a.breakevens.map((b) => rnd(b)),
+            breakevens_after_costs: a.breakevensNet.map((b) => rnd(b)),
+            probability_of_profit_pct: Number.isFinite(a.pop) ? rnd(a.pop * 100, 1) : null,
+            net_premium: { type: a.net.type, rupees: rnd(Math.abs(a.net.net)) },
+            margin_estimate: rnd(a.margin.total),
+            pnl_now_model: rnd(a.pnlNow),
+            greeks: { delta: rnd(a.netGreeks.delta, 2), gamma: rnd(a.netGreeks.gamma, 4), theta_per_day: rnd(a.netGreeks.theta), vega_per_vol_pt: rnd(a.netGreeks.vega) },
+            multi_expiry: a.multiExpiry,
+            front_expiry: a.frontExpiry || null,
+            iv_shift_pts_applied: ivShift,
+          },
+      live_position: liveOnScreen && livePos ? { loaded_from_kite_at: livePos.asOf, kite_pnl: livePos.pnl, changes: liveChanges } : null,
+    };
+  };
+
   const summary = () => {
     const a = analysis;
     const lines = [
@@ -778,6 +911,14 @@ export default function StrategyBuilder() {
         source={sourceBadge}
         actions={
           <>
+            {kiteOrdersAvailable() ? (
+              <>
+                <LivePositionsMenu onPick={loadLivePosition} />
+                <Button type="button" size="sm" variant="outline" onClick={() => setAskOpen(true)} disabled={!legs.length} title="Ask Claude about the legs on screen and your live position">
+                  <Sparkles /> Ask Claude
+                </Button>
+              </>
+            ) : null}
             <Button
               type="button"
               size="sm"
@@ -844,6 +985,44 @@ export default function StrategyBuilder() {
           </>
         }
       />
+
+      {liveOnScreen && livePos ? (
+        <div role="status" className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-tile border border-primary/30 bg-wash-brand/50 px-3 py-2 text-body-sm">
+          <Briefcase className="h-4 w-4 shrink-0 text-primary-ink" aria-hidden="true" />
+          <span className="font-semibold">Live {livePos.underlying} position</span>
+          <span className="text-muted-foreground">from Kite at {String(livePos.asOf).slice(11, 16)} IST</span>
+          {livePos.pnl !== null ? (
+            <span className="text-muted-foreground">
+              · Kite P&amp;L <span className={cn("font-num font-semibold tabular-nums", livePos.pnl < 0 ? "text-bearish" : "text-bullish")}>{formatINR(livePos.pnl, { decimals: 0 })}</span>
+            </span>
+          ) : null}
+          <span className={cn("text-muted-foreground", liveChanges.length && "font-medium text-warning")}>
+            · {liveChanges.length ? `${liveChanges.length} change${liveChanges.length === 1 ? "" : "s"} on screen (what-if)` : "unchanged"}
+          </span>
+          <span className="ml-auto flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                void fetchLiveBook().then((b) => {
+                  const g = b.ok ? (b.groups ?? []).find((x) => x.underlying === livePos.underlying) : undefined;
+                  if (g) loadLivePosition(g, b.as_of ?? new Date().toISOString());
+                  else toast.error(`Could not reload your ${livePos.underlying} position`, { description: b.ok ? "No open position on it right now." : b.reason });
+                })
+              }
+            >
+              <RefreshCw /> Reload from Kite
+            </Button>
+            <Button type="button" size="sm" onClick={() => setAskOpen(true)}>
+              <Sparkles /> Ask Claude
+            </Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setLivePos(null)} aria-label="Stop comparing with the live position" title="Stop comparing with the live position (the legs stay)">
+              <X />
+            </Button>
+          </span>
+        </div>
+      ) : null}
 
       {shared && (
         <div role="status" className="flex flex-col gap-2 rounded-tile border border-info/30 bg-wash-info px-3 py-2.5 text-body-sm sm:flex-row sm:items-center">
@@ -1108,6 +1287,10 @@ export default function StrategyBuilder() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {kiteOrdersAvailable() ? (
+        <AskClaudeSheet open={askOpen} onOpenChange={setAskOpen} symbol={symbol} live={liveOnScreen} context={builderContext} />
+      ) : null}
 
       <StrategyWizard open={wizardOpen} onOpenChange={setWizardOpen} ctx={resolveCtx} timeline={wizardTimeline} broker={broker} onPick={applyTemplate} />
 
