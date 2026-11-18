@@ -238,7 +238,7 @@ export function LiveOrderDialog({
 
   const blockers: string[] = [];
   if (!liveOn) blockers.push("Live trading is off in Broker settings.");
-  if (status && !status.enabled) blockers.push("The server has live orders switched off (KITE_ORDERS=on in the dashboard's .env).");
+  if (status && !status.enabled) blockers.push("The server has live orders switched off (KITE_ORDERS=off in the dashboard's .env).");
   if (status?.halted) blockers.push("Live orders are halted. Resume them on the Orders page.");
   if (status && status.logged_in === false) blockers.push("The dashboard is not logged in to Kite today.");
 

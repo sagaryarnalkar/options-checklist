@@ -151,7 +151,7 @@ export function KiteOrderBook({ compact = false }: { compact?: boolean }) {
         </CardContent>
         {st && !st.enabled ? (
           <CardContent className="pt-0 text-body-sm text-muted-foreground">
-            To turn live orders on, add <code className="rounded bg-control-track px-1">KITE_ORDERS=on</code> to the dashboard's .env and restart it. Kite accepts orders only from the IP
+            Live orders are switched off in the dashboard's .env (<code className="rounded bg-control-track px-1">KITE_ORDERS=off</code>). Remove that line and restart the dashboard to turn them back on. Kite accepts orders only from the IP
             registered on your Kite Connect app (IP Whitelist).
           </CardContent>
         ) : null}

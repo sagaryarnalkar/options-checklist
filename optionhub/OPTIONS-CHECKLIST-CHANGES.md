@@ -63,6 +63,14 @@ The owner found it misleading to place real orders from a page named Paper Tradi
 | `src/components/live/KiteOrders.tsx` | `KiteOrderBook` (status, halt, book, cancel, modify) is split from the Orders page so Live Trading can show it. |
 | `vite.config.ts` | Fixed the "VITE_SITE_URL is not set" warning, whose unescaped quotes turned the message into `NaN` and failed builds without VITE_SITE_URL (#116 slip; production sets it). |
 
+### Live trading on by default in our build; 1Cliq's lock survives rebuilds (#125)
+
+| Where | What changed |
+|---|---|
+| `src/lib/brokerConfig.ts` (`isLiveTradingEnabled`) | In our build Live trading is ON unless switched off in Broker settings (an explicit off sticks). Upstream builds keep off-by-default. The other gates remain: the Live Trading page, the per-order real-money confirmation, 1Cliq arming, and the dashboard's rules and halt switch. |
+| `server/lib/tradingLockState.mjs` | `TRADING_LOCK_FILE` (set by the dashboard) moves the lock file out of the build directory, so a rebuild no longer resets 1Cliq to "engine fault: lock file missing". |
+| `src/components/LiveTradingToggle.tsx`, `src/components/live/*` | Copy: on by default; the server is switched off only by `KITE_ORDERS=off`. |
+
 `LICENSE`, `NOTICE.md` and `COMMERCIAL-LICENSE.md` are kept in this folder, along with the copyright notes in source comments.
 
 Taking upstream updates:
