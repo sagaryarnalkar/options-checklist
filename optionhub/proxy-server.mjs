@@ -56,7 +56,7 @@ import * as panicGate from "./server/lib/panicGate.mjs";
 import * as tradingLockState from "./server/lib/tradingLockState.mjs";
 import * as auditLog from "./server/lib/auditLog.mjs";
 import * as basketEngine from "./server/lib/basketEngine.mjs";
-import { DASHBOARD, ORDER_GET_OPS, ORDER_POST_OPS, dashboardAccount, dashboardJson, dashboardOrders, dashboardSnapshots, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
+import { DASHBOARD, ORDER_GET_OPS, ORDER_POST_OPS, dashboardAccount, dashboardAssistantStream, dashboardJson, dashboardOrders, dashboardPositions, dashboardSnapshots, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -3317,7 +3317,7 @@ export const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-dhan-client-id, x-dhan-access-token, x-broker-credentials, x-hz-orders");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-dhan-client-id, x-dhan-access-token, x-broker-credentials, x-hz-orders, x-hz-ask");
     res.setHeader("Access-Control-Max-Age", "600");
   }
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
@@ -3337,8 +3337,9 @@ export const server = http.createServer(async (req, res) => {
   // options-checklist: real Zerodha orders through the dashboard (server/dashboard.mjs dashboardOrders).
   const ordersOp = DASHBOARD && path === "/api/dashboard/orders" ? String(params.get("op") || "") : null;
   const isOrdersPost = ordersOp !== null && ORDER_POST_OPS.has(ordersOp);
+  const isAskPost = DASHBOARD && path === "/api/dashboard/assistant" && req.method === "POST";
   if (isSessionLogin && req.method !== "POST") return send(res, 405, { error: "Method not allowed", reason: "Use POST with a JSON body" }, { Allow: "POST" });
-  if (req.method === "POST" && !isTradePost && !isSessionLogin && !isOrdersPost) return send(res, 405, { error: "Method not allowed" });
+  if (req.method === "POST" && !isTradePost && !isSessionLogin && !isOrdersPost && !isAskPost) return send(res, 405, { error: "Method not allowed" });
   if (req.method === "GET" && isTradePost) return send(res, 405, { error: "Method not allowed", reason: "Use POST with a JSON body" }, { Allow: "POST" });
 
   try {
@@ -3381,6 +3382,19 @@ export const server = http.createServer(async (req, res) => {
       if (!ORDER_GET_OPS.has(ordersOp)) return send(res, 405, { ok: false, code: "METHOD", message: `${ordersOp || "op"} needs POST` });
       const out = await dashboardOrders(ordersOp, "GET", params, null);
       return send(res, out.status, out.body);
+    }
+    if (DASHBOARD && (path === "/api/dashboard/positions" || path === "/api/dashboard/assistant")) {
+      // options-checklist: the live book and Ask Claude for the Strategy Builder (server/dashboard.mjs). Same
+      // caller rule as the order routes; Ask Claude also needs its own header (no plain form can send it).
+      if (!origin && !isLoopbackAddress(clientIp(req))) return send(res, 403, { ok: false, message: "Accepts non-browser clients only from loopback" });
+      if (path === "/api/dashboard/positions") {
+        const out = await dashboardPositions();
+        return send(res, out.status, out.body);
+      }
+      if (req.method !== "POST") return send(res, 405, { ok: false, message: "Use POST" });
+      if (req.headers["x-hz-ask"] !== "1") return send(res, 403, { ok: false, message: "Missing x-hz-ask header" });
+      const body = await readJsonBody(req);
+      return dashboardAssistantStream(res, body);
     }
     if (DASHBOARD && path === "/api/dashboard/account") {
       // options-checklist: the dashboard's Kite account for the header chip (server/dashboard.mjs)

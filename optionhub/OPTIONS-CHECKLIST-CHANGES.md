@@ -71,6 +71,16 @@ The owner found it misleading to place real orders from a page named Paper Tradi
 | `server/lib/tradingLockState.mjs` | `TRADING_LOCK_FILE` (set by the dashboard) moves the lock file out of the build directory, so a rebuild no longer resets 1Cliq to "engine fault: lock file missing". |
 | `src/components/LiveTradingToggle.tsx`, `src/components/live/*` | Copy: on by default; the server is switched off only by `KITE_ORDERS=off`. |
 
+### Live positions and Ask Claude in the Strategy Builder (#126)
+
+| Where | What changed |
+|---|---|
+| `src/lib/livePositions.ts`, `src/components/strategy/LivePositionsMenu.tsx` (new), `src/pages/StrategyBuilder.tsx` | **Live positions** loads one underlying's live Kite position: options and futures, with Kite's average as the entry price (legs marked manual). `?positions=NIFTY` does the same from a link. A strip shows the Kite P&L, how the legs on screen differ from the live position ("N changes, what-if"), **Reload from Kite** and **Ask Claude**. The link is kept across reloads (`mc_sb_live_v1`) until dismissed. |
+| `src/lib/askClaude.ts`, `src/components/strategy/AskClaudeSheet.tsx` (new) | **Ask Claude**: the dashboard's assistant, streamed in a side panel. It gets the legs on screen, the builder's payoff figures and the change list. Read-only: it cannot place orders. |
+| `server/dashboard.mjs`, `proxy-server.mjs` | `GET /api/dashboard/positions` and `POST /api/dashboard/assistant` (needs the `x-hz-ask` header; the stream is passed through and cancelled when the browser leaves). |
+| `src/components/desk/DeskFrame.tsx` | The dashboard frame may ask the terminal to open `/strategy-builder?positions=<UNDERLYING>` (hz:navigate). This is accepted only from the dashboard's origin and its frame, and only for that path. |
+| `src/components/PageHeader.tsx` | Actions wrap onto a second row instead of squeezing the title into a narrow column. |
+
 `LICENSE`, `NOTICE.md` and `COMMERCIAL-LICENSE.md` are kept in this folder, along with the copyright notes in source comments.
 
 Taking upstream updates:

@@ -38,7 +38,7 @@ export function PageHeader({ icon: Icon, eyebrow, title, description, actions, s
       data-page-header=""
       className={cn("flex min-w-0 flex-col gap-3 pb-1 sm:flex-row sm:items-end sm:justify-between sm:gap-6", className)}
     >
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 sm:min-w-[18rem]">
         {context ? <p className="mb-0.5 text-body-sm font-medium text-muted-foreground">{context}</p> : null}
         <h1 className="flex min-w-0 items-center gap-2 font-display text-display text-foreground">
           {Icon ? <Icon className="h-5 w-5 shrink-0 text-primary-ink" strokeWidth={2} aria-hidden="true" /> : null}
@@ -48,7 +48,8 @@ export function PageHeader({ icon: Icon, eyebrow, title, description, actions, s
         {source ? <div className="mt-1.5 flex flex-wrap items-center gap-2 text-body-sm">{source}</div> : null}
       </div>
       {actions ? (
-        <div className="flex min-w-0 shrink-0 flex-wrap items-center gap-2 sm:justify-end">{actions}</div>
+        // options-checklist: actions wrap onto a second row instead of squeezing the title into a narrow column
+        <div className="flex min-w-0 flex-wrap items-center gap-2 sm:justify-end">{actions}</div>
       ) : null}
     </header>
   );

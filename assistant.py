@@ -72,6 +72,8 @@ SYSTEM_PROMPT = """You are the analysis assistant inside a self-hosted options d
 # What you can see
 Every question arrives with an <app_context> block: a fresh snapshot taken when the question was asked — open legs with quantities, prices, implied vols and greeks, per-underlying and book-wide greeks, margins, payoff breakevens, spot and VIX. Use it first. Call tools for anything deeper or for numbers that must be current to the minute. A chat may be scoped to one underlying; focus there, but you may use book-wide data when it matters.
 
+Questions asked from the Strategy Builder also carry app_context.strategy_builder: the legs on the user's screen with the builder's own payoff figures (its model, its margin estimate). When those legs were loaded from the live book, `live_position.changes` lists how the screen now differs from the live position (empty = unchanged). Treat the screen as a proposal: say which figures describe the live book (app_context.positions, Kite's numbers) and which describe the edited structure, and quantify the difference with run_scenario / check_margin before endorsing it.
+
 # Hard rules
 - You are read-only. You cannot place, modify or cancel orders, and you must never write as if you had. When you suggest an adjustment, give it as a concrete proposal (legs, strikes, quantities) for the user to execute in Kite.
 - Every number you state must come from the app_context or a tool result. Never invent prices, greeks, margins or statistics. If something is missing or a tool fails, say so plainly.
@@ -689,7 +691,11 @@ def run_tool(ctx: ToolContext, name: str, args) -> tuple:
 
 # --------------------------------------------------------------- context --
 
-def build_context(ctx: ToolContext, scope: str, focus: Optional[str] = None) -> str:
+BUILDER_CONTEXT_CAP = 16_000       # chars of strategy_builder JSON in one question
+
+
+def build_context(ctx: ToolContext, scope: str, focus: Optional[str] = None,
+                  builder: Optional[dict] = None) -> str:
     """The <app_context> block prepended to each question."""
     now = datetime.now(IST)
     data = _data_json()
@@ -718,6 +724,10 @@ def build_context(ctx: ToolContext, scope: str, focus: Optional[str] = None) -> 
         body["positions"] = {"error": "no Kite session — positions unavailable until the user logs in"}
     if focus:
         body["focus_leg"] = focus
+    if isinstance(builder, dict) and builder:
+        raw = json.dumps(builder, default=str, separators=(",", ":"))
+        body["strategy_builder"] = builder if len(raw) <= BUILDER_CONTEXT_CAP else {
+            "error": f"strategy_builder context too large ({len(raw)} chars) — ask the user to describe the legs"}
     open_ = now.weekday() < 5 and (9, 15) <= (now.hour, now.minute) <= (15, 30)
     return (f'<app_context as_of="{now.isoformat(timespec="seconds")}" scope="{scope}" '
             f'market_hours="{"open" if open_ else "closed"}" kite="{kite_state}">\n'
@@ -873,7 +883,7 @@ def _options(c: dict, ctx: ToolContext):
 
 
 async def chat_turn(conv_id: Optional[str], scope: str, question: str,
-                    focus: Optional[str] = None):
+                    focus: Optional[str] = None, builder: Optional[dict] = None):
     """Async generator of events: meta, status, text, done, error."""
     if not SCOPE_RE.match(scope or ""):
         yield {"type": "error", "message": "bad scope"}
@@ -906,7 +916,7 @@ async def chat_turn(conv_id: Optional[str], scope: str, question: str,
         return
     async with lock, _one_at_a_time():
         ctx = ToolContext()
-        context = await asyncio.to_thread(build_context, ctx, scope, focus)
+        context = await asyncio.to_thread(build_context, ctx, scope, focus, builder)
         yield {"type": "meta", "conversation_id": c["id"], "model": c.get("model") or MODEL or "plan default"}
         usage = {"input_tokens": 0, "output_tokens": 0, "cache_read_input_tokens": 0,
                  "cache_creation_input_tokens": 0, "model_calls": 0, "tool_calls": 0}
