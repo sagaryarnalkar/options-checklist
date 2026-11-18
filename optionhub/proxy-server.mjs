@@ -56,7 +56,7 @@ import * as panicGate from "./server/lib/panicGate.mjs";
 import * as tradingLockState from "./server/lib/tradingLockState.mjs";
 import * as auditLog from "./server/lib/auditLog.mjs";
 import * as basketEngine from "./server/lib/basketEngine.mjs";
-import { DASHBOARD, dashboardAccount, dashboardJson, dashboardSnapshots, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
+import { DASHBOARD, ORDER_GET_OPS, ORDER_POST_OPS, dashboardAccount, dashboardJson, dashboardOrders, dashboardSnapshots, feedHeaders, nseRelayUrl } from "./server/dashboard.mjs"; // options-checklist
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -3317,7 +3317,7 @@ export const server = http.createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", origin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-dhan-client-id, x-dhan-access-token, x-broker-credentials");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-dhan-client-id, x-dhan-access-token, x-broker-credentials, x-hz-orders");
     res.setHeader("Access-Control-Max-Age", "600");
   }
   if (req.method === "OPTIONS") { res.writeHead(204); return res.end(); }
@@ -3334,8 +3334,11 @@ export const server = http.createServer(async (req, res) => {
   const isTradePost = !!tradeEndpoint && TRADE_POST_ENDPOINTS.has(tradeEndpoint);
   const isTradeGet = !!tradeEndpoint && TRADE_GET_ENDPOINTS.has(tradeEndpoint);
   const isSessionLogin = path === "/api/broker-session-login";
+  // options-checklist: real Zerodha orders through the dashboard (server/dashboard.mjs dashboardOrders).
+  const ordersOp = DASHBOARD && path === "/api/dashboard/orders" ? String(params.get("op") || "") : null;
+  const isOrdersPost = ordersOp !== null && ORDER_POST_OPS.has(ordersOp);
   if (isSessionLogin && req.method !== "POST") return send(res, 405, { error: "Method not allowed", reason: "Use POST with a JSON body" }, { Allow: "POST" });
-  if (req.method === "POST" && !isTradePost && !isSessionLogin) return send(res, 405, { error: "Method not allowed" });
+  if (req.method === "POST" && !isTradePost && !isSessionLogin && !isOrdersPost) return send(res, 405, { error: "Method not allowed" });
   if (req.method === "GET" && isTradePost) return send(res, 405, { error: "Method not allowed", reason: "Use POST with a JSON body" }, { Allow: "POST" });
 
   try {
@@ -3362,6 +3365,21 @@ export const server = http.createServer(async (req, res) => {
       const brokerId = vBrokerId(params.get("broker"));
       const body = await readJsonBody(req, SESSION_LOGIN_BODY_LIMIT);
       const out = await handleSessionLogin({ registry: brokerRegistry, brokerId, body, rateKey: clientIp(req), limiter: sessionLoginLimiter, ipLimiter: sessionLoginIpLimiter });
+      return send(res, out.status, out.body);
+    }
+    if (ordersOp !== null) {
+      // A browser must come from an allowlisted Origin (checked above); an Origin-less caller only from this
+      // machine. Every change also needs the x-hz-orders header, which no plain form or no-cors request can
+      // send. The dashboard re-checks everything and is the only side holding the Kite login.
+      if (!origin && !isLoopbackAddress(clientIp(req))) return send(res, 403, { ok: false, code: "FORBIDDEN", message: "Order routes accept non-browser clients only from loopback" });
+      if (req.method === "POST") {
+        if (req.headers["x-hz-orders"] !== "1") return send(res, 403, { ok: false, code: "FORBIDDEN", message: "Missing x-hz-orders header" });
+        const body = await readJsonBody(req);
+        const out = await dashboardOrders(ordersOp, "POST", params, body);
+        return send(res, out.status, out.body);
+      }
+      if (!ORDER_GET_OPS.has(ordersOp)) return send(res, 405, { ok: false, code: "METHOD", message: `${ordersOp || "op"} needs POST` });
+      const out = await dashboardOrders(ordersOp, "GET", params, null);
       return send(res, out.status, out.body);
     }
     if (DASHBOARD && path === "/api/dashboard/account") {

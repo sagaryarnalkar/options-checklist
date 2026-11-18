@@ -19,6 +19,7 @@ import { useTerminalActions } from "./hooks/useTerminalActions";
 import { useTerminalHotkeys } from "./hooks/useTerminalHotkeys";
 import { useRiskStatus } from "./hooks/useRiskStatus";
 import { useTradingLock } from "./hooks/useTradingLock";
+import { LOCK_STATES } from "./lib/panicApi";
 import { usePanicActions } from "./hooks/usePanicActions";
 import { useLegRiskArm } from "./hooks/useLegRiskArm";
 import { TerminalHeaderBar } from "./components/TerminalHeaderBar";
@@ -134,8 +135,12 @@ export default function OneCliqTerminal() {
 
   const refreshPositions = useCallback(() => setPositions(getPositions()), []);
 
+  // options-checklist: read before useQuickOrder so live (Zerodha) entries honour the lock the banner shows.
+  const tradingLock = useTradingLock();
+  const entryLocked = tradingLock.lock.state === LOCK_STATES.UNLOCKED ? null : (tradingLock.lock.reason || tradingLock.lock.state);
+
   const { execute, latestMessage, busy, pushMessage, clearMessages } = useQuickOrder({
-    config, mode, securityIdFor, quoteFor, onKeepAlive: keepAlive,
+    config, mode, securityIdFor, quoteFor, onKeepAlive: keepAlive, entryLocked,
   });
 
   const fire = useCallback(async (optionType: OptionType, side: "BUY" | "SELL") => {
@@ -145,7 +150,6 @@ export default function OneCliqTerminal() {
 
   // Server-confirmed status only (1CLIQ-TRADE-SPEC.md §4) — never optimistic.
   const riskStatus = useRiskStatus();
-  const tradingLock = useTradingLock();
   const { closeAllLive, cancelAllLive, panicBusy } = usePanicActions({ pushMessage });
   const riskArm = useLegRiskArm();
 

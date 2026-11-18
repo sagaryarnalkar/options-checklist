@@ -158,3 +158,70 @@ export async function dashboardSnapshots(params) {
     return { status: 502, body: { data: null, meta: { source: "database", asOf: Date.now(), stale: true, reason: String(e?.message || e).slice(0, 200) } } };
   }
 }
+
+// ── Real Zerodha orders (the dashboard's kite_orders.py, /hub/orders/*) ──
+//
+// The order screens (paper-trading ticket + baskets, Orders page, 1Cliq) send order INTENTS here; the
+// dashboard turns them into Kite orders with its own login and enforces every rule (allowed contracts, lot
+// cap, price band, daily cap, halt, idempotency). This hub never holds a Kite token and adds no authority:
+// the dashboard's routes answer only this proxy over loopback with HUB_FEED_TOKEN.
+
+const ORDER_OPS = {
+  status: { method: "GET", path: "/hub/orders/status" },
+  book: { method: "GET", path: "/hub/orders/book" },
+  order: { method: "GET", path: "/hub/orders/order", query: ["order_id"] },
+  log: { method: "GET", path: "/hub/orders/log", query: ["limit"] },
+  preview: { method: "POST", path: "/hub/orders/preview", timeoutMs: 25_000 },
+  place: { method: "POST", path: "/hub/orders/place", sends: true },
+  modify: { method: "POST", path: "/hub/orders/modify", sends: true },
+  cancel: { method: "POST", path: "/hub/orders/cancel", sends: true },
+  halt: { method: "POST", path: "/hub/orders/halt" },
+};
+
+/** Ops that change something (POST, JSON body, need the x-hz-orders header). */
+export const ORDER_POST_OPS = new Set(Object.keys(ORDER_OPS).filter((k) => ORDER_OPS[k].method === "POST"));
+export const ORDER_GET_OPS = new Set(Object.keys(ORDER_OPS).filter((k) => ORDER_OPS[k].method === "GET"));
+
+/** Forward one order op to the dashboard. { status, body } for the proxy's send(); body is always
+ *  { ok: boolean, ... } — refusals carry { code, message }. */
+export async function dashboardOrders(op, method, params, body, doFetch = fetch) {
+  const spec = ORDER_OPS[op];
+  if (!spec) return { status: 404, body: { ok: false, code: "UNKNOWN_OP", message: `Unknown orders op. Use: ${Object.keys(ORDER_OPS).join(", ")}` } };
+  if (spec.method !== method) return { status: 405, body: { ok: false, code: "METHOD", message: `${op} takes ${spec.method}` } };
+  const q = new URLSearchParams();
+  for (const k of spec.query || []) {
+    const v = params?.get?.(k);
+    if (v) q.set(k, v);
+  }
+  const qs = q.toString();
+  const init = { method, headers: { ...feedHeaders(), Accept: "application/json" }, signal: AbortSignal.timeout(spec.timeoutMs ?? 15_000) };
+  if (method === "POST") {
+    init.headers["Content-Type"] = "application/json";
+    init.body = JSON.stringify(body ?? {});
+  }
+  let r;
+  try {
+    r = await doFetch(`${FEED_URL}${spec.path}${qs ? `?${qs}` : ""}`, init);
+  } catch (e) {
+    const why = String(e?.message || e).slice(0, 120);
+    return {
+      status: 504,
+      body: {
+        ok: false,
+        code: "NO_ANSWER",
+        // A send that timed out may still have reached Kite: never let the screen call it failed.
+        message: spec.sends
+          ? `No answer from the dashboard (${why}). The order MAY have gone through: check the order book before trying again.`
+          : `Dashboard unreachable: ${why}`,
+      },
+    };
+  }
+  const j = await r.json().catch(() => null);
+  if (!j || typeof j !== "object") return { status: 502, body: { ok: false, code: "BAD_UPSTREAM", message: `The dashboard answered HTTP ${r.status} without JSON.` } };
+  if (j.ok === undefined) {
+    // FastAPI's own refusals ({"detail": ...}): auth, validation.
+    const detail = typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail ?? j).slice(0, 200);
+    return { status: r.status, body: { ok: false, code: `HTTP_${r.status}`, message: detail } };
+  }
+  return { status: r.status, body: j };
+}

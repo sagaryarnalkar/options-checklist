@@ -12,6 +12,8 @@ import { toast } from "sonner";
 import { PageHeader } from "@/components/PageHeader";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { EmptyState } from "@/components/positions/ui";
+import { KiteOrders } from "@/components/live/KiteOrders";
+import { kiteOrdersAvailable } from "@/lib/kiteOrders";
 
 const CANCELLABLE_STATUSES = new Set(["PENDING", "TRANSIT"]);
 
@@ -41,7 +43,12 @@ const STATUS_COLOR: Record<string, string> = {
 // static-IP caveat as placing an order. Field names are read defensively
 // (optional chaining, "—" fallbacks) since this reflects Dhan's own response
 // shape rather than something this app normalizes.
+// options-checklist: in our build the page is the dashboard's Zerodha order book (components/live/KiteOrders).
 export default function Orders() {
+  return kiteOrdersAvailable() ? <KiteOrders /> : <DhanOrders />;
+}
+
+function DhanOrders() {
   useDocumentTitle("Orders");
   const queryClient = useQueryClient();
   const [cancellingId, setCancellingId] = useState<string | null>(null);

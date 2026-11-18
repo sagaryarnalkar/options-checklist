@@ -10,11 +10,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { BookOpenCheck, Download, FlaskConical, Layers, LineChart, Upload, Wallet, X } from "lucide-react";
+import { BookOpenCheck, Download, FlaskConical, Layers, LineChart, Radio, Upload, Wallet, X } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { LiveOrderDialog } from "@/components/live/LiveOrderDialog";
+import { kiteOrdersAvailable, type KiteLeg } from "@/lib/kiteOrders";
 import { PageHeader } from "@/components/PageHeader";
 import { ChainFeed } from "@/components/positions/ChainFeed";
 import { downloadText, feedKey, signedINR, spotsFromFeeds, useChainFeeds, type FeedSnapshot } from "@/components/positions/helpers";
@@ -214,6 +217,11 @@ export default function PaperTrading() {
     setExpiry(firstExpiry(s));
   };
   const [staged, setStaged] = useState<BasketLeg[]>([]);
+  // options-checklist: Live (Zerodha) mode — the ticket and the basket send REAL orders through the dashboard's
+  // Kite login (LiveOrderDialog). Never persisted: every visit starts in Paper.
+  const liveCapable = kiteOrdersAvailable();
+  const [live, setLive] = useState(false);
+  const [liveOrder, setLiveOrder] = useState<{ legs: KiteLeg[]; source: "ticket" | "basket" } | null>(null);
   const [tab, setTab] = useState("positions");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const basketRef = useRef<HTMLDivElement>(null);
@@ -309,6 +317,17 @@ export default function PaperTrading() {
   const wouldBeNaked = useCallback((input: TicketOrder) => nakedShortViolations(state.positions, [input]).length > 0, [state.positions]);
 
   const place = (input: TicketOrder, quote: Quote | null, maxLoss: number | null): boolean => {
+    if (live) {
+      setLiveOrder({
+        source: "ticket",
+        legs: [{
+          underlying: input.symbol, expiry: input.expiry, strike: input.strike, opt_type: input.type, side: input.side, lots: input.lots,
+          order_type: input.orderType === "LIMIT" ? "LIMIT" : "MARKET",
+          price: input.orderType === "LIMIT" ? input.limitPrice : undefined,
+        }],
+      });
+      return false;
+    }
     const s0 = stateRef.current;
     const liveQuote = quoteFromFeed(feeds[feedKey(input.symbol, input.expiry)], input) ?? quote;
     const px = input.orderType === "LIMIT" ? input.limitPrice ?? NaN : marketFillPrice(liveQuote, input.side, s0.settings.slippagePct);
@@ -469,6 +488,21 @@ export default function PaperTrading() {
         }
         actions={
           <>
+            {liveCapable ? (
+              <ToggleGroup
+                type="single"
+                size="sm"
+                value={live ? "live" : "paper"}
+                onValueChange={(v) => v && setLive(v === "live")}
+                aria-label="Paper or live orders"
+                className={cn("rounded-pill", live && "ring-1 ring-bearish/60")}
+              >
+                <ToggleGroupItem value="paper">Paper</ToggleGroupItem>
+                <ToggleGroupItem value="live" className="data-[state=on]:bg-bearish data-[state=on]:text-bearish-foreground">
+                  <Radio className={cn(live && "animate-pulse")} aria-hidden="true" /> Live · Zerodha
+                </ToggleGroupItem>
+              </ToggleGroup>
+            ) : null}
             <Button asChild variant="outline" size="sm">
               <Link to="/journal?source=paper">
                 <BookOpenCheck aria-hidden="true" /> Journal
@@ -511,6 +545,19 @@ export default function PaperTrading() {
         }
       />
 
+      {live ? (
+        <p className="flex flex-wrap items-center gap-2 rounded-tile border border-bearish/50 bg-bearish/5 px-3 py-2 text-body-sm text-foreground" role="status">
+          <Radio className="h-4 w-4 shrink-0 animate-pulse text-bearish" aria-hidden="true" />
+          <span>
+            <span className="font-semibold text-bearish">LIVE.</span> The order ticket and the basket below send <strong>real orders</strong> to your Zerodha account through the
+            dashboard's Kite login, after a confirmation. NIFTY and BANKNIFTY only, at most 25 lots an order. The paper account below is not touched.
+          </span>
+          <Link to="/orders" className="ml-auto font-semibold text-primary-ink underline-offset-4 hover:underline">
+            Kite orders
+          </Link>
+        </p>
+      ) : null}
+
       <div className={cn(STAT_GROUP, "grid-cols-2 sm:grid-cols-3 xl:grid-cols-6")}>
         <Stat label="Equity" value={formatCompactIN(f.equity, { symbol: true, decimals: 2 })} sub={`started ${formatCompactIN(state.startingCapital, { symbol: true })}`} help="Cash plus the marked value of open positions (long value minus short liability)." />
         <Stat label="Return" value={formatPct(ret, { decimals: 2, signed: true })} tone={ret > 0 ? "bullish" : ret < 0 ? "bearish" : "muted"} sub="on starting capital" />
@@ -524,7 +571,11 @@ export default function PaperTrading() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[400px_minmax(0,1fr)]">
         <div className="min-w-0">
-          <Panel title="Order ticket" subtitle="Pick a price in the mini chain, set your max loss, then buy or sell.">
+          <Panel
+            title={live ? <span className="text-bearish">Order ticket · LIVE</span> : "Order ticket"}
+            subtitle={live ? "Pick a strike in the mini chain, then buy or sell: a confirmation shows Kite's own figures before anything is sent." : "Pick a price in the mini chain, set your max loss, then buy or sell."}
+            className={live ? "border-bearish/50" : undefined}
+          >
             <OrderTicket
               symbol={symbol}
               onSymbol={setSymbol}
@@ -540,6 +591,7 @@ export default function PaperTrading() {
               guard={guardTicket}
               wouldBeNaked={wouldBeNaked}
               onPlace={place}
+              live={live}
             />
           </Panel>
         </div>
@@ -687,9 +739,23 @@ export default function PaperTrading() {
                         <LineChart aria-hidden="true" /> Analyse
                       </Link>
                     </Button>
-                    <Button onClick={() => setConfirmOpen(true)} disabled={killOn && !basketOrders.orders.length}>
-                      Place all at market
-                    </Button>
+                    {live ? (
+                      <Button
+                        className="bg-bearish text-bearish-foreground hover:bg-bearish/90"
+                        onClick={() =>
+                          setLiveOrder({
+                            source: "basket",
+                            legs: staged.map((l) => ({ underlying: l.symbol, expiry: l.expiry, strike: l.strike, opt_type: l.type, side: l.side, lots: l.lots, order_type: "MARKET" as const })),
+                          })
+                        }
+                      >
+                        <Radio aria-hidden="true" /> Place on Zerodha…
+                      </Button>
+                    ) : (
+                      <Button onClick={() => setConfirmOpen(true)} disabled={killOn && !basketOrders.orders.length}>
+                        Place all at market
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}
@@ -697,6 +763,10 @@ export default function PaperTrading() {
           </div>
         </div>
       </div>
+
+      {liveCapable ? (
+        <LiveOrderDialog open={!!liveOrder} onOpenChange={(o) => !o && setLiveOrder(null)} legs={liveOrder?.legs ?? []} source={liveOrder?.source ?? "ticket"} />
+      ) : null}
 
       <BasketConfirmDialog open={confirmOpen} onOpenChange={setConfirmOpen} preview={preview} capital={capital} maxRiskPct={guardrails.maxRiskPct} guard={guardBasket} onConfirm={placeBasket} />
 

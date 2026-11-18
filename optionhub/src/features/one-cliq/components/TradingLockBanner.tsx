@@ -3,6 +3,7 @@ import { Lock, ShieldAlert, Unlock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { LOCK_STATES, type TradingLockRecord } from "../lib/panicApi";
+import { isDashboardKiteBuild } from "@/lib/brokerConfig";
 
 interface Props {
   lock: TradingLockRecord;
@@ -35,7 +36,11 @@ export function TradingLockBanner({ lock, isLossTriggered, busy, unlockError, on
 
   if (lock.state === LOCK_STATES.UNLOCKED) return null;
 
-  const canSelfService = lock.state !== LOCK_STATES.LOCKED_BY_ENGINE_FAULT;
+  // options-checklist: a fresh install has no lock file yet, which reads as an engine fault (fail closed). In our
+  // build there is no Dhan risk engine whose state that could be about, so the owner may clear THAT case here
+  // (the proxy already accepts "unlocked" from it); any other engine fault still needs an operator.
+  const firstRun = isDashboardKiteBuild() && lock.state === LOCK_STATES.LOCKED_BY_ENGINE_FAULT && /lock file missing/i.test(lock.reason ?? "");
+  const canSelfService = lock.state !== LOCK_STATES.LOCKED_BY_ENGINE_FAULT || firstRun;
   const sinceLabel = lock.since ? new Date(lock.since).toLocaleTimeString("en-IN", { hour12: false }) : "unknown";
 
   const handleUnlock = async () => {
@@ -87,7 +92,7 @@ export function TradingLockBanner({ lock, isLossTriggered, busy, unlockError, on
             </>
           ) : (
             <Button size="sm" variant="outline" className="h-7 text-body-sm" disabled={busy} onClick={handleUnlock}>
-              <Unlock className="h-3 w-3 mr-1" /> Unlock
+              <Unlock className="h-3 w-3 mr-1" /> {firstRun ? "Unlock (first run: no lock file yet)" : "Unlock"}
             </Button>
           )}
           {unlockError && <span className="text-bearish">{unlockError}</span>}

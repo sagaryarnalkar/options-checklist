@@ -37,6 +37,21 @@ This copy is rebranded as **HeroZero** and is the main shell for the options-che
 - **Ecosystem code deleted:** the cross-promotion component and its call sites, the social and outbound link components, and his product/ecosystem/social link data. `lib/brand/links.ts` is now just the HeroZero names.
 - Exports and alerts are tagged `herozero-*`. The "report on GitHub" helper is gone. Participants' FAQ heading is now "How to read this".
 
+### Real Zerodha orders through the dashboard (#123)
+
+Live orders go through the dashboard's own Kite login. This app never holds the Kite token. The dashboard (`kite_orders.py`) re-checks every order: NIFTY/BANKNIFTY options and futures only, at most 25 lots, quantity from Kite's lot size, a price band around LTP, a daily cap, a halt switch, and an intent id that makes each attempt idempotent.
+
+| Where | What changed |
+|---|---|
+| `server/dashboard.mjs`, `proxy-server.mjs` | `GET/POST /api/dashboard/orders?op=status\|book\|order\|log\|preview\|place\|modify\|cancel\|halt` forwards to the dashboard's `/hub/orders/*` with the feed token. POST needs an allowed Origin (or a loopback caller) and the `x-hz-orders: 1` header. A send that gets no answer says the order MAY have gone through. |
+| `src/lib/kiteOrders.ts` (new) | Client: preview, place, modify and cancel. `placeKiteOrder` and `modifyKiteOrder` require a `LiveArmToken` (liveArm.ts). Baskets go one leg at a time, buys first, and each leg must report COMPLETE before the next is sent. The first refusal, rejection or unfilled leg stops the basket, with no automatic unwind. |
+| `src/components/live/LiveOrderDialog.tsx` (new) | Real-order confirmation. It shows Kite's contract, quantity, LTP, rule verdicts and Kite margin. Product and order type (LIMIT / MARKET / SL / SL-M) are chosen here. Nothing is sent until the real-money box is ticked. Intent ids are minted when the dialog opens. |
+| `src/pages/PaperTrading.tsx`, `src/components/paper/OrderTicket.tsx` | A **Paper / Live · Zerodha** switch, which starts on Paper at every visit. In Live mode the ticket and the basket open the confirmation, and the paper-only controls (stop/target, max loss, paper guardrails, naked-sell hiding) step aside. The paper account is untouched. |
+| `src/pages/Orders.tsx`, `src/components/live/KiteOrders.tsx` (new) | In our build the Orders page is the Kite order book, with cancel, modify (price / trigger / lots) and the server's **Halt all live orders** switch. Cancelling works while halted. |
+| `src/features/one-cliq/hooks/useQuickOrder.ts`, `OneCliqTerminal.tsx`, `components/TradingLockBanner.tsx` | Armed live keys send Kite orders (MARKET; market protection as an aggressive LIMIT; LIMIT at LTP). They respect the trading lock, which was display-only. A fresh install's "lock file missing" engine-fault lock can be cleared from the banner in our build only. |
+| `src/components/LiveTradingToggle.tsx` | Copy for the dashboard build: Zerodha via the dashboard, and Kite's static-IP rule. |
+| Tests | `server/dashboard.test.mjs` (orders forwarding), `src/lib/kiteOrders.test.ts`, `src/components/live/LiveMode.test.tsx`. |
+
 `LICENSE`, `NOTICE.md` and `COMMERCIAL-LICENSE.md` are kept in this folder, along with the copyright notes in source comments.
 
 Taking upstream updates:
