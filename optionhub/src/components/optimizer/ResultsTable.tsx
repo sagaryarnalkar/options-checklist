@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { ExternalLink, NotebookPen, ShoppingBasket, Target } from "lucide-react";
+import { ExternalLink, NotebookPen, Radio, ShoppingBasket, Target } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import type { PayoffTone } from "@/lib/optimizer";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,7 @@ const TONE_TEXT: Record<PayoffTone, string> = {
   volatile: "text-info",
 };
 
-function ResultsTableImpl({ results, view, onOpen, onAddToBasket, onPaperTrade, neutralView = false }: ResultsTableProps) {
+function ResultsTableImpl({ results, view, onOpen, onAddToBasket, onPaperTrade, onLiveTrade, neutralView = false }: ResultsTableProps) {
   return (
     <div className="overflow-hidden rounded-tile border border-separator bg-card shadow-card">
       <Table aria-label="Ranked strategies table" className="min-w-[720px] text-body-sm [&_td]:px-2 [&_th]:px-2">
@@ -92,6 +92,12 @@ function ResultsTableImpl({ results, view, onOpen, onAddToBasket, onPaperTrade, 
                       <NotebookPen aria-hidden="true" />
                       <span className="hidden 2xl:inline">Paper</span>
                     </Button>
+                    {onLiveTrade ? (
+                      <Button size="pill" variant="outline" className="border-bearish/50 text-bearish hover:text-bearish" onClick={() => onLiveTrade(c)} aria-label={`Trade ${c.label} live`} title="Trade live (Zerodha)">
+                        <Radio aria-hidden="true" />
+                        <span className="hidden 2xl:inline">Live</span>
+                      </Button>
+                    ) : null}
                     <Button size="pill" variant="ghost" onClick={() => onAddToBasket(c)} aria-label={`Add ${c.label} to basket`} title="Add to basket">
                       <ShoppingBasket aria-hidden="true" />
                     </Button>

@@ -121,7 +121,7 @@ function siteMetaPlugin(siteUrl: string): Plugin {
         const lastmod = new Date().toISOString().slice(0, 10);
         this.emitFile({ type: "asset", fileName: "sitemap.xml", source: buildSitemapXml(site, paths, lastmod) });
       } else {
-        this.warn("VITE_SITE_URL is not set: sitemap.xml was skipped; canonical and og:url fall back to "/".");
+        this.warn("VITE_SITE_URL is not set: sitemap.xml was skipped; canonical and og:url fall back to '/'.");
       }
     },
   };

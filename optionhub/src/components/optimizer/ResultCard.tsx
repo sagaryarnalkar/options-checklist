@@ -1,5 +1,5 @@
 import { memo, type ReactNode } from "react";
-import { AlertTriangle, ExternalLink, Info, NotebookPen, ShoppingBasket, Target } from "lucide-react";
+import { AlertTriangle, ExternalLink, Info, NotebookPen, Radio, ShoppingBasket, Target } from "lucide-react";
 import { Badge, badgeVariants } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -77,7 +77,7 @@ function Metric({ label, value, tone, hint }: { label: string; value: string; to
   );
 }
 
-function ResultCardImpl({ candidate: c, view, onOpen, onAddToBasket, onPaperTrade, primary = false, neutralView = false }: ResultCardProps) {
+function ResultCardImpl({ candidate: c, view, onOpen, onAddToBasket, onPaperTrade, onLiveTrade, primary = false, neutralView = false }: ResultCardProps) {
   const credit = c.netPremium > 0;
   const tag = tagFor(c, view);
   return (
@@ -179,6 +179,12 @@ function ResultCardImpl({ candidate: c, view, onOpen, onAddToBasket, onPaperTrad
           <NotebookPen aria-hidden="true" />
           <span>Paper trade</span>
         </Button>
+        {onLiveTrade ? (
+          <Button variant="outline" className="border-bearish/50 text-bearish hover:text-bearish" onClick={() => onLiveTrade(c)} title="Stage on the Live Trading page: real Zerodha orders, sent only after you confirm there">
+            <Radio aria-hidden="true" />
+            <span>Trade live</span>
+          </Button>
+        ) : null}
         <Button variant="ghost" onClick={() => onAddToBasket(c)} aria-label={`Add ${c.label} to basket`}>
           <ShoppingBasket aria-hidden="true" />
           <span className="hidden sm:inline">Basket</span>

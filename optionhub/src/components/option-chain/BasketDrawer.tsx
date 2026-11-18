@@ -1,11 +1,12 @@
 import { useMemo } from "react";
-import { AlertTriangle, ArrowUpRight, CheckCircle2, Minus, NotebookPen, Plus, ShoppingBasket, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CheckCircle2, Minus, NotebookPen, Plus, Radio, ShoppingBasket, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { formatDateIST, formatINR, formatStrike, formatTimeIST, MINUS } from "@/lib/options";
 import { basketNetPremium, groupBySymbol, type BasketGroup, type BasketLeg, type BasketSent, type SendTarget } from "./basket";
+import { kiteOrdersAvailable } from "@/lib/kiteOrders";
 
 export interface BasketDrawerProps {
   open: boolean;
@@ -23,6 +24,7 @@ const TARGET_LABEL: Record<SendTarget, string> = {
   builder: "the Strategy Builder",
   append: "the current strategy",
   paper: "Paper Trading",
+  live: "Live Trading",
 };
 
 function NetAmount({ net, className }: { net: number; className?: string }) {
@@ -205,6 +207,16 @@ function GroupCard({ group, lotSizeFor, onLots, onFlip, onRemove, onSend }: Grou
         <Button variant="outline" className="h-auto min-h-7 whitespace-normal py-1 leading-tight" onClick={() => onSend("paper", group.legs)}>
           <NotebookPen /> Paper trade
         </Button>
+        {kiteOrdersAvailable() ? (
+          <Button
+            variant="outline"
+            className="col-span-2 h-auto min-h-7 whitespace-normal border-bearish/50 py-1 leading-tight text-bearish hover:text-bearish"
+            onClick={() => onSend("live", group.legs)}
+            title="Stage these legs on the Live Trading page: real Zerodha orders, sent only after you confirm there"
+          >
+            <Radio /> Trade live (Zerodha)
+          </Button>
+        ) : null}
       </div>
     </section>
   );

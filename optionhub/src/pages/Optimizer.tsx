@@ -10,7 +10,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { SourceBadge } from "@/components/option-chain/SourceBadge";
-import { addLegs, paperTradingUrl, readBasket, strategyBuilderUrl, writeBasket } from "@/components/option-chain/basket";
+import { addLegs, liveTradingUrl, paperTradingUrl, readBasket, strategyBuilderUrl, writeBasket } from "@/components/option-chain/basket";
+import { kiteOrdersAvailable } from "@/lib/kiteOrders";
 import { OptimizerForm } from "@/components/optimizer/OptimizerForm";
 import { DEFAULT_FORM_SETTINGS, type FormSettings } from "@/components/optimizer/formSettings";
 import { ResultsGrid, type ResultsLayout } from "@/components/optimizer/ResultsGrid";
@@ -364,6 +365,13 @@ export default function Optimizer() {
     },
     [navigate, symbol],
   );
+  // options-checklist: stage on the Live Trading page (real Zerodha orders after a confirmation there).
+  const liveTrade = useCallback(
+    (c: RankedCandidate) => {
+      navigate(liveTradingUrl(toBasketLegs(c, c.lots, symbol)));
+    },
+    [navigate, symbol],
+  );
   const changeLayout = (v: string) => {
     if (v !== "cards" && v !== "table") return;
     setLayout(v);
@@ -603,6 +611,7 @@ export default function Optimizer() {
                 onOpen={openInBuilder}
                 onAddToBasket={addToBasket}
                 onPaperTrade={paperTrade}
+                onLiveTrade={kiteOrdersAvailable() ? liveTrade : undefined}
                 emptyHint={
                   stats && stats.feasible === 0 && stats.overBudget > stats.unprofitable
                     ? `Most strategies need more than ${formatCompactIN(settings.budget, { symbol: true })} of funds. Raise the budget or allow fewer lots.`

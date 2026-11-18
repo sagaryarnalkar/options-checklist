@@ -1,6 +1,6 @@
 /**
- * options-checklist: Paper Trading's Live · Zerodha mode end to end in the page, with the terminal proxy's
- * /api/dashboard/orders stubbed (no network, no real order). Our build only (VITE_DASHBOARD_KITE=1).
+ * options-checklist: the Live Trading page (/trade) end to end, with the terminal proxy's /api/dashboard/orders
+ * stubbed (no network, no real order). Our build only (VITE_DASHBOARD_KITE=1). Paper Trading stays paper.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
@@ -46,6 +46,7 @@ function installOrdersApi() {
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
     sent.push({ op, body });
     if (op === "status") return json(STATUS);
+    if (op === "book") return json({ ok: true, orders: [], enabled: true, halted: false });
     if (op === "preview") {
       const legs = (body?.legs as Array<Record<string, unknown>>) ?? [];
       return json({
@@ -62,10 +63,10 @@ function installOrdersApi() {
   }));
 }
 
-async function loadPage() {
+async function loadPage(page: "LiveTrading" | "PaperTrading" = "LiveTrading") {
   vi.resetModules();
   vi.stubEnv("VITE_DASHBOARD_KITE", "1");
-  const { default: Page } = await import("@/pages/PaperTrading");
+  const { default: Page } = page === "LiveTrading" ? await import("@/pages/LiveTrading") : await import("@/pages/PaperTrading");
   return Page;
 }
 
@@ -79,19 +80,33 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("Paper Trading · Live (Zerodha) mode", () => {
-  it("is absent outside our build", async () => {
+describe("Live Trading page", () => {
+  it("is absent outside our build: no route, no link, and /trade falls back to Paper Trading", async () => {
     vi.resetModules();
-    const { default: Page } = await import("@/pages/PaperTrading");
-    renderPage(<Page />, "/paper-trading");
-    expect(screen.queryByRole("radio", { name: /Live · Zerodha/ })).toBeNull();
+    const { ROUTES } = await import("@/lib/routes");
+    expect(ROUTES.some((r) => r.path === "/trade")).toBe(false);
+    const { default: Paper } = await import("@/pages/PaperTrading");
+    renderPage(<Paper />, "/paper-trading");
+    expect(screen.queryByRole("link", { name: /Live Trading/ })).toBeNull();
+    expect(await screen.findByRole("button", { name: /Buy at market/ })).toBeInTheDocument();
+  });
+
+  it("Paper Trading stays paper in our build, with a link to Live Trading", async () => {
+    const Paper = await loadPage("PaperTrading");
+    renderPage(<Paper />, "/paper-trading");
+    expect(screen.getByRole("heading", { level: 1, name: /Paper Trading/ })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Live Trading/ })).toHaveAttribute("href", "/trade");
+    expect(await screen.findByRole("button", { name: /Buy at market/ })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /on Zerodha/ })).toBeNull();
+    const { ROUTES } = await import("@/lib/routes");
+    expect(ROUTES.find((r) => r.path === "/trade")).toMatchObject({ navLabel: "Live Trading", group: "Trade" });
   });
 
   it("the ticket opens the confirmation; nothing is sent until Live Trading is on and the real-money box is ticked", async () => {
     const Page = await loadPage();
-    renderPage(<Page />, "/paper-trading");
-    fireEvent.click(await screen.findByRole("radio", { name: /Live · Zerodha/ }));
-    expect(screen.getByText(/send/, { selector: "span" })).toBeInTheDocument();
+    renderPage(<Page />, "/trade");
+    expect(screen.getByRole("heading", { level: 1, name: /Live Trading/ })).toBeInTheDocument();
+    expect(screen.queryByText("Equity")).toBeNull(); // no paper account on this page
     const buy = await screen.findByRole("button", { name: /Buy on Zerodha/ });
     await waitFor(() => expect(buy).toBeEnabled()); // no paper max-loss needed in Live mode
     fireEvent.click(buy);
@@ -134,8 +149,7 @@ describe("Paper Trading · Live (Zerodha) mode", () => {
     ]);
     localStorage.setItem("optionsdesk_live_trading_enabled", "true");
     const Page = await loadPage();
-    renderPage(<Page />, `/paper-trading?legs=${enc}`);
-    fireEvent.click(await screen.findByRole("radio", { name: /Live · Zerodha/ }));
+    renderPage(<Page />, `/trade?legs=${enc}`);
     fireEvent.click(await screen.findByRole("button", { name: /Place on Zerodha/ }));
     const dialog = await screen.findByRole("dialog");
     await within(dialog).findByText("NIFTY26NOV25000CE");

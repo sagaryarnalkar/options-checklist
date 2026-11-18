@@ -22,7 +22,7 @@ export interface ResultsGridProps extends ResultActions {
 }
 
 /** Ranked strategies as cards or a compact table, with loading and empty states. */
-export function ResultsGrid({ results, view, loading, onOpen, onAddToBasket, onPaperTrade, emptyHint, layout = "cards", neutralView = false }: ResultsGridProps) {
+export function ResultsGrid({ results, view, loading, onOpen, onAddToBasket, onPaperTrade, onLiveTrade, emptyHint, layout = "cards", neutralView = false }: ResultsGridProps) {
   if (loading && results.length === 0 && layout === "table") {
     return (
       <div className="space-y-1.5 rounded-tile border border-separator bg-card p-3" role="status" aria-busy="true" aria-label="Loading strategies">
@@ -65,7 +65,7 @@ export function ResultsGrid({ results, view, loading, onOpen, onAddToBasket, onP
   if (layout === "table") {
     return (
       <div className={wrap} aria-busy={loading}>
-        <ResultsTable results={results} view={view} onOpen={onOpen} onAddToBasket={onAddToBasket} onPaperTrade={onPaperTrade} neutralView={neutralView} />
+        <ResultsTable results={results} view={view} onOpen={onOpen} onAddToBasket={onAddToBasket} onPaperTrade={onPaperTrade} onLiveTrade={onLiveTrade} neutralView={neutralView} />
       </div>
     );
   }
@@ -75,7 +75,7 @@ export function ResultsGrid({ results, view, loading, onOpen, onAddToBasket, onP
         {results.map((c, i) => (
           <li key={c.id} className="flex min-w-0">
             <div className="h-full w-full">
-              <ResultCard candidate={c} view={view} primary={i === 0} neutralView={neutralView} onOpen={onOpen} onAddToBasket={onAddToBasket} onPaperTrade={onPaperTrade} />
+              <ResultCard candidate={c} view={view} primary={i === 0} neutralView={neutralView} onOpen={onOpen} onAddToBasket={onAddToBasket} onPaperTrade={onPaperTrade} onLiveTrade={onLiveTrade} />
             </div>
           </li>
         ))}
